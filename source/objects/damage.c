@@ -138,6 +138,7 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "units/vehicles.h"
+#include "campaign_score.h" /* port: port/linux/game/campaign_score.c */
 #include "headshot_party.h" /* port: port/linux/game/headshot_party.c */
 
 /* network_game_globals.c's */
@@ -1143,6 +1144,16 @@ static void object_damage_aftermath(
 				player_index,
 				TRUE);
 		}
+	}
+
+	/* port: an enemy a player kills scores points (display.campaign_score). Not in
+	the chain above: game_engine_can_score() is true in the campaign, where
+	that chain records nothing for an actor's death. */
+	if (!TEST_FLAG(damage->flags, _damage_no_statistics_bit) &&
+		TEST_FLAG(being_damaged_flags, _object_being_damaged_body_depleted_bit) &&
+		TEST_FLAG(_object_mask_unit, object->object.type))
+	{
+		campaign_score_record_kill(object_index, damage->owner_player_index);
 	}
 
 	/* port: a grunt shot dead in the head pops with confetti */
