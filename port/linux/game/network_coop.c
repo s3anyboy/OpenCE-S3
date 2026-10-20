@@ -121,6 +121,7 @@ index and tag, since the map placed them at the same index everywhere.
 #include "coop_vehicles.h"
 #include "coop_spectate.h"
 #include "network_coop.h"
+#include "headshot_party.h" /* port: port/linux/game/headshot_party.c */
 #include "network_distributed.h"
 
 /* ---------- constants */
@@ -214,6 +215,9 @@ enum
 	/* a breakable surface broke: value its index, frame its BSP, reals the
 	damage's epicenter */
 	_coop_event_surface_broken,
+	/* a grunt's headshot party: reals the head's position (old clients ignore
+	an event kind they do not know) */
+	_coop_event_headshot_party,
 };
 
 /* distributed_coop_event.type of an effect: at a cutscene flag (value), or on
@@ -1868,6 +1872,13 @@ static void client_apply_event(
 			breakable_surface_port_break(event->value, &epicenter);
 		}
 		break;
+	case _coop_event_headshot_party:
+		{
+			real_point3d head = { event->reals[0], event->reals[1], event->reals[2] };
+
+			headshot_party_network(&head);
+		}
+		break;
 	case _coop_event_unit_open:
 		if (distributed_object_index_valid(event->object_index) && network_objects_client_has(event->object_index) &&
 			object_try_and_get_and_verify_type(event->object_index, _object_mask_unit))
@@ -2613,6 +2624,18 @@ void network_coop_note_surface_broken(
 	event->reals[0] = epicenter->x;
 	event->reals[1] = epicenter->y;
 	event->reals[2] = epicenter->z;
+}
+
+void network_coop_note_headshot_party(
+	real_point3d const *head)
+{
+	struct distributed_coop_event *event = event_new(_coop_event_headshot_party);
+
+	if (!event)
+		return;
+	event->reals[0] = head->x;
+	event->reals[1] = head->y;
+	event->reals[2] = head->z;
 }
 
 /* host: a few broken surfaces again each refresh, round them all, for a

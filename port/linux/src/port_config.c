@@ -175,6 +175,11 @@ static const struct config_setting config_settings[] =
 		"from the game's first tick, which the items' respawn periods count from\n"
 		"too: a weapon is back on the map at every multiple of its period on the\n"
 		"clock." },
+	{ "display.headshot_party", _config_boolean, "false", "HALO_HEADSHOT_PARTY", _environment_value, _platform_all,
+		"A grunt that a player kills with a shot to the head pops with confetti\n"
+		"(drawn on the screen, from where its head was) and plays party.wav, a\n"
+		"WAV file in the data folder (no file, no sound). Campaign only; only a\n"
+		"single player and the host of a co-op game see it." },
 	{ "display.scoreboard_team_layout", _config_string, "\"teams\"", "HALO_SCOREBOARD_TEAM_LAYOUT", _environment_value,
 		_platform_all,
 		"How the scoreboard lists a team game's players: \"teams\" in a column for\n"

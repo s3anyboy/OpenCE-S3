@@ -110,6 +110,7 @@ symbols in this file:
 #include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
+#include "headshot_party.h" /* port: port/linux/game/headshot_party.c */
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
@@ -1491,6 +1492,9 @@ void hud_draw_screen(
 		{
 			hud_draw_match_timer();
 		}
+
+		/* port: the confetti of a grunt's headshot party, in this view */
+		headshot_party_draw_view();
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))
