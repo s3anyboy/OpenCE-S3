@@ -184,7 +184,8 @@ static const struct config_setting config_settings[] =
 		"variant's name, times the difficulty: easy 0.5, normal 1, heroic 2,\n"
 		"legendary 5, rounded up to a multiple of 5). A ghost, banshee or wraith\n"
 		"destroyed is worth 50, 75 or 100. The score is drawn at the bottom right,\n"
-		"and a summary is shown when a level is won, until A or B is pressed." },
+		"and a summary is shown when a level is won, until A or B is pressed. In\n"
+		"online co-op the scoreboard (Tab) lists each player's own score and kills." },
 	{ "display.scoreboard_team_layout", _config_string, "\"teams\"", "HALO_SCOREBOARD_TEAM_LAYOUT", _environment_value,
 		_platform_all,
 		"How the scoreboard lists a team game's players: \"teams\" in a column for\n"

@@ -38,6 +38,11 @@ void campaign_score_draw(void);
 bottom right of the view being drawn */
 void campaign_score_draw_view(long player_index);
 
+/* (game_engine.c's co-op scoreboard) a player's own score (the points of
+their kills, whatever network.coop_score_type) and kills, drawn beside their
+name; FALSE when the campaign is not scored */
+boolean campaign_score_player_stats(long player_index, long *score, long *kills);
+
 /* (network_coop.c) network co-op: the host scores the kills and sends each
 to the clients, and when the level is won */
 void campaign_score_network_kill(short player_index, long variant_index, short points, boolean competitive);

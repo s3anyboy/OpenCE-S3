@@ -379,6 +379,24 @@ static long campaign_score_kills_of(
 	return total;
 }
 
+/* (game_engine.c's co-op scoreboard) a player's own score and kills, drawn
+beside their name; FALSE when the campaign is not scored */
+boolean campaign_score_player_stats(
+	long player_index,
+	long *score,
+	long *kills)
+{
+	short index = (short)DATUM_INDEX_TO_ABSOLUTE_INDEX(player_index);
+
+	if (!campaign_score_enabled())
+		return FALSE;
+	campaign_score_update();
+	*score = campaign_score_total(index);
+	*kills = campaign_score_kills_of(index);
+
+	return TRUE;
+}
+
 /* the points of all the players' kills together (a co-op team's score) */
 static long campaign_score_team_total(
 	void)
