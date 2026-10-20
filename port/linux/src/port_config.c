@@ -175,6 +175,16 @@ static const struct config_setting config_settings[] =
 		"from the game's first tick, which the items' respawn periods count from\n"
 		"too: a weapon is back on the map at every multiple of its period on the\n"
 		"clock." },
+	{ "display.campaign_timer", _config_boolean, "false", "HALO_CAMPAIGN_TIMER", _environment_value, _platform_all,
+		"Draw a clock at the bottom right in the campaign (and online co-op),\n"
+		"counting up from the level's start. The main menu's scene has none." },
+	{ "display.campaign_score", _config_boolean, "false", "HALO_CAMPAIGN_SCORE", _environment_value, _platform_all,
+		"Score the campaign: each enemy a player kills is worth points by its\n"
+		"actor variant (a base by the kind of actor, times a rank by the\n"
+		"variant's name, times the difficulty: easy 0.5, normal 1, heroic 2,\n"
+		"legendary 5, rounded up to a multiple of 5). A ghost, banshee or wraith\n"
+		"destroyed is worth 50, 75 or 100. The score is drawn at the bottom right,\n"
+		"and a summary is shown when a level is won, until A or B is pressed." },
 	{ "display.scoreboard_team_layout", _config_string, "\"teams\"", "HALO_SCOREBOARD_TEAM_LAYOUT", _environment_value,
 		_platform_all,
 		"How the scoreboard lists a team game's players: \"teams\" in a column for\n"
@@ -567,6 +577,12 @@ static const struct config_setting config_settings[] =
 		"false, they walk through each other (the AI's characters they still\n"
 		"bump into). PLAYER COLLISIONS in co-op's Server Setup > Co-op Options\n"
 		"writes its choice here." },
+	{ "network.coop_score_type", _config_string, "\"cooperative\"", "HALO_NET_COOP_SCORE_TYPE", _environment_value,
+		_platform_all,
+		"How an online co-op game's campaign score (display.campaign_score) is\n"
+		"kept: \"cooperative\" adds the players' scores together, \"competitive\"\n"
+		"gives each player a score of their own. SCORING TYPE in co-op's\n"
+		"Server Setup > Co-op Options writes its choice here; the host's counts." },
 	{ "network.coop_enemies_mode", _config_string, "\"per_player\"", "HALO_NET_COOP_ENEMIES_MODE", _environment_value,
 		_platform_all,
 		"Online co-op's extra enemies: \"none\", \"per_player\" (each squad of\n"
@@ -1524,6 +1540,7 @@ static const struct
 		"team_global_enemy_proximity", NULL }, NULL },
 	{ "network.coop_friendly_fire", { "off", "on", "shields_only", "explosives_only", NULL }, NULL },
 	{ "network.coop_enemies_mode", { "none", "per_player", "multiplier", NULL }, NULL },
+	{ "network.coop_score_type", { "cooperative", "competitive", NULL }, NULL },
 	{ "streamer.slurs", { "off", "severe", "strong", "mild", NULL }, NULL },
 	{ "streamer.swearing", { "off", "severe", "strong", "mild", NULL }, NULL },
 	{ "streamer.insults", { "off", "severe", "strong", "mild", NULL }, NULL },

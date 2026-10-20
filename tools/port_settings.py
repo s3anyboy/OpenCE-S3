@@ -114,6 +114,10 @@ SCREENS = {
              "Light Show: the shield glow three times as far,\nat full from a third of the flare.", None),
             ("MATCH TIMER:", "display.match_timer", ON_OFF,
              "Draw a clock at the bottom right in multiplayer,\ncounting up from the start of the game.", None),
+            ("CAMPAIGN TIMER:", "display.campaign_timer", ON_OFF,
+             "Draw a clock at the bottom right in the campaign,\ncounting up from the start of the level.", None),
+            ("CAMPAIGN SCORE:", "display.campaign_score", ON_OFF,
+             "Score each enemy killed in the campaign, and show\nthe score at the bottom right.", None),
             ("HDR:", "display.hdr", ON_OFF,
              "Keep the light of explosions, plasma and the sun\npast white, and roll it off instead of clipping.", None),
             ("HDR DISPLAY:", "display.hdr_output", ON_OFF,
@@ -222,12 +226,12 @@ SCREENS = {
 _video = SCREENS["video_settings"]
 _graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_res_text", "display.anti_aliasing",
              "display.anisotropic_filtering", "display.shadow_resolution", "display.per_pixel_lighting", "display.match_timer",
-             "display.model_detail"}
+             "display.campaign_timer", "display.campaign_score", "display.model_detail"}
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
                   "display.overshield_effect", "display.hdr", "display.hdr_output"}
 SCREENS["video_settings/graphics"] = {
-    "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 30,
+    "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 26,
     "same_place": ["anti_aliasing_android"],
     "rows": [row for row in _video["rows"] if row[1] in _graphics],
 }
@@ -1218,7 +1222,7 @@ COOP_ENEMIES_MULTIPLIERS = [2, 4, 8, 16, 32]
 # help of each of them; menu_functions.c's gametype_options give their
 # settings' values)
 COOP_SETUP_SCREENS = [
-    ("coop_options", "CO-OP OPTIONS", "Friendly fire, the enemies and player collisions,\\nfor this game.", [
+    ("coop_options", "CO-OP OPTIONS", "Friendly fire, the enemies, player collisions, the\\ntimer and the score, for this game.", [
         ("coop_friendly_fire", "FRIENDLY FIRE:", ["OFF", "ON", "SHIELD ONLY", "EXPLOSIVES ONLY"], [
             "Players can not be hurt by weapons and explosives\\nfired by the other players.",
             "Players can be hurt by weapons or explosives\\nfired by the other players.",
@@ -1248,6 +1252,19 @@ COOP_SETUP_SCREENS = [
         ("coop_player_collisions", "PLAYER COLLISIONS:", ["ON", "OFF"], [
             "Players bump into each other, as in the campaign.",
             "Players walk through each other, so that no one\\nblocks a doorway. The AI's characters still block.",
+        ]),
+        # (the campaign's timer and score: display.campaign_score, as Video Setup > Graphics has it, and how it is kept)
+        ("coop_campaign_timer", "CAMPAIGN TIMER:", ["ON", "OFF"], [
+            "Shows the clock in the campaign.",
+            "Hides the clock in the campaign.",
+        ]),
+        ("coop_campaign_score", "CAMPAIGN SCORE:", ["ON", "OFF"], [
+            "Scores each kill and shows the score and the\\nsummary at the end of each level.",
+            "Hides the score and the summary.",
+        ]),
+        ("coop_score_type", "SCORING TYPE:", ["COOPERATIVE", "COMPETITIVE"], [
+            "The players' scores are added together: every player\\nsees the team's score.",
+            "Each player has a score of their own, from the\\nenemies they kill.",
         ]),
     ]),
     ("voice_options", "VOICE AND VOTING", "Voice chat, text chat and votes to kick a player,\\nfor this game.",
@@ -1295,10 +1312,12 @@ def _setup_option_screen(base: str, key: str, rows: list) -> list:
     children = ['<data input="game settings lists text update"/>',
                 '<on event="created" run="port setup options init"/>']
     place = -1
+    # (more than nine rows are closer, to stay above the help text)
+    step = 30 if len(rows) <= 9 else 25
     for row_key, *_ in rows:
         if row_key not in SETUP_OPTION_SAME_PLACE:
             place += 1
-        children.append(f'<child widget="{base}/op_{row_key}" x="54" y="{73 + 30 * place}"/>')
+        children.append(f'<child widget="{base}/op_{row_key}" x="54" y="{73 + step * place}"/>')
     children.append(f'<child widget="{base}/{key}_button_bar" y="414"/>')
     lines += _widget(f"{base}/{key}_menu", [("type", "column_list"), ("width", 640), ("height", 480),
                                            ("flags", "pass_unhandled_to_focused_child up_down_tabs_children"),

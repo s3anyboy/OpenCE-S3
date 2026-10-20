@@ -104,12 +104,14 @@ symbols in this file:
 #include "render/render_camera_projection.h"
 #include "saved games/game_state.h"
 #include "scenario/scenario.h"
+#include "scenario/scenario_definitions.h"
 #include "sound/game_sound.h"
 #include "tag_files/tag_files.h"
 #include "text/draw_string.h"
 #include "coop_spectate.h" /* port: port/linux/game/coop_spectate.c */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
+#include "campaign_score.h" /* port: port/linux/game/campaign_score.c */
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
@@ -1403,21 +1405,29 @@ static void temporary_hud_draw(
 Edition's HUD has none), counting up from the game's
 first tick, which the items' respawn periods count from as well
 (game_engine_update_item_spawn's game_time_get() % respawn_period): an item
-is back on the map at every multiple of its period on the clock. */
+is back on the map at every multiple of its period on the clock. In the
+campaign (display.campaign_timer, a setting of its own) it counts up from the
+level's start; the main menu's scene (ui.map) has none. */
 static boolean hud_match_timer_setting(
 	void)
 {
-	static boolean setting = FALSE;
+	static boolean match_setting = FALSE;
+	static boolean campaign_setting = FALSE;
 	static unsigned long read_at = (unsigned long)-1;
 
 	/* (read again when Settings changes it) */
 	if (read_at != config_changes())
 	{
 		read_at = config_changes();
-		setting = config_boolean("display.match_timer") != 0;
+		match_setting = config_boolean("display.match_timer") != 0;
+		campaign_setting = config_boolean("display.campaign_timer") != 0;
 	}
+	if (game_engine_running())
+		return match_setting;
+	if (global_scenario == NULL || global_scenario->type == _scenario_type_main_menu)
+		return FALSE;
 
-	return setting;
+	return campaign_setting;
 }
 
 static void hud_draw_match_timer(
@@ -1485,12 +1495,17 @@ void hud_draw_screen(
 		if (cinematic_in_progress())
 			coop_skip_vote_draw(render.local_player_index);
 
-		/* port: the match clock, in multiplayer */
-		if (game_engine_running() && !cinematic_in_progress() &&
+		/* port: the match clock in multiplayer and the clock in the campaign (it
+		counts from the level's start), each with its own setting */
+		if (!cinematic_in_progress() &&
 			hud_scripted_globals->show_hud)
 		{
 			hud_draw_match_timer();
 		}
+
+		/* port: the campaign's score, bottom right in this view (display.campaign_score) */
+		if (!cinematic_in_progress() && hud_scripted_globals->show_hud)
+			campaign_score_draw_view(player_index);
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))
