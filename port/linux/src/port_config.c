@@ -187,7 +187,7 @@ static const struct config_setting config_settings[] =
 		"level's time (the campaign timer's): x1 at 0, to x0.25 at 30 minutes.\n"
 		"The score is drawn at the bottom right,\n"
 		"and a summary is shown when a level is won, until A or B is pressed. In\n"
-		"online co-op the scoreboard (Tab) lists each player's own score and kills." },
+		"online co-op the scoreboard (Tab) lists each player's own score, kills and deaths." },
 	{ "display.scoreboard_team_layout", _config_string, "\"teams\"", "HALO_SCOREBOARD_TEAM_LAYOUT", _environment_value,
 		_platform_all,
 		"How the scoreboard lists a team game's players: \"teams\" in a column for\n"

@@ -1722,8 +1722,9 @@ enum
 	SCOREBOARD_NAME_WIDTH = 150,
 	SCOREBOARD_SCORE_WIDTH = 95,
 	SCOREBOARD_PING_WIDTH = 40,
-	/* (the campaign's, with display.campaign_score: a column of kills before the ping) */
+	/* (the campaign's, with display.campaign_score: columns of kills and deaths before the ping) */
 	SCOREBOARD_KILLS_WIDTH = 60,
+	SCOREBOARD_DEATHS_WIDTH = 70,
 	SCOREBOARD_COLUMN_WIDTH = SCOREBOARD_PLACE_WIDTH + SCOREBOARD_NAME_WIDTH + SCOREBOARD_SCORE_WIDTH + SCOREBOARD_PING_WIDTH,
 	SCOREBOARD_COLUMN_GAP = 40,
 	/* the rows a column has: as many as fit between 6 rows of the screen
@@ -1740,11 +1741,13 @@ enum
 
 #define SCOREBOARD_SCALE 0.75f
 
-/* port: the width of the kills column the campaign's scoreboard has when the
-campaign is scored (display.campaign_score), else 0; the columns are that much
-wider */
+/* port: the width of the kills and deaths columns the campaign's scoreboard
+has when the campaign is scored (display.campaign_score), else 0; the columns
+are that much wider */
 static long scoreboard_kills_width = 0;
-#define SCOREBOARD_COLUMN_WIDTH_NOW ((long)SCOREBOARD_COLUMN_WIDTH + scoreboard_kills_width)
+static long scoreboard_deaths_width = 0;
+#define SCOREBOARD_COLUMN_WIDTH_NOW \
+	((long)SCOREBOARD_COLUMN_WIDTH + scoreboard_kills_width + scoreboard_deaths_width)
 
 /* network_distributed.c's */
 long distributed_player_ping(short player_index);
@@ -1812,7 +1815,7 @@ static void scoreboard_draw_row(
 	long font_index = hud_get_font_index();
 	/* (brightened as a copy: the team colours serve every row) */
 	real_argb_color color = *row_color;
-	short tab_stops[5];
+	short tab_stops[6];
 	struct font_header *font;
 	long line_height;
 
@@ -1831,9 +1834,10 @@ static void scoreboard_draw_row(
 	tab_stops[1] = (short)(left + SCOREBOARD_PLACE_WIDTH);
 	tab_stops[2] = (short)(tab_stops[1] + SCOREBOARD_NAME_WIDTH);
 	tab_stops[3] = (short)(tab_stops[2] + SCOREBOARD_SCORE_WIDTH);
-	/* port: the campaign's kills column, before the ping's */
+	/* port: the campaign's kills and deaths columns, before the ping's */
 	tab_stops[4] = (short)(tab_stops[3] + scoreboard_kills_width);
-	draw_string_set_tab_stops(tabs ? tab_stops : NULL, tabs ? (scoreboard_kills_width ? 5 : 4) : 0);
+	tab_stops[5] = (short)(tab_stops[4] + scoreboard_deaths_width);
+	draw_string_set_tab_stops(tabs ? tab_stops : NULL, tabs ? (scoreboard_kills_width ? 6 : 4) : 0);
 	/* (the row as wide as the screen once scaled) */
 	bounds.x1 = (short)(bounds.x0 + (bounds.x1 - bounds.x0) / SCOREBOARD_SCALE);
 	if (!tabs)
@@ -2071,7 +2075,7 @@ static void game_engine_rasterize_scoreboard(
 	wchar_t score_string[256];
 	wchar_t title_string[80];
 	wchar_t ping_string[16];
-	wchar_t kills_string[24];
+	wchar_t kills_string[48];
 	real_argb_color text_color;
 	real_argb_color team_colors[2];
 	real_argb_color color;
@@ -2119,6 +2123,7 @@ static void game_engine_rasterize_scoreboard(
 		return;
 	/* port: a scored campaign's players have their score and kills */
 	scoreboard_kills_width = campaign && campaign_score_enabled() ? SCOREBOARD_KILLS_WIDTH : 0;
+	scoreboard_deaths_width = scoreboard_kills_width ? SCOREBOARD_DEATHS_WIDTH : 0;
 	offset_rectangle2d(&bounds, -render.camera.viewport_bounds.x0, -render.camera.viewport_bounds.y0);
 	{
 		struct font_header *font = font_definition_get(font_index);
@@ -2307,7 +2312,7 @@ static void game_engine_rasterize_scoreboard(
 	}
 	/* port: bounded (the map's column names) */
 	usnprintf(row_string, NUMBEROF(row_string), L"\t%s\t%s\t%s%s\t%s", column_name, score_name, score_string,
-		scoreboard_kills_width ? L"\tKills" : L"", network ? L"Ping" : L"");
+		scoreboard_kills_width ? L"\tKills\tDeaths" : L"", network ? L"Ping" : L"");
 	row_string[NUMBEROF(row_string) - 1] = 0;
 	{
 		long column;
@@ -2371,15 +2376,16 @@ static void game_engine_rasterize_scoreboard(
 		{
 			long player_score;
 			long player_kills;
+			long player_deaths;
 
-			if (campaign_score_player_stats(entry->player_index, &player_score, &player_kills))
+			if (campaign_score_player_stats(entry->player_index, &player_score, &player_kills, &player_deaths))
 			{
 				usnprintf(score_string, NUMBEROF(score_string), L"%ld", player_score);
-				usnprintf(kills_string, NUMBEROF(kills_string), L"\t%ld", player_kills);
+				usnprintf(kills_string, NUMBEROF(kills_string), L"\t%ld\t%ld", player_kills, player_deaths);
 			}
 			else
 			{
-				usprintf(kills_string, L"\t");
+				usprintf(kills_string, L"\t\t");
 			}
 		}
 		ping_string[0] = 0;
@@ -2487,7 +2493,7 @@ static void game_engine_rasterize_scoreboard(
 
 			latency_meter_color(ping, &ping_color);
 			ping_color.alpha = alpha;
-			usnprintf(row_string, NUMBEROF(row_string), L"\t\t\t\t%s%s", scoreboard_kills_width ? L"\t" : L"",
+			usnprintf(row_string, NUMBEROF(row_string), L"\t\t\t\t%s%s", scoreboard_kills_width ? L"\t\t" : L"",
 				ping_string);
 			row_string[NUMBEROF(row_string) - 1] = 0;
 			scoreboard_draw_row(
