@@ -530,6 +530,9 @@ void input_abstraction_update(
 			real_point2d right_stick;
 			long control_index;
 			boolean invert_look;
+			/* port: whether the pad's right direction moves (strafes or turns): not
+			when the button layout gives it an action (Fishsticks' grenade switch) */
+			boolean dpad_right_moves = TRUE;
 
 			player_look_yaw_rate[controller_index] = input_abstraction_globals.player_control_preferences[controller_index].yaw_rate;
 			player_look_pitch_rate[controller_index] = input_abstraction_globals.player_control_preferences[controller_index].pitch_rate;
@@ -630,6 +633,14 @@ void input_abstraction_update(
 				}
 			}
 
+			for (control_index = 0; control_index < NUMBER_OF_GAME_CONTROLS; control_index++)
+			{
+				if (input_abstraction_globals.player_control_preferences[controller_index].game_control_to_xbox_buttons[control_index] ==
+					_gamepad_binary_button_dpad_right)
+				{
+					dpad_right_moves = FALSE;
+				}
+			}
 			invert_look = input_abstraction_globals.player_control_preferences[controller_index].invert_look;
 			if (!invert_look && input_abstraction_globals.player_control_preferences[controller_index].invert_look_aircraft_control)
 			{
@@ -642,7 +653,7 @@ void input_abstraction_update(
 					{
 						state->strafe = 1.f;
 					}
-					else if (gamepad->buttons[_gamepad_binary_button_dpad_right])
+					else if (dpad_right_moves && gamepad->buttons[_gamepad_binary_button_dpad_right])
 					{
 						state->strafe = -1.f;
 					}
@@ -670,7 +681,7 @@ void input_abstraction_update(
 					{
 						state->yaw = 1.f;
 					}
-					else if (gamepad->buttons[_gamepad_binary_button_dpad_right])
+					else if (dpad_right_moves && gamepad->buttons[_gamepad_binary_button_dpad_right])
 					{
 						state->yaw = -1.f;
 					}
@@ -698,7 +709,7 @@ void input_abstraction_update(
 					{
 						state->yaw = 1.f;
 					}
-					else if (gamepad->buttons[_gamepad_binary_button_dpad_right])
+					else if (dpad_right_moves && gamepad->buttons[_gamepad_binary_button_dpad_right])
 					{
 						state->yaw = -1.f;
 					}
@@ -726,7 +737,7 @@ void input_abstraction_update(
 					{
 						state->strafe = 1.f;
 					}
-					else if (gamepad->buttons[_gamepad_binary_button_dpad_right])
+					else if (dpad_right_moves && gamepad->buttons[_gamepad_binary_button_dpad_right])
 					{
 						state->strafe = -1.f;
 					}

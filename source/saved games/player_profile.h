@@ -40,6 +40,9 @@ enum
 	/* port: the Master Chief Collection's Bumper Jumper (jump on the left
 	shoulder, melee on the right), which the Xbox game did not have */
 	_button_preset_bumper_jumper,
+	/* port: Fishsticks: zoom on the left trigger and melee on the right
+	thumbstick's button, grenade throw on the right bumper, crouch on B, grenade switch on the pad's right */
+	_button_preset_fishsticks,
 	NUMBER_OF_BUTTON_PRESETS
 };
 
