@@ -183,7 +183,9 @@ static const struct config_setting config_settings[] =
 		"actor variant (a base by the kind of actor, times a rank by the\n"
 		"variant's name, times the difficulty: easy 0.5, normal 1, heroic 2,\n"
 		"legendary 5, rounded up to a multiple of 5). A ghost, banshee or wraith\n"
-		"destroyed is worth 50, 75 or 100. The score is drawn at the bottom right,\n"
+		"destroyed is worth 50, 75 or 100, and every kill's points fall with the\n"
+		"level's time (the campaign timer's): x1 at 0, to x0.25 at 30 minutes.\n"
+		"The score is drawn at the bottom right,\n"
 		"and a summary is shown when a level is won, until A or B is pressed. In\n"
 		"online co-op the scoreboard (Tab) lists each player's own score and kills." },
 	{ "display.scoreboard_team_layout", _config_string, "\"teams\"", "HALO_SCOREBOARD_TEAM_LAYOUT", _environment_value,

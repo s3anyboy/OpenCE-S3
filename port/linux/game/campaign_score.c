@@ -17,7 +17,9 @@ the clients of a network co-op game (network_coop.c), which keep the same
 log. A co-op game's score is the players' added together (network.coop_score_type
 "cooperative") or each player's own ("competitive"); the host's choice counts.
 
-The score is a log of kills, each with the game time it happened at. Going
+A kill's points fall with the level's time, as the campaign timer counts
+it: a multiplier of 1 at 0, falling in a straight line to 0.25 at 30 minutes
+and staying there. The score is a log of kills, each with the game time it happened at. Going
 back to a checkpoint puts the game time back, and the kills after it are
 forgotten with it; the totals are summed from the log.
 
@@ -74,6 +76,12 @@ enum
 	/* and the score's gap above the clock */
 	CAMPAIGN_SCORE_CLOCK_GAP = 8,
 };
+
+/* the time multiplier of a kill's points: 1x at the level's start (0 on
+the campaign timer), falling in a straight line to a quarter at 30 minutes and
+staying there */
+#define CAMPAIGN_SCORE_TIME_MINUTES 30
+#define CAMPAIGN_SCORE_TIME_MINIMUM 0.25f
 
 /* the score's colour: a player's name in the chat (network_chat.c's
 chat_color) */
@@ -595,6 +603,22 @@ static boolean campaign_score_append(
 	return TRUE;
 }
 
+/* a kill's points, as the level's time (the campaign timer's, which the
+game time counts) leaves them: 1x at the start, down to 0.25x at 30 minutes
+(at least 1 point is kept) */
+static short campaign_score_time_points(
+	short points)
+{
+	real limit = (real)CAMPAIGN_SCORE_TIME_MINUTES * 60.0f * (real)TICKS_PER_SECOND;
+	real fraction = (real)game_time_get() / limit;
+	real multiplier;
+
+	fraction = fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
+	multiplier = 1.0f - (1.0f - CAMPAIGN_SCORE_TIME_MINIMUM) * fraction;
+
+	return (short)MAX((long)(points * multiplier + 0.5f), 1);
+}
+
 void campaign_score_record_kill(
 	long unit_index,
 	long killing_player_index)
@@ -628,6 +652,8 @@ void campaign_score_record_kill(
 	}
 	if (points <= 0)
 		return;
+	/* (the host scores the kill, and sends the points: a client's log is the same) */
+	points = campaign_score_time_points(points);
 	campaign_score_competitive = campaign_score_type_competitive();
 	if (campaign_score_append(variant_index, (short)killing_player_index, points) && network_coop_active())
 		network_coop_note_score_kill((short)killing_player_index, variant_index, points, campaign_score_competitive);
