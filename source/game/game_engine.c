@@ -2294,12 +2294,17 @@ static void game_engine_rasterize_scoreboard(
 	string_list_index = tag_loaded('ustr', "ui\\multiplayer_game_text");
 	column_name = string_list_index != NONE && !campaign ? unicode_string_list_get_string(string_list_index, 0x43) : L"";
 	score_name = string_list_index != NONE ? unicode_string_list_get_string(string_list_index, 0x44) : L"";
-	/* port: the campaign has no game text loaded to name the column */
-	if (campaign && scoreboard_kills_width)
-		score_name = L"Score";
+	/* (the heading's fields: the place's, the name's, then the score's, which
+	the game engine names; the campaign has no game text loaded to name any) */
 	score_string[0] = 0;
 	if (!campaign)
 		game_engine->format_score_name(score_string);
+	else if (scoreboard_kills_width)
+	{
+		/* port: a scored campaign's columns */
+		score_name = L"Name";
+		usprintf(score_string, L"Score");
+	}
 	/* port: bounded (the map's column names) */
 	usnprintf(row_string, NUMBEROF(row_string), L"\t%s\t%s\t%s%s\t%s", column_name, score_name, score_string,
 		scoreboard_kills_width ? L"\tKills" : L"", network ? L"Ping" : L"");
