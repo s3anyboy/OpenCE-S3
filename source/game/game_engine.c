@@ -2294,6 +2294,9 @@ static void game_engine_rasterize_scoreboard(
 	string_list_index = tag_loaded('ustr', "ui\\multiplayer_game_text");
 	column_name = string_list_index != NONE && !campaign ? unicode_string_list_get_string(string_list_index, 0x43) : L"";
 	score_name = string_list_index != NONE ? unicode_string_list_get_string(string_list_index, 0x44) : L"";
+	/* port: the campaign has no game text loaded to name the column */
+	if (campaign && scoreboard_kills_width)
+		score_name = L"Score";
 	score_string[0] = 0;
 	if (!campaign)
 		game_engine->format_score_name(score_string);
