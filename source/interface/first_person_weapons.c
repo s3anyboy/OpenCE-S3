@@ -125,12 +125,15 @@ symbols in this file:
 #include "sound/sound_manager.h"
 #include "units/units.h"
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
+#include "hardcore_views.h" /* port: a teammate pane is not a director camera */
 #include "shaders/shader_definitions.h" /* port: (the shield's flare on the arms) */
 #include "shaders/shaders.h"
 /* port: port/linux/game/shield_color.c */
 real_rgb_color const *shield_color_colors(long unit_index, real_rgb_color const *colors);
-/* port: port/linux/game/overshield_effect.c */
-real const *overshield_effect_values(long unit_index, real const *values, boolean arms);
+
+#ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
+#include "performance_sound.h"
+#endif
 
 /* ---------- constants */
 
@@ -473,6 +476,36 @@ long first_person_weapon_get_local_index(
 	return (local_player_index==MAXIMUM_NUMBER_OF_LOCAL_PLAYERS) ? NONE : local_player_index;
 }
 
+/* port: the spare slot's weapon is that teammate's current one, held idle.
+their fire is not simulated here, and the slot is cleared after the pane */
+void first_person_weapon_observe_unit(
+	short local_player_index,
+	long unit_index)
+{
+	struct first_person_weapon *first_person_weapon;
+
+	first_person_weapon_new_unit(local_player_index, unit_index);
+	first_person_weapon= first_person_weapon_get(local_player_index);
+	/* no idle animation: leave the slot empty so the pose builder's assert
+	(a missing state animation) does not take the game down */
+	if (first_person_weapon->state_animation.index==NONE)
+	{
+		first_person_weapon->weapon_index= NONE;
+		first_person_weapon->visible= FALSE;
+	}
+}
+
+void first_person_weapon_observe_clear(
+	short local_player_index)
+{
+	struct first_person_weapon *first_person_weapon= first_person_weapon_get(local_player_index);
+
+	first_person_weapon_set_visibility(local_player_index, FALSE);
+	first_person_weapon->weapon_index= NONE;
+	first_person_weapon->unit_index= NONE;
+	first_person_weapon->state_animation.index= NONE;
+}
+
 void first_person_weapon_draw(
 	void)
 {
@@ -657,7 +690,10 @@ void first_person_weapon_render_update(
 		if (first_person_weapon->unit_index!=NONE &&
 			first_person_weapon->weapon_index!=NONE)
 		{
-			boolean visible= director_get_perspective(render.local_player_index)==_director_perspective_first_person &&
+			/* port: a teammate pane has no director, so the first-person
+			test would hide their weapon. zoom still puts it away */
+			boolean visible= (hardcore_views_is_teammate_window((short)render.window_index) ||
+				director_get_perspective(render.local_player_index)==_director_perspective_first_person) &&
 				player_control_get_zoom_level(render.local_player_index)==NONE;
 
 			first_person_weapon_set_visibility(render.local_player_index, visible);
@@ -1832,6 +1868,9 @@ static void first_person_weapon_update(
 		long sound_definition_index;
 		short animation_update_result;
 		boolean moving;
+#ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
+		unsigned animation_sound_role;
+#endif
 
 		model_definition_get(weapon_definition->weapon.interface_definition.first_person_model.index);
 		animation_graph= animation_graph_definition_get(
@@ -1858,6 +1897,13 @@ static void first_person_weapon_update(
 
 		/* port: a PAL map's first-person animation at the NTSC maps' pace,
 		which the weapon's timing keeps (port/linux/game/pal_tags.c) */
+#ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
+		/* The last sound frame may also advance this state below. */
+		animation_sound_role =
+			first_person_weapon->state==_first_person_weapon_state_ready ||
+			first_person_weapon->state==_first_person_weapon_state_put_away ?
+				_performance_sound_weapon_ready : _performance_sound_normal;
+#endif
 		if (!pal_tags_first_person_advance(local_player_index,
 			weapon_definition->weapon.interface_definition.first_person_animations.index,
 			first_person_weapon->state_animation.index, first_person_weapon->state_animation.frame_index))
@@ -1882,6 +1928,9 @@ static void first_person_weapon_update(
 		if (sound_definition_index!=NONE &&
 			director_get_perspective(local_player_index)==_director_perspective_first_person)
 		{
+#ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
+			unsigned previous_sound_role = performance_sound_push(animation_sound_role);
+#endif
 			first_person_weapon->current_sound_index= object_impulse_sound_new(
 				first_person_weapon->weapon_index,
 				sound_definition_index,
@@ -1889,6 +1938,9 @@ static void first_person_weapon_update(
 				global_origin3d,
 				global_forward3d,
 				1.0f);
+#ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
+			performance_sound_pop(previous_sound_role);
+#endif
 			first_person_weapon->current_sound_state= first_person_weapon->state;
 		}
 
@@ -2220,6 +2272,12 @@ static void weapon_play_first_person_weapon_sound(
 
 							if (definition_index!=NONE)
 							{
+#ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
+								unsigned previous_sound_role = performance_sound_push(
+									message_type==_first_person_weapon_message_ready ||
+									message_type==_first_person_weapon_message_put_away ?
+										_performance_sound_weapon_ready : _performance_sound_normal);
+#endif
 								object_impulse_sound_new(
 									weapon_index,
 									definition_index,
@@ -2227,6 +2285,9 @@ static void weapon_play_first_person_weapon_sound(
 									global_origin3d,
 									global_forward3d,
 									1.0f);
+#ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
+								performance_sound_pop(previous_sound_role);
+#endif
 							}
 						}
 					}
