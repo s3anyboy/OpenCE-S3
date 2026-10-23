@@ -43,6 +43,8 @@
 		<frame png="ce/shell/bitmaps/game_type_grafix__3.png" width="256" height="128"/>
 		<frame png="ce/shell/bitmaps/game_type_grafix__4.png" width="256" height="128"/>
 		<frame png="ce/shell/bitmaps/game_type_grafix__5.png" width="256" height="128"/>
+		<frame png="ce/shell/bitmaps/game_type_grafix__6.png" width="256" height="128"/>
+		<frame png="ce/shell/bitmaps/game_type_grafix__7.png" width="256" height="128"/>
 	</bitmap>
 	<bitmap name="bitmaps/gradient">
 		<frame png="ce/shell/bitmaps/gradient__0.png" width="4" height="512"/>
@@ -242,6 +244,8 @@
 		<frame png="ce/shell/main_menu/settings_select/multiplayer_setup/playlist_edit/game_type_select/rules_options__3.png" width="256" height="256"/>
 		<frame png="ce/shell/main_menu/settings_select/multiplayer_setup/playlist_edit/game_type_select/rules_options__4.png" width="256" height="256"/>
 		<frame png="ce/shell/main_menu/settings_select/multiplayer_setup/playlist_edit/game_type_select/rules_options__5.png" width="256" height="256"/>
+		<frame png="ce/shell/main_menu/settings_select/multiplayer_setup/playlist_edit/game_type_select/rules_options__6.png" width="256" height="256"/>
+		<frame png="ce/shell/main_menu/settings_select/multiplayer_setup/playlist_edit/game_type_select/rules_options__7.png" width="256" height="256"/>
 	</bitmap>
 	<bitmap name="main_menu/settings_select/multiplayer_setup/playlist_edit/gametype_options">
 		<frame png="ce/shell/main_menu/settings_select/multiplayer_setup/playlist_edit/gametype_options__0.png" width="512" height="256"/>

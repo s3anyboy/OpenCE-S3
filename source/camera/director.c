@@ -335,8 +335,9 @@ short director_desired_perspective(
 	*perspective = 0;
 	if (unit_index != NONE)
 	{
-		struct unit_datum *unit = unit_get(unit_index);
-		if (unit->object.parent_object_index != NONE)
+		struct unit_datum *unit = unit_try_and_get(unit_index);
+		/* port: guard against a unit deleted during round reset */
+		if (unit && unit->object.parent_object_index != NONE)
 		{
 			struct object_datum *parent_object = object_get(unit->object.parent_object_index);
 			if (TEST_FLAG(_object_mask_unit, parent_object->object.type))

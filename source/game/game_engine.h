@@ -40,15 +40,28 @@ enum game_engine_type
 	game_engine_race,
 	game_engine_terminator,
 	game_engine_stub,
+	/* port: territories gametype — battlefield-style multi-point territory capture */
+	game_engine_territories,
+	/* port: infection gametype — alpha/infected vs survivors */
+	game_engine_infection,
 	number_of_game_engines,
 	first_usable_game_engine_index = game_engine_ctf,
-	last_usable_game_engine_index = game_engine_race,
+	last_usable_game_engine_index = game_engine_infection,
 };
+
+#define game_engine_conquest game_engine_territories
 
 enum get_score_type
 {
 	_get_score_individual = 0,
 	_get_score_team,
+};
+
+enum goal_radar
+{
+	_radar_motion_tracker = 0,
+	_radar_nav_point,
+	_radar_none,
 };
 
 /* ---------- macros */
@@ -129,6 +142,39 @@ struct race_variant
 	long team_scoring;
 };
 
+/* port: territories gametype's variant options */
+struct territories_variant
+{
+	long base_count;
+};
+
+#define conquest_variant territories_variant
+
+/* port: infection gametype's variant options (24 bytes) */
+struct infection_variant
+{
+	byte initial_zombie_pct;         /* 5, 10, 25 (%) */
+	byte rounds;                     /* 1, 2, 3, 5, 7, 10 */
+	byte round_time_minutes;         /* 0 (no limit), 2, 3, 5, 10, 15 */
+	byte infected_speed;             /* 75, 100, 125, 150, 200 (%) */
+	byte infected_gravity;           /* 50, 75, 100, 150, 200 (%) */
+	byte infected_damage_resistance; /* 50, 100, 150, 200, 300 (%) */
+	byte infected_health;            /* 50, 100, 150, 200, 300, 400 (%) */
+	byte infected_shields;           /* 0=Off, 1=Normal */
+	byte alpha_speed;                /* 100, 125, 150, 175, 200 (%) */
+	byte alpha_gravity;              /* 50, 75, 100, 150, 200 (%) */
+	byte alpha_damage_resistance;    /* 50, 100, 150, 200, 300 (%) */
+	byte alpha_health;               /* 50, 100, 150, 200, 300, 400 (%) */
+	byte alpha_shields;              /* 0=Off, 1=Normal, 2=Overshield */
+	byte alpha_camo;                 /* 0=Off, 1=On */
+	byte survivor_speed;             /* 75, 100, 125, 150, 200 (%) */
+	byte survivor_gravity;           /* 50, 75, 100, 150, 200 (%) */
+	byte survivor_damage_resistance; /* 50, 100, 150, 200, 300 (%) */
+	byte survivor_health;            /* 50, 100, 150, 200, 300, 400 (%) */
+	byte survivor_shields;           /* 0=Off, 1=Normal */
+	byte pad[5];
+};
+
 union game_engine_variant
 {
 	struct ctf_variant ctf;
@@ -136,6 +182,9 @@ union game_engine_variant
 	struct king_variant king;
 	struct oddball_variant oddball;
 	struct race_variant race;
+	struct territories_variant territories;
+	struct territories_variant conquest;
+	struct infection_variant infection;
 };
 
 struct game_variant
@@ -497,6 +546,9 @@ void game_engine_variant_cleanup(
 
 boolean game_engine_display_team_indicators(
 	void);
+boolean game_engine_is_territories(
+	void);
+#define game_engine_is_conquest game_engine_is_territories
 
 boolean game_engine_can_score(
 	void);
@@ -710,5 +762,18 @@ extern struct game_engine *game_engine;
 real game_engine_get_damage_multiplier(
 	long damaging_player_index,
 	long damaged_player_index);
+
+/* port: infection gametype helpers */
+boolean game_engine_is_infection(void);
+real game_engine_infection_get_gravity_scale(long unit_index);
+boolean game_engine_infection_has_shield(long player_index);
+real game_engine_infection_get_damage_multiplier(long damaging_player_index, long damaged_player_index);
+long game_engine_infection_get_player_infections(long player_index);
+void game_engine_infection_get_status(
+	long *survivor_count,
+	long *infected_count,
+	long *current_round,
+	long *total_rounds,
+	long *round_seconds_remaining);
 
 #endif // __GAME_ENGINE_H

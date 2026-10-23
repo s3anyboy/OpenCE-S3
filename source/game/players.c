@@ -4931,7 +4931,17 @@ void players_update_before_game(
 						unit_get(player->unit_index)->unit.current_weapon_index);
 					if (weapon_index != NONE && weapon_must_be_readied(weapon_index))
 					{
-						if (TEST_FLAG(action->control_flags, _unit_control_weapon_primary_trigger_bit) ||
+						if (game_engine_is_infection())
+						{
+							/* port: in Infection, the Oddball skull is melee-only and cannot be thrown/dropped */
+							if (TEST_FLAG(action->control_flags, _unit_control_weapon_primary_trigger_bit))
+							{
+								SET_FLAG(action->control_flags, _unit_control_use_equipment_bit, TRUE);
+							}
+							SET_FLAG(action->control_flags, _unit_control_weapon_primary_trigger_bit, FALSE);
+							SET_FLAG(action->control_flags, _unit_control_weapon_secondary_trigger_bit, FALSE);
+						}
+						else if (TEST_FLAG(action->control_flags, _unit_control_weapon_primary_trigger_bit) ||
 							TEST_FLAG(action->control_flags, _unit_control_weapon_secondary_trigger_bit))
 						{
 							unit_drop_current_weapon(player->unit_index, TRUE);

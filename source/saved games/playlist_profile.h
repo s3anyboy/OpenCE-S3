@@ -14,7 +14,14 @@ header included in hcex build.
 
 /* ---------- constants */
 
-/* ---------- macros */
+enum
+{
+	/* port: synthetic playlist profile indices for Territories and Infection (low 4 bits = 1 = _saved_game_file_type_game_variant) */
+	TERRITORIES_PLAYLIST_PROFILE_INDEX = (long)0xCFFF0001,
+	INFECTION_PLAYLIST_PROFILE_INDEX = (long)0xCFFE0001
+};
+
+#define CONQUEST_PLAYLIST_PROFILE_INDEX TERRITORIES_PLAYLIST_PROFILE_INDEX
 
 /* ---------- structures */
 

@@ -967,8 +967,25 @@ wchar_t *saved_game_file_get_display_name(
 	long profile_index)
 {
 	struct enumerated_saved_game_file file;
-	long memory_unit = SAVED_GAME_FILE_INDEX_MEMORY_UNIT(profile_index);
-	long n = SAVED_GAME_FILE_INDEX_FILE_INDEX(profile_index);
+	long memory_unit;
+	long n;
+
+	/* port: territories synthetic profile */
+	if (profile_index == TERRITORIES_PLAYLIST_PROFILE_INDEX)
+	{
+		ustrncpy(saved_game_file_display_name, L"Territories", MAX_GAMENAME - 1);
+		saved_game_file_display_name[MAX_GAMENAME - 1] = 0;
+		return saved_game_file_display_name;
+	}
+	if (profile_index == INFECTION_PLAYLIST_PROFILE_INDEX)
+	{
+		ustrncpy(saved_game_file_display_name, L"Infection", MAX_GAMENAME - 1);
+		saved_game_file_display_name[MAX_GAMENAME - 1] = 0;
+		return saved_game_file_display_name;
+	}
+
+	memory_unit = SAVED_GAME_FILE_INDEX_MEMORY_UNIT(profile_index);
+	n = SAVED_GAME_FILE_INDEX_FILE_INDEX(profile_index);
 
 	match_assert(
 		"c:\\halo\\SOURCE\\saved games\\saved_game_files.c",
@@ -999,10 +1016,19 @@ boolean saved_game_file_open(
 	long profile_index)
 {
 	struct enumerated_saved_game_file file;
-	long type = SAVED_GAME_FILE_INDEX_TYPE(profile_index);
-	long memory_unit = SAVED_GAME_FILE_INDEX_MEMORY_UNIT(profile_index);
-	long n = SAVED_GAME_FILE_INDEX_FILE_INDEX(profile_index);
+	long type;
+	long memory_unit;
+	long n;
 	boolean success;
+
+	/* port: territories synthetic profile cannot be opened on disk */
+	if (profile_index == TERRITORIES_PLAYLIST_PROFILE_INDEX ||
+		profile_index == INFECTION_PLAYLIST_PROFILE_INDEX)
+		return FALSE;
+
+	type = SAVED_GAME_FILE_INDEX_TYPE(profile_index);
+	memory_unit = SAVED_GAME_FILE_INDEX_MEMORY_UNIT(profile_index);
+	n = SAVED_GAME_FILE_INDEX_FILE_INDEX(profile_index);
 
 	match_assert(
 		"c:\\halo\\SOURCE\\saved games\\saved_game_files.c",
@@ -1196,6 +1222,11 @@ boolean saved_game_file_get_path_to_enclosing_directory(
 		full_path);
 
 	full_path[0] = 0;
+
+	/* port: territories synthetic profile has no directory on disk */
+	if (profile_index == TERRITORIES_PLAYLIST_PROFILE_INDEX ||
+		profile_index == INFECTION_PLAYLIST_PROFILE_INDEX)
+		return FALSE;
 
 	if (profile_index != NONE)
 	{

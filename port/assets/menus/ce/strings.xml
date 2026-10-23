@@ -193,6 +193,9 @@
 		<string text="[%s]: " map="188"/>
 		<string text=" Remaining" map="189"/>
 		<string text="Server IP Address - " map="190"/>
+		<string text="Territories"/>
+		<string text="tickets"/>
+		<string text="Infection"/>
 	</strings>
 	<strings name="error/error_headers" map="ui\shell\error\error_headers">
 		<string text="ATTENTION" map="0"/>
@@ -723,7 +726,8 @@
 		<string text="Sometimes you have to kill. \nNow is one of those times. \nWhack or be whacked.\nCurrent Rules:" map="2"/>
 		<string text="Become one with the ball. And \nkeep the ball away from every-\none else while you're at it.\nCurrent Rules:" map="3"/>
 		<string text="Complete the required number \nof laps before your opponents, \nblowing away the competition.\nCurrent Rules:" map="4"/>
-		<string text=" \n \n \nCurrent Rules:" map="5"/>
+		<string text="Capture and hold territory \npoints to bleed the enemy's \ntickets to zero.\nCurrent Rules:"/>
+		<string text="Survive the infected horde,\nor hunt down the remaining\nsurvivors before time expires.\nCurrent Rules:"/>
 	</strings>
 	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/game_type_select/gametype_select_list_options" map="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_edit\game_type_select\gametype_select_list_options">
 		<string text="CAPTURE THE FLAG" map="0"/>
@@ -731,7 +735,240 @@
 		<string text="SLAYER" map="2"/>
 		<string text="ODDBALL" map="3"/>
 		<string text="RACE" map="4"/>
-		<string text="SAVE CHANGES" map="5"/>
+		<string text="TERRITORIES"/>
+		<string text="INFECTION"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/territories_edit/cap_territories">
+		<string text="There will be 3 territory bases to capture on the map."/>
+		<string text="There will be 4 territory bases to capture on the map."/>
+		<string text="There will be 5 territory bases to capture on the map."/>
+		<string text="There will be 6 territory bases to capture on the map."/>
+		<string text="Each team starts with 50 tickets."/>
+		<string text="Each team starts with 75 tickets."/>
+		<string text="Each team starts with 100 tickets."/>
+		<string text="Each team starts with 150 tickets."/>
+		<string text="Each team starts with 200 tickets."/>
+		<string text="Each team starts with 250 tickets."/>
+		<string text="Each team starts with 300 tickets."/>
+		<string text="Each team starts with 400 tickets."/>
+		<string text="Each team starts with 500 tickets."/>
+		<string text="Each team starts with 750 tickets."/>
+		<string text="Each team starts with 1000 tickets."/>
+		<string text="Each team starts with 1500 tickets."/>
+		<string text="The game will have no time limit.  It will only end\nwhen someone wins."/>
+		<string text="This game will have a 10 minute time limit.  It will\nend after the time limit is up or someone wins."/>
+		<string text="This game will have a 15 minute time limit.  It will\nend after the time limit is up or someone wins."/>
+		<string text="This game will have a 20 minute time limit.  It will\nend after the time limit is up or someone wins."/>
+		<string text="This game will have a 25 minute time limit.  It will\nend after the time limit is up or someone wins."/>
+		<string text="This game will have a 30 minute time limit.  It will\nend after the time limit is up or someone wins."/>
+		<string text="This game will have a 45 minute time limit.  It will\nend after the time limit is up or someone wins."/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/territories_edit/territories_labels">
+		<string text="BASES:"/>
+		<string text="TICKETS:"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/territories_edit/var_base_count">
+		<string text="3 BASES"/>
+		<string text="4 BASES"/>
+		<string text="5 BASES"/>
+		<string text="6 BASES"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/territories_edit/var_tickets">
+		<string text="50 TICKETS"/>
+		<string text="75 TICKETS"/>
+		<string text="100 TICKETS"/>
+		<string text="150 TICKETS"/>
+		<string text="200 TICKETS"/>
+		<string text="250 TICKETS"/>
+		<string text="300 TICKETS"/>
+		<string text="400 TICKETS"/>
+		<string text="500 TICKETS"/>
+		<string text="750 TICKETS"/>
+		<string text="1000 TICKETS"/>
+		<string text="1500 TICKETS"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/cap_infection">
+		<string text="Configure general match rules: initial zombie count,\nnumber of rounds, and round time limit."/>
+		<string text="Customize traits for regular infected players:\nspeed, gravity, damage resistance, health, and shields."/>
+		<string text="Customize traits for the initial Alpha Zombies:\nspeed, gravity, resistance, health, shields, and camo."/>
+		<string text="Customize traits for un-infected survivor players:\nspeed, gravity, damage resistance, health, and shields."/>
+		<string text="5% of players (at least 1) start each round\nas Alpha Zombies."/>
+		<string text="10% of players (at least 1) start each round\nas Alpha Zombies."/>
+		<string text="25% of players (at least 1) start each round\nas Alpha Zombies."/>
+		<string text="The match consists of 1 round."/>
+		<string text="The match consists of 2 rounds."/>
+		<string text="The match consists of 3 rounds."/>
+		<string text="The match consists of 5 rounds."/>
+		<string text="The match consists of 7 rounds."/>
+		<string text="The match consists of 10 rounds."/>
+		<string text="Each round has no time limit and ends only when\nall survivors are infected."/>
+		<string text="Survive for 2 minutes to win the round."/>
+		<string text="Survive for 3 minutes to win the round."/>
+		<string text="Survive for 5 minutes to win the round."/>
+		<string text="Survive for 10 minutes to win the round."/>
+		<string text="Survive for 15 minutes to win the round."/>
+		<string text="Infected move at 75% of normal speed."/>
+		<string text="Infected move at 100% normal speed."/>
+		<string text="Infected move at 125% of normal speed."/>
+		<string text="Infected move at 150% of normal speed."/>
+		<string text="Infected move at 200% of normal speed."/>
+		<string text="Infected have 50% (low) gravity."/>
+		<string text="Infected have 75% gravity."/>
+		<string text="Infected have 100% normal gravity."/>
+		<string text="Infected have 150% (high) gravity."/>
+		<string text="Infected have 50% damage resistance (take 2x damage)."/>
+		<string text="Infected have 100% normal damage resistance."/>
+		<string text="Infected have 150% damage resistance."/>
+		<string text="Infected have 200% damage resistance (half damage)."/>
+		<string text="Infected have 300% damage resistance."/>
+		<string text="Infected have 50% maximum health."/>
+		<string text="Infected have 100% normal maximum health."/>
+		<string text="Infected have 150% maximum health."/>
+		<string text="Infected have 200% maximum health."/>
+		<string text="Infected have 300% maximum health."/>
+		<string text="Infected have 400% maximum health."/>
+		<string text="Infected have no energy shields."/>
+		<string text="Infected have normal energy shields."/>
+		<string text="Alpha Zombies move at 100% normal speed."/>
+		<string text="Alpha Zombies move at 125% of normal speed."/>
+		<string text="Alpha Zombies move at 150% of normal speed."/>
+		<string text="Alpha Zombies move at 175% of normal speed."/>
+		<string text="Alpha Zombies move at 200% of normal speed."/>
+		<string text="Alpha Zombies have 50% (low) gravity."/>
+		<string text="Alpha Zombies have 75% gravity."/>
+		<string text="Alpha Zombies have 100% normal gravity."/>
+		<string text="Alpha Zombies have 150% (high) gravity."/>
+		<string text="Alpha Zombies have 50% damage resistance."/>
+		<string text="Alpha Zombies have 100% normal damage resistance."/>
+		<string text="Alpha Zombies have 150% damage resistance."/>
+		<string text="Alpha Zombies have 200% damage resistance."/>
+		<string text="Alpha Zombies have 300% damage resistance."/>
+		<string text="Alpha Zombies have 50% maximum health."/>
+		<string text="Alpha Zombies have 100% normal maximum health."/>
+		<string text="Alpha Zombies have 150% maximum health."/>
+		<string text="Alpha Zombies have 200% maximum health."/>
+		<string text="Alpha Zombies have 300% maximum health."/>
+		<string text="Alpha Zombies have 400% maximum health."/>
+		<string text="Alpha Zombies have no energy shields."/>
+		<string text="Alpha Zombies have normal energy shields."/>
+		<string text="Alpha Zombies spawn with an Overshield."/>
+		<string text="Alpha Zombies are visible."/>
+		<string text="Alpha Zombies have permanent Active Camouflage."/>
+		<string text="Survivors move at 75% of normal speed."/>
+		<string text="Survivors move at 100% normal speed."/>
+		<string text="Survivors move at 125% of normal speed."/>
+		<string text="Survivors move at 150% of normal speed."/>
+		<string text="Survivors move at 200% of normal speed."/>
+		<string text="Survivors have 50% (low) gravity."/>
+		<string text="Survivors have 75% gravity."/>
+		<string text="Survivors have 100% normal gravity."/>
+		<string text="Survivors have 150% (high) gravity."/>
+		<string text="Survivors have 50% damage resistance."/>
+		<string text="Survivors have 100% normal damage resistance."/>
+		<string text="Survivors have 150% damage resistance."/>
+		<string text="Survivors have 200% damage resistance."/>
+		<string text="Survivors have 300% damage resistance."/>
+		<string text="Survivors have 50% maximum health."/>
+		<string text="Survivors have 100% normal maximum health."/>
+		<string text="Survivors have 150% maximum health."/>
+		<string text="Survivors have 200% maximum health."/>
+		<string text="Survivors have 300% maximum health."/>
+		<string text="Survivors have 400% maximum health."/>
+		<string text="Survivors have no energy shields."/>
+		<string text="Survivors have normal energy shields."/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/infection_labels">
+		<string text="TRAIT GROUP:"/>
+		<string text="INITIAL ZOMBIES:"/>
+		<string text="ROUNDS:"/>
+		<string text="GAME TIME:"/>
+		<string text="INFECTED SPEED:"/>
+		<string text="INFECTED GRAVITY:"/>
+		<string text="INFECTED RESISTANCE:"/>
+		<string text="INFECTED HEALTH:"/>
+		<string text="INFECTED SHIELDS:"/>
+		<string text="ALPHA SPEED:"/>
+		<string text="ALPHA GRAVITY:"/>
+		<string text="ALPHA RESISTANCE:"/>
+		<string text="ALPHA HEALTH:"/>
+		<string text="ALPHA SHIELDS:"/>
+		<string text="ALPHA CAMO:"/>
+		<string text="SURVIVOR SPEED:"/>
+		<string text="SURVIVOR GRAVITY:"/>
+		<string text="SURVIVOR RESISTANCE:"/>
+		<string text="SURVIVOR HEALTH:"/>
+		<string text="SURVIVOR SHIELDS:"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_page">
+		<string text="GENERAL"/>
+		<string text="INFECTED"/>
+		<string text="ALPHA ZOMBIE"/>
+		<string text="UN-INFECTED"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_init_pct">
+		<string text="5%"/>
+		<string text="10%"/>
+		<string text="25%"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_rounds">
+		<string text="1 ROUND"/>
+		<string text="2 ROUNDS"/>
+		<string text="3 ROUNDS"/>
+		<string text="5 ROUNDS"/>
+		<string text="7 ROUNDS"/>
+		<string text="10 ROUNDS"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_round_time">
+		<string text="NO LIMIT"/>
+		<string text="2 MINUTES"/>
+		<string text="3 MINUTES"/>
+		<string text="5 MINUTES"/>
+		<string text="10 MINUTES"/>
+		<string text="15 MINUTES"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_speed">
+		<string text="75%"/>
+		<string text="100%"/>
+		<string text="125%"/>
+		<string text="150%"/>
+		<string text="200%"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_alpha_speed">
+		<string text="100%"/>
+		<string text="125%"/>
+		<string text="150%"/>
+		<string text="175%"/>
+		<string text="200%"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_gravity">
+		<string text="50% (LOW)"/>
+		<string text="75%"/>
+		<string text="100% (NORMAL)"/>
+		<string text="150% (HIGH)"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_resist">
+		<string text="50% (WEAK)"/>
+		<string text="100% (NORMAL)"/>
+		<string text="150% (TOUGH)"/>
+		<string text="200%"/>
+		<string text="300%"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_health">
+		<string text="50%"/>
+		<string text="100%"/>
+		<string text="150%"/>
+		<string text="200%"/>
+		<string text="300%"/>
+		<string text="400%"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_shields">
+		<string text="OFF"/>
+		<string text="ON"/>
+	</strings>
+	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/infection_edit/var_inf_alpha_shields">
+		<string text="OFF"/>
+		<string text="NORMAL"/>
+		<string text="OVERSHIELD"/>
 	</strings>
 	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/koth_edit/cap_koth" map="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_edit\koth_edit\cap_koth">
 		<string text="During the course of the game, the Hill will teleport to\na random location." map="0"/>

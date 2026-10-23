@@ -1802,9 +1802,9 @@ static void object_delete_initial_recursive(
 	host's objects on the host's word, a flag or ball among them: the game
 	deletes none, but a host may, and the client lets go of it first,
 	network_objects.c's distributed_client_delete) */
-	if (game_engine_running() && object->object.type == _object_type_weapon && !network_objects_client_deleting())
+	if (game_engine_running() && object->object.type == _object_type_weapon && !network_objects_client_deleting() && !game_engine_is_infection())
 	{
-		match_assert("c:\\halo\\SOURCE\\objects\\objects.c", 829, !(weapon_is_flag(object_index)));
+		match_warn("c:\\halo\\SOURCE\\objects\\objects.c", 829, !(weapon_is_flag(object_index))); /* port: custom gamemodes delete balls */
 	}
 	
 	if (object->object.first_child_object_index!=NONE)

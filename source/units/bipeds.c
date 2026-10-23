@@ -2426,7 +2426,8 @@ static void biped_update_physics(
 			velocity_change = acceleration;
 		physics->new_velocity.i = velocity_change.i + physics->velocity.i;
 		physics->new_velocity.j = velocity_change.j + physics->velocity.j;
-		physics->new_velocity.k = physics->velocity.k - global_gravity;
+		/* port: Infection per-role gravity trait scale */
+		physics->new_velocity.k = physics->velocity.k - global_gravity * game_engine_infection_get_gravity_scale(physics->biped_index);
 		physics->out_flags = TEST_FLAG(in_flags, _biped_physics_in_slipping_bit) ?
 			FLAG(_biped_physics_out_slipping_bit) : 0;
 	}
@@ -2562,7 +2563,7 @@ static void biped_update_physics(
 			physics->out_flags = slipping ? FLAG(_biped_physics_out_slipping_bit) : 0;
 			add_vectors3d(&velocity_change, &physics->velocity, &physics->new_velocity);
 			if (TEST_FLAG(physics->out_flags, _biped_physics_out_slipping_bit))
-				physics->new_velocity.k -= global_gravity;
+				physics->new_velocity.k -= global_gravity * game_engine_infection_get_gravity_scale(physics->biped_index);
 		}
 	}
 

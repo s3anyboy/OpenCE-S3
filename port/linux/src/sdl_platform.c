@@ -1017,7 +1017,7 @@ screen at any resolution; this one is made again whenever the window's size
 in pixels changes (menu_cursor_fit, from platform_pump_events). */
 
 /* the arrow's height in the menus' 480 lines (72 pixels at 1080p) */
-#define MENU_CURSOR_HEIGHT 32
+#define MENU_CURSOR_HEIGHT 16
 /* the arrow's tip in the picture, past its soft edge: the click point */
 #define MENU_CURSOR_TIP 2
 
@@ -1066,8 +1066,8 @@ static void menu_cursor_fit(void)
 		return;
 	lines = height < width * 3 / 4 ? height : width * 3 / 4;
 	cursor_height = lines * MENU_CURSOR_HEIGHT / 480;
-	if (cursor_height < 16)
-		cursor_height = 16;
+	if (cursor_height < 8)
+		cursor_height = 8;
 	if (cursor_height == menu_cursor_height)
 		return;
 	menu_cursor_height = cursor_height;
