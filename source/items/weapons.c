@@ -220,6 +220,7 @@ symbols in this file:
 #include "game/cheats.h"
 #include "game/game.h"
 #include "game/game_engine.h"
+#include "infection.h" /* port: port/linux/game/infection.c */
 #include "game/players.h"
 #include "game/aim_assist.h" /* port: the reticle's read-only shot direction */
 #include "interface/first_person_weapons.h"
@@ -602,7 +603,7 @@ static void weapon_precache_projectile_trails(
 			struct weapon_trigger_definition *trigger = TAG_BLOCK_GET_ELEMENT(
 				&definition->weapon.triggers, trigger_index, struct weapon_trigger_definition);
 
-			if (trigger->projectile.group_tag == PROJECTILE_DEFINITION_TAG && trigger->projectile.index != NONE)
+			if (trigger->projectile.index != NONE)
 			{
 				struct projectile_definition *projectile = projectile_definition_get(trigger->projectile.index);
 				short attachment_index;
@@ -917,9 +918,11 @@ void weapon_delete(
 	/* (port: but a flag or ball a client of the distributed netcode deletes,
 	on the host's word or as one the host has not told it of: objects.c's
 	object_delete_initial_recursive) */
-	if (game_engine_running() && !network_objects_client_deleting() && !game_engine_is_infection())
+	if (game_engine_running() && !network_objects_client_deleting())
 	{
-		match_warn("c:\\halo\\SOURCE\\items\\weapons.c", 234, !weapon_is_flag(weapon_index)); /* port: custom gamemodes delete balls */
+		/* port: (but an Infection zombie's skull: infection.c) */
+		match_assert("c:\\halo\\SOURCE\\items\\weapons.c", 234,
+			!weapon_is_flag(weapon_index) || infection_can_delete_skull(weapon_index));
 	}
 
 	return;
