@@ -226,6 +226,12 @@ is held. The profile's button layout (Settings > Gamepads) is the
 gamepads' only. Besides the Xbox's five, it has the Master Chief
 Collection's Bumper Jumper: jump on the left bumper, melee on the right,
 switching grenades on A, action and reload on B and the flashlight on X.
+Fishsticks has zoom on the left trigger and melee on the right stick's
+button, the grenade thrown with the right bumper, crouch on B and grenades
+switched with the pad's left direction (which then does not strafe or turn).
+
+Recon is the standard layout with action and reload on the right bumper and
+grenades switched with the left bumper (the flashlight moves to X).
 
 | Action | Keys and buttons (default) |
 | --- | --- |
@@ -430,6 +436,7 @@ the setting for one start of the game. It has priority over the file.
 | `display.match_timer` | `false` | `HALO_MATCH_TIMER` | `true`: a multiplayer game draws its clock at the bottom right, counting up from the game's first tick, which the items' respawn periods count from too: a weapon is back on the map at every multiple of its period on the clock. The campaign has its own (`display.campaign_timer`). MATCH TIMER in Video Setup > Graphics. |
 | `display.campaign_timer` | `false` | `HALO_CAMPAIGN_TIMER` | `true`: the campaign (and online co-op) draws a clock at the bottom right, counting up from the level's start. The main menu's scene has none. CAMPAIGN TIMER in Video Setup > Graphics, and in co-op's Server Setup > Co-op Options. |
 | `display.campaign_score` | `false` | `HALO_CAMPAIGN_SCORE` | `true`: the campaign is scored. Each enemy a player kills is worth points by its actor variant: a base by the kind of actor (grunt 10, jackal 15, elite 30, hunter 100, engineer 5, Flood forms 5 to 10, sentinel 15) times a rank by the variant's name (minor 1, major 1.5, ultra 2, zealot 3) times the difficulty (easy 0.5, normal 1, heroic 2, legendary 5), rounded up to a multiple of 5. A ghost, banshee or wraith destroyed is worth 50, 75 or 100 (scaled by the difficulty the same way). Every kill's points also fall with the level's time, as the campaign timer counts it (even with the timer hidden): times 1 at 0, falling in a straight line to times 0.25 at 30 minutes, and staying there. The score is drawn at the bottom right; when a level is won, a summary (each player's score and kills in co-op, and the best kinds of enemy) is shown over the level until A or B is pressed, before the main menu or the co-op lobby loads. In online co-op the host sends its kills to the clients, and the scoreboard (`controls.scoreboard`) has each player's own score, kills and deaths (a death is a player's unit going away, seen by every machine). CAMPAIGN SCORE in Video Setup > Graphics, and in co-op's Server Setup > Co-op Options. |
+| `display.headshot_party` | `false` | `HALO_HEADSHOT_PARTY` | `true`: a grunt that a player kills with a shot to the head pops with confetti, drawn in each player's own view from where its head was, and plays `party.wav`, a WAV file in the data folder (no file, no sound). Campaign only; in co-op the host's clients see it too. GRUNT PARTY in Video Setup > Extra Effects. |
 | `display.text_chat` | `true` | `HALO_TEXT_CHAT` | Show the text chat of network games (Settings > Network Setup > Multiplayer HUD > TEXT CHAT). `false` hides its lines, and its keys and a controller's D-pad Up open nothing. Refer to "Text chat". |
 | `display.chat_style` | `"colors"` | `HALO_CHAT_STYLE` | The text chat's colours (Settings > Network Setup > Multiplayer HUD > CHAT TEXT): `"colors"`, the player's name in their team's colour and the text a pale blue; `"white"`, all of it white, as Custom Edition. |
 | `display.scoreboard_team_layout` | `"teams"` | `HALO_SCOREBOARD_TEAM_LAYOUT` | How the multiplayer scoreboard (hold BACK, or tab) lists a team game's players. `"teams"`: a column for each team, red on the left and blue on the right. `"score"`: all the players in order of score. With more players than fit, the mouse wheel and Page Up / Page Down scroll the scoreboard. |
@@ -437,6 +444,9 @@ the setting for one start of the game. It has priority over the file.
 | `display.scoreboard_background_color` | `"16, 16, 16, 150"` | `HALO_SCOREBOARD_BACKGROUND_COLOR` | The colour of the scoreboard's panel: `"red, green, blue, alpha"`, each from `0` to `255`. Alpha `0` is see-through, `255` is solid. |
 | `display.anisotropic_filtering` | `0` | `HALO_ANISOTROPIC_FILTERING` | Textures seen at a grazing angle (floors, walls, terrain) are sampled along the angle from finer mip levels, so they stay sharp; the Xbox game asks for none. `0` or `1`: as on the Xbox. `2`, `4`, `8` or `16`: at most that many samples (at most the GPU's); `4` keeps most of `16`'s sharpness at less cost on slower GPUs. TEXTURE FILTERING in Video Setup > Graphics. It applies to the textures of the map that have mip levels and are filtered linearly (base, detail, bump and environment maps; lightmaps have no mip levels), not to what the game renders, such as the water's ripples. On Android and the web, only where the GPU has `GL_EXT_texture_filter_anisotropic`. |
 | `display.latency_meter` | `false` | `HALO_LATENCY_METER` | `true`: in a network game, your round trip to the host in milliseconds at the top right of the screen, "Ping 45 ms" with four bars: green below 80 ms, yellow below 150, red from 150. The host shows "Max ping", its slowest player's. A player's machine that has heard nothing from the host for two seconds shows "Connection problem". The round trip includes each machine's wait for its next tick, so a LAN reads 15 to 35 ms. Not shown in the menus, after the game, in a co-op cutscene or when the host plays alone. The scoreboard's pings take the same colours, and show the round trips this machine times itself (the host: each player's; a player: their own), so they agree with the meter. Nothing more is sent. Only in config.toml, not in the menus. |
+| `display.subtitles` | `false` | `HALO_SUBTITLES` | `true`: subtitles at the bottom of the screen, on single player maps, for the sound tags that the subtitles name (built into the game, or your own file), while they play. Refer to "Subtitles". Also in the menus: Audio Setup, Subtitles. |
+| `display.subtitles_language` | `"english"` | `HALO_SUBTITLES_LANGUAGE` | The subtitles' language: `english`, `french`, `german`, `italian`, `chinese`, `chinese_simple`, `japanese`, `korean`, `spanish_latam`, `spanish` or `portuguese`. Refer to "Subtitles". Also in the menus: Audio Setup, Subtitles. |
+| `display.subtitles_file` | `"subtitles.txt"` | `HALO_SUBTITLES_FILE` | Your own subtitles file, in the data root (next to `maps`), or a path; it replaces the subtitles built into the game, which are used where there is no such file. Read again when the settings change. |
 | `display.per_pixel_lighting` | `false` | `HALO_PER_PIXEL_LIGHTING` | `false`: the models (characters, weapons, vehicles, scenery) are lit at each vertex and the light is blended between them, as on the Xbox. The light across a curved surface then shows facets, and a point light that passes close lights only the vertices it reaches. `true`: the models are lit at each pixel by the same lights (the ambient light, two distant lights and two point lights), which changes their look. |
 | `display.structure_culling` | `31` | `HALO_STRUCTURE_CULLING` | Which tests skip the triangles of the level (its walls, floors and terrain) that the camera cannot see before they are drawn, as bits added together: `1`, triangles outside the view; `2`, groups of triangles that all face away from the camera; `4`, single triangles that face away; `8`, smaller groups, so that more of them are skipped whole; `16`, the rooms nearest the camera first. Each test is conservative: the picture is the same, with fewer triangles drawn. `0`: the original walk, which draws every triangle of each visible room. The console's `structure_culling <bits>` changes it until the game quits, and `debug_structure_culling true` shows what was skipped (red: outside the view, blue: facing away). |
 | `display.shield_glow` | `false` | `HALO_SHIELD_GLOW` | `true`: as a unit's energy shield flares (hit, charging, falling), it lights what is around it and itself, as a plasma bolt does, in the shield shader's own color (a Spartan's gold, an Elite's blue), rising and falling with the flare seen on the body. An ordinary dynamic light of the game's, drawn with a light definition the map has (`shield_glow.c`). Up to 8 units near the camera. Video Setup's Extra Effects screen sets it. |
@@ -1199,6 +1209,59 @@ the invite with the invite button of Discord. When a person accepts it, that
 person joins the game. If the game does not operate, Discord starts it.
 The game sends the activity only to a Discord client of the same user.
 
+## Subtitles
+
+The game shows subtitles at the bottom of the screen for the sound tags that
+a text file names. The game has its own built in, from
+`port/assets/subtitles/subtitles.txt` (the build embeds the file, so edit it
+and build again). To use your own instead, put `subtitles.txt` in the data
+root (next to `maps`; `display.subtitles_file` changes the name): a file
+there replaces the built-in subtitles whole. A line is a sound tag's path, a
+`-` (or `=` or `:`), and the text:
+
+```
+# the tag's path: the tag folder, without ".sound" (any case; / or \)
+"sound/dialog/a10/a10_chief_get_down" - "Chief, get down!"
+sound\dialog\a10\cortana_01 = Chief, I need you on the bridge.\nNow.
+sound/dialog/b30/* - "(radio chatter)"
+```
+
+- The path is in quotes, or without them if it holds no spaces. The text is
+  in quotes or not. `\n` in the text starts a new line, and a long line
+  wraps.
+- A path that ends in `/*` is every sound tag below that folder. A line that
+  names a tag, or a longer folder, is used before it.
+- Empty lines and lines that start with `#`, `//` or `;` are ignored. A path
+  named twice keeps its last line.
+- A line is shown when its sound is heard (a sound too far away to be heard
+  shows nothing), and stays for the sound's length. Up to four lines are
+  shown together, the newest lowest. In a cutscene they stand above the
+  letterbox's bar. A paused game keeps its lines.
+- Each language has a file: `subtitles.txt` is English, and the others are
+  `subtitles_french.txt`, `subtitles_german.txt`, `subtitles_italian.txt`,
+  `subtitles_chinese.txt` (Traditional), `subtitles_chinese_simple.txt`,
+  `subtitles_japanese.txt`, `subtitles_korean.txt`, `subtitles_spanish_latam.txt`,
+  `subtitles_spanish.txt` and `subtitles_portuguese.txt`, built in (from
+  `port/assets/subtitles`) or next to `maps`, which replaces the built-in
+  one. Choose the language with `display.subtitles_language` (Audio Setup,
+  Subtitles). A language's file need not have every line: a line it
+  lacks is shown in English. Only the English subtitles are built in now.
+- The files are UTF-8, and the text is drawn in the HUD font (Overpass),
+  which has the Latin letters of French, German, Italian, Spanish and
+  Portuguese with their accents. The Chinese, Japanese and Korean characters
+  are drawn from Noto Sans CJK (`port/assets/fonts`, SIL Open Font License),
+  a subset of the forms of the language's region: Traditional Chinese,
+  Simplified Chinese, Japanese or Korean, from `display.subtitles_language`.
+  The subset has the commonly used characters (the first levels of Big5,
+  GB 2312 and JIS X 0208, and the Hangul of KS X 1001) and the kana and
+  punctuation; a rarer character is left out. It needs
+  `display.high_res_text` (on by default), and a line of them is wrapped
+  only where the text has a space: write a space in a long line where it may
+  break.
+- The file is read when the game starts, and again when a setting changes.
+  They are off until `display.subtitles` is `true` (Audio Setup,
+  Subtitles), and only on single player maps.
+
 ## Mods
 
 A mod is a folder in `mods/` in the data root with a `mod.toml` and a
@@ -1435,7 +1498,7 @@ Other changes:
 | `interface/player_ui.c` | Fast setup opens the pregame screen through the port's menus (the lobby), as `interface/ui_widget.c` does. |
 | `game/game_time.c`, `main/main.c` | With `debug.fixed_step`, a game of one machine runs a tick a frame, each frame taking a tick's time, so that it plays the same every time (`tools/stagekit`). |
 | `input/input_abstraction.c`, `game/player_control.c`, `game/players.c`, `game/player_queues_new.c`, `units/units.h` | The keyboard and mouse's actions (`src/xinput_sdl.c`, `include/halo_keyboard.h`) join controller 1's game controls; their reload key reloads on its own, and their action key only acts (a control flag of the port's, sent with the player's action, stops the reload the controller's X falls back to). |
-| `saved games/player_profile.h`, `interface/player_ui.c` | A sixth button layout, the Master Chief Collection's Bumper Jumper (`profile.button_preset` 5). A layout the build does not know (a later build's) gets the standard buttons, not none, which moved start and back and stopped the game. |
+| `saved games/player_profile.h`, `interface/player_ui.c` | A sixth button layout, the Master Chief Collection's Bumper Jumper (`profile.button_preset` 5), and a seventh, Fishsticks (6: zoom on the left trigger, melee on the right stick's button, grenade throw on the right bumper, crouch on B, grenade switch on the pad's left, which then does not move you), and an eighth, Recon (7: the standard buttons with action and reload on the right bumper, grenade switch on the left bumper, flashlight on X). A layout the build does not know (a later build's) gets the standard buttons, not none, which moved start and back and stopped the game. |
 | `sound/sound_manager.c`, `interface/hud.c`, `game/game_engine.c` | The music's and the other sounds' volumes; the HUD's and the scoreboard's settings are read again when Settings changes them. |
 | `rasterizer/xbox/rasterizer_xbox_shadows.c` | With larger shadow maps (`display.shadow_resolution`), the blur's taps stay half a texel apart, and more passes widen it to cover the same part of the map as on the Xbox. |
 | `rasterizer/rasterizer.c` | The 128 KB of vertices of the debug display of a model's vertices are static, not on the stack: the compiler inlines the function in `render_model`, and the Windows build probed the stack a page at a time for every model drawn. |

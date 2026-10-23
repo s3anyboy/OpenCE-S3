@@ -33,6 +33,11 @@ SHIELD_COLORS = ["white", "black", "red", "blue", "gray", "yellow", "green", "pi
                  "orange", "teal", "sage", "brown", "tan", "maroon", "salmon"]
 SENSITIVITIES = [(f"{value:g}", f"{value:g}") for value in (0.1, 0.15, 0.25, 0.4, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4)]
 VOLUMES = [(str(step), f"{step / 10:g}") for step in range(11)]
+# the subtitles' languages (port/linux/game/subtitles.c, tools/embed_assets.py)
+SUBTITLE_LANGUAGES = [("ENGLISH", "english"), ("FRENCH", "french"), ("GERMAN", "german"), ("ITALIAN", "italian"),
+                      ("CHINESE", "chinese"), ("CHINESE (SIMPLE)", "chinese_simple"), ("JAPANESE", "japanese"),
+                      ("KOREAN", "korean"), ("SPANISH (LATAM)", "spanish_latam"), ("SPANISH", "spanish"),
+                      ("PORTUGUESE", "portuguese")]
 
 # each screen: its folder below PE, its screen's widget (the name the profile
 # menu opens), its header (widget, bitmap), the row spacing, and its rows:
@@ -118,6 +123,8 @@ SCREENS = {
              "Draw a clock at the bottom right in the campaign,\ncounting up from the start of the level.", None),
             ("CAMPAIGN SCORE:", "display.campaign_score", ON_OFF,
              "Score each enemy killed in the campaign, and show\nthe score at the bottom right.", None),
+            ("GRUNT PARTY:", "display.headshot_party", ON_OFF,
+             "A grunt shot dead in the head pops with confetti\nand a sound, in the campaign.", None),
             ("HDR:", "display.hdr", ON_OFF,
              "Keep the light of explosions, plasma and the sun\npast white, and roll it off instead of clipping.", None),
             ("HDR DISPLAY:", "display.hdr_output", ON_OFF,
@@ -142,7 +149,8 @@ SCREENS = {
     "audio_settings": {
         "screen": "audio_settings_screen",
         "header": ("header_profile_audio_settings", f"{PE}/audio_settings/header_profile_audio_settings"),
-        "spacing": 30,
+        # (ten places, with the categories)
+        "spacing": 27,
         # (the devices, desktop only, first: Android's rows from the top)
         "platform_places": True,
         "rows": [
@@ -210,7 +218,7 @@ SCREENS = {
              "Level the view while walking.", None),
             ("BUTTON LAYOUT:", "profile.button_preset",
              [("DEFAULT", "0"), ("SWAP TRIGGERS", "1"), ("SWAP A, L TRIGGER", "2"), ("SWAP B, L TRIGGER", "3"),
-              ("SWAP B, R STICK", "4"), ("BUMPER JUMPER", "5")],
+              ("SWAP B, R STICK", "4"), ("BUMPER JUMPER", "5"), ("FISHSTICKS", "6"), ("RECON", "7")],
              "Which of the controller's buttons does what (not\nthe keyboard's: Controls Setup sets those).", None),
             ("STICK LAYOUT:", "profile.joystick_preset",
              [("DEFAULT", "0"), ("SOUTHPAW", "1"), ("LEGACY", "2"), ("LEGACY SOUTHPAW", "3")],
@@ -229,7 +237,8 @@ _graphics = {"display.high_res_hud", "display.hud_button_style", "display.high_r
              "display.campaign_timer", "display.campaign_score", "display.model_detail"}
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
-                  "display.overshield_effect", "display.hdr", "display.hdr_output"}
+                  "display.overshield_effect", "display.headshot_party", "display.hdr",
+                  "display.hdr_output"}
 SCREENS["video_settings/graphics"] = {
     "screen": "graphics_settings_screen", "header": _video["header"], "spacing": 26,
     "same_place": ["anti_aliasing_android"],
@@ -284,9 +293,21 @@ _audio["rows"] = [row for row in _audio["rows"] if row[1] not in _processing]
 
 # (voice chat stays on Audio Setup; the text chat's rows are the multiplayer
 # HUD's, on Network Setup)
+# (the subtitles, a screen of their own: Sound Setup's places are all taken)
+SCREENS["audio_settings/subtitles"] = {
+    "screen": "subtitles_settings_screen", "header": _audio["header"], "spacing": 30,
+    "rows": [
+        ("SUBTITLES:", "display.subtitles", ON_OFF,
+         "Subtitles at the bottom of the screen for the\nsound tags named in subtitles.txt. Off: none.", None),
+        ("SUBTITLE LANGUAGE:", "display.subtitles_language", SUBTITLE_LANGUAGES,
+         "The subtitles' language. A line a language\nlacks is shown in English. From subtitles_<language>.txt.", None),
+    ],
+}
 _audio["categories"] = [
     ("SOUND PROCESSING:", "audio_settings/sound_processing",
      "The reverb, and how sounds are converted to the\noutput's rate."),
+    ("SUBTITLES:", "audio_settings/subtitles",
+     "Subtitles at the bottom of the screen for the\nsound tags named in subtitles.txt, and their language."),
 ]
 
 # Network Setup's map sharing (port/linux/game/map_share.c): this machine's
@@ -368,7 +389,7 @@ CONTROL_ROWS = 7
 
 # the settings whose rows have the wider spinner (a device's name)
 WIDE_SETTINGS = {"audio.output_device", "audio.input_device", "streamer.slurs", "streamer.swearing",
-                 "streamer.insults"}
+                 "streamer.insults", "display.subtitles_language"}
 
 # the host's voice chat and vote kicks, on Teamplay Options
 # (_teamplay_options_extras): each row's key, its label, its choices' words

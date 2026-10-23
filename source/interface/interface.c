@@ -108,6 +108,7 @@ symbols in this file:
 #include "map_share.h" /* port: port/linux/game/map_share.c */
 #include "latency_meter.h" /* port: port/linux/game/latency_meter.c */
 #include "campaign_score.h" /* port: port/linux/game/campaign_score.c */
+#include "subtitles.h" /* port: port/linux/game/subtitles.c */
 
 /* ---------- constants */
 
@@ -397,6 +398,8 @@ void interface_draw_fullscreen_overlays(
 	latency_meter_draw();
 	/* port: the last level's score summary (display.campaign_score) */
 	campaign_score_draw();
+	/* port: the sound tags' subtitles (display.subtitles) */
+	subtitles_draw();
 	terminal_draw();
 	main_framerate_render();
 	render_debug_profile();

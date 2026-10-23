@@ -103,6 +103,8 @@ void network_coop_note_object_effect(long effect_definition_index, long object_i
 `epicenter`. Each machine's own shots break glass too, but with their own
 random damage, so the host's breaks are the ones everyone keeps. */
 void network_coop_note_surface_broken(short breakable_surface_index, real_point3d const *epicenter);
+/* headshot_party.c: a grunt's headshot party, at the head, for the clients */
+void network_coop_note_headshot_party(real_point3d const *head);
 void network_coop_note_scenery_animation(long object_index, long animation_graph_index, short animation_index,
 	short frame_index);
 

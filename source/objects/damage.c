@@ -139,6 +139,7 @@ symbols in this file:
 #include "units/units.h"
 #include "units/vehicles.h"
 #include "campaign_score.h" /* port: port/linux/game/campaign_score.c */
+#include "headshot_party.h" /* port: port/linux/game/headshot_party.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -1024,6 +1025,10 @@ static void damage_data_validate_owner(
 		damage->owner_player_index = NONE;
 }
 
+/* port: whether the hit that the aftermath is of was on a head (the headshot
+party, display.headshot_party) */
+static boolean object_damage_head_hit = FALSE;
+
 static void object_damage_aftermath(
 	long object_index,
 	struct damage_data *damage,
@@ -1149,6 +1154,14 @@ static void object_damage_aftermath(
 		TEST_FLAG(_object_mask_unit, object->object.type))
 	{
 		campaign_score_record_kill(object_index, damage->owner_player_index);
+	}
+
+	/* port: a grunt shot dead in the head pops with confetti */
+	if (object_damage_head_hit &&
+		TEST_FLAG(being_damaged_flags, _object_being_damaged_body_depleted_bit) &&
+		TEST_FLAG(_object_mask_unit, object->object.type))
+	{
+		headshot_party_kill(object_index, damage->owner_player_index);
 	}
 
 	if (TEST_FLAG(_object_mask_unit, object->object.type))
@@ -1701,6 +1714,7 @@ void object_cause_damage(
 			body_damage = 0.f;
 			body_damage_multiplier = 0.f;
 			being_damaged_flags = 0;
+			object_damage_head_hit = FALSE; /* port */
 			body_part = NONE;
 			friendly_damage = _friendly_damage_all;
 
@@ -1754,6 +1768,8 @@ void object_cause_damage(
 						&collision_model->resistance.materials,
 						material_index,
 						struct damage_resistance_material);
+					/* port: (the hit's own material, not an area's) */
+					object_damage_head_hit = TEST_FLAG(damage_material->flags, _damage_material_head_bit) != 0;
 				}
 				else if (collision_model->resistance.indirect_damage_material_index >= 0 &&
 					collision_model->resistance.indirect_damage_material_index <
@@ -1911,6 +1927,7 @@ void object_cause_damage(
 				body_damage,
 				body_damage_multiplier,
 				body_part);
+			object_damage_head_hit = FALSE; /* port */
 			/* (the host's, for its clients) */
 			network_damage_aftermath(
 				current_object_index,

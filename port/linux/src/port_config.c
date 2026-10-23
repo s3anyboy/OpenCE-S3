@@ -188,6 +188,11 @@ static const struct config_setting config_settings[] =
 		"The score is drawn at the bottom right,\n"
 		"and a summary is shown when a level is won, until A or B is pressed. In\n"
 		"online co-op the scoreboard (Tab) lists each player's own score, kills and deaths." },
+	{ "display.headshot_party", _config_boolean, "false", "HALO_HEADSHOT_PARTY", _environment_value, _platform_all,
+		"A grunt that a player kills with a shot to the head pops with confetti\n"
+		"(drawn on the screen, from where its head was) and plays party.wav, a\n"
+		"WAV file in the data folder (no file, no sound). Campaign only; only a\n"
+		"single player and the host of a co-op game see it." },
 	{ "display.scoreboard_team_layout", _config_string, "\"teams\"", "HALO_SCOREBOARD_TEAM_LAYOUT", _environment_value,
 		_platform_all,
 		"How the scoreboard lists a team game's players: \"teams\" in a column for\n"
@@ -210,6 +215,24 @@ static const struct config_setting config_settings[] =
 		"screen's top right, with bars (the host: its slowest player's), and\n"
 		"\"Connection problem\" when the host has sent nothing for two seconds;\n"
 		"the scoreboard's pings in the same colours, as this machine times them." },
+	{ "display.subtitles", _config_boolean, "false", "HALO_SUBTITLES", _environment_value, _platform_all,
+		"Show subtitles at the bottom of the screen for the sound tags that the\n"
+		"subtitles name (built into the game, or display.subtitles_file), while they\n"
+		"play. Also Video Setup, Extra Effects in the menus." },
+	{ "display.subtitles_file", _config_string, "\"subtitles.txt\"", "HALO_SUBTITLES_FILE", _environment_value,
+		_platform_all,
+		"Your own subtitles, in place of the game's built-in ones: a text file with a\n"
+		"line for each sound tag, the tag's path\n"
+		"and the text, such as  \"sound/a10/a10\" - \"Chief, get down!\"  (a path\n"
+		"ending in /* is every tag below it; \\n starts a new line; # starts a\n"
+		"comment). Read again when the settings change." },
+	{ "display.subtitles_language", _config_string, "\"english\"", "HALO_SUBTITLES_LANGUAGE", _environment_value,
+		_platform_all,
+		"The subtitles' language: \"english\", \"french\", \"german\", \"italian\",\n"
+		"\"chinese\", \"chinese_simple\", \"japanese\", \"korean\", \"spanish_latam\",\n"
+		"\"spanish\" or \"portuguese\". Its lines are in subtitles_<language>.txt (next\n"
+		"to the maps, or built into the game); a line it lacks is shown in English.\n"
+		"Also Video Setup, Extra Effects in the menus." },
 	{ "display.per_pixel_lighting", _config_boolean, "false", "HALO_PER_PIXEL_LIGHTING", _environment_value,
 		_platform_all,
 		"Light the models (characters, weapons, vehicles, scenery) for each\n"

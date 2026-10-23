@@ -112,6 +112,7 @@ symbols in this file:
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
 #include "campaign_score.h" /* port: port/linux/game/campaign_score.c */
+#include "headshot_party.h" /* port: port/linux/game/headshot_party.c */
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
@@ -1506,6 +1507,8 @@ void hud_draw_screen(
 		/* port: the campaign's score, bottom right in this view (display.campaign_score) */
 		if (!cinematic_in_progress() && hud_scripted_globals->show_hud)
 			campaign_score_draw_view(player_index);
+		/* port: the confetti of a grunt's headshot party, in this view */
+		headshot_party_draw_view();
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))
