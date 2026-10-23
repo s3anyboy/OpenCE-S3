@@ -379,6 +379,15 @@ boolean game_engine_is_ctf_slayer(
 	return game_engine_running() && game_engine_get_variant()->game_engine_index == game_engine_ctf_slayer;
 }
 
+/* port: ctf/slayer's capture points: the variant's, else the default */
+static long ctf_slayer_capture_points(
+	void)
+{
+	long points = game_engine_get_variant()->game_engine_variant.ctf.points_per_capture;
+
+	return points > 0 ? points : CTF_SLAYER_CAPTURE_POINTS;
+}
+
 /* port: ctf/slayer's kills score as slayer's do, for the killer's team (a
 client of the distributed netcode has the host's scores: its copy of a kill
 would count twice) */
@@ -410,7 +419,7 @@ static long ctf_slayer_player_points(
 {
 	return (long)player->statistics.kills[0] * CTF_SLAYER_KILL_POINTS -
 		(long)player->statistics.friendly_fire_kills * CTF_SLAYER_KILL_POINTS +
-		(long)player->statistics.multiplayer_statistics.ctf_statistics.flag_scores * CTF_SLAYER_CAPTURE_POINTS;
+		(long)player->statistics.multiplayer_statistics.ctf_statistics.flag_scores * ctf_slayer_capture_points();
 }
 
 static void ctf_engine_prespawn_player_update(
@@ -575,7 +584,7 @@ static boolean ctf_engine_initialize_for_new_map(
 	ctf_globals.score_to_win = game_engine_get_variant()->universal_variant.score_to_win;
 	/* port: ctf/slayer's limit is the editor's captures, in points */
 	if (game_engine_get_variant()->game_engine_index == game_engine_ctf_slayer)
-		ctf_globals.score_to_win *= CTF_SLAYER_CAPTURE_POINTS;
+		ctf_globals.score_to_win *= ctf_slayer_capture_points();
 
 	starting_location_count = player_get_starting_location_count();
 	for (starting_location_index = 0;
@@ -1275,7 +1284,7 @@ static void ctf_award_capture(
 		0x1B6,
 		NONE != team_index);
 
-	ctf_globals.scores[team_index] += game_engine_get_variant()->game_engine_index == game_engine_ctf_slayer ? CTF_SLAYER_CAPTURE_POINTS : 1;
+	ctf_globals.scores[team_index] += game_engine_get_variant()->game_engine_index == game_engine_ctf_slayer ? ctf_slayer_capture_points() : 1;
 	player->statistics.multiplayer_statistics.ctf_statistics.flag_scores++;
 	ctf_show_capture(player_index, player->team_index);
 	if (VALID_INDEX(team_index, NUMBER_OF_CTF_TEAMS))

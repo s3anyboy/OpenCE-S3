@@ -5327,6 +5327,8 @@ static struct gametype_option const gametype_options[] =
 		{ 1, 0 } },
 	{ "captures_to_win_spinner", _option_long, VARIANT_FIELD(universal_variant.score_to_win), 0, 5,
 		{ 1, 3, 5, 10, 15 } },
+	{ "kills_per_capture_spinner", _option_long, VARIANT_FIELD(game_engine_variant.ctf.points_per_capture), 0, 10,
+		{ 5, 10, 15, 20, 25, 30, 40, 50, 75, 100 } },
 	{ "time_limit_spinner", _option_short, OPTIONS_FIELD(time_limit), 0, 7, TIME_LIMITS },
 	/* king of the hill */
 	{ "koth_moving_hill_spinner", _option_byte, VARIANT_FIELD(game_engine_variant.king.moving_hill), 0, 2, { 1, 0 } },
@@ -6163,6 +6165,8 @@ static boolean gametype_engine_set(struct widget_instance *item)
 				capture is 25 points: the limit is in captures) */
 				if (changed)
 					variant->universal_variant.score_to_win = 4;
+				if (changed || variant->game_engine_variant.ctf.points_per_capture <= 0)
+					variant->game_engine_variant.ctf.points_per_capture = 25;
 				variant->universal_variant.teams = 1;
 			}
 			else if (variant->game_engine_index == 9)

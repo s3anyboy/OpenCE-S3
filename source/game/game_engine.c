@@ -7260,6 +7260,7 @@ struct game_variant *build_game_variant_ctf_slayer(
 	result.game_engine_variant.ctf.flag_must_reset = FALSE;
 	result.game_engine_variant.ctf.reset_on_capture = FALSE;
 	result.game_engine_variant.ctf.single_flag_time = 0;
+	result.game_engine_variant.ctf.points_per_capture = 25;
 
 	*variant = result;
 
@@ -7983,6 +7984,16 @@ void game_engine_variant_cleanup(
 		variant->universal_variant.teams = TRUE;
 		variant->game_engine_variant.ctf.flag_at_home_to_score = !!variant->game_engine_variant.ctf.flag_at_home_to_score;
 		variant->game_engine_variant.ctf.single_flag_time = FLOOR(variant->game_engine_variant.ctf.single_flag_time, 0);
+		/* port: ctf/slayer's capture points (a plain ctf game keeps none) */
+		if (variant->game_engine_index == game_engine_ctf_slayer)
+		{
+			if (variant->game_engine_variant.ctf.points_per_capture <= 0)
+				variant->game_engine_variant.ctf.points_per_capture = 25;
+			variant->game_engine_variant.ctf.points_per_capture =
+				PIN(variant->game_engine_variant.ctf.points_per_capture, 1, 100);
+		}
+		else
+			variant->game_engine_variant.ctf.points_per_capture = 0;
 		break;
 
 	case game_engine_slayer:
