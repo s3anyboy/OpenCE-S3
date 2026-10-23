@@ -983,6 +983,12 @@ wchar_t *saved_game_file_get_display_name(
 		saved_game_file_display_name[MAX_GAMENAME - 1] = 0;
 		return saved_game_file_display_name;
 	}
+	if (profile_index == CTF_SLAYER_PLAYLIST_PROFILE_INDEX)
+	{
+		ustrncpy(saved_game_file_display_name, L"CTF/Slayer", MAX_GAMENAME - 1);
+		saved_game_file_display_name[MAX_GAMENAME - 1] = 0;
+		return saved_game_file_display_name;
+	}
 
 	memory_unit = SAVED_GAME_FILE_INDEX_MEMORY_UNIT(profile_index);
 	n = SAVED_GAME_FILE_INDEX_FILE_INDEX(profile_index);
@@ -1023,7 +1029,8 @@ boolean saved_game_file_open(
 
 	/* port: territories synthetic profile cannot be opened on disk */
 	if (profile_index == TERRITORIES_PLAYLIST_PROFILE_INDEX ||
-		profile_index == INFECTION_PLAYLIST_PROFILE_INDEX)
+		profile_index == INFECTION_PLAYLIST_PROFILE_INDEX ||
+		profile_index == CTF_SLAYER_PLAYLIST_PROFILE_INDEX)
 		return FALSE;
 
 	type = SAVED_GAME_FILE_INDEX_TYPE(profile_index);
@@ -1225,7 +1232,8 @@ boolean saved_game_file_get_path_to_enclosing_directory(
 
 	/* port: territories synthetic profile has no directory on disk */
 	if (profile_index == TERRITORIES_PLAYLIST_PROFILE_INDEX ||
-		profile_index == INFECTION_PLAYLIST_PROFILE_INDEX)
+		profile_index == INFECTION_PLAYLIST_PROFILE_INDEX ||
+		profile_index == CTF_SLAYER_PLAYLIST_PROFILE_INDEX)
 		return FALSE;
 
 	if (profile_index != NONE)

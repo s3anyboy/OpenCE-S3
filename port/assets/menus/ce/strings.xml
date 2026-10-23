@@ -728,6 +728,7 @@
 		<string text="Complete the required number \nof laps before your opponents, \nblowing away the competition.\nCurrent Rules:" map="4"/>
 		<string text="Capture and hold territory \npoints to bleed the enemy's \ntickets to zero.\nCurrent Rules:"/>
 		<string text="Survive the infected horde,\nor hunt down the remaining\nsurvivors before time expires.\nCurrent Rules:"/>
+		<string text="Capture the flag, but every kill\nscores a point and every capture\nscores 25. Score limit is in captures.\nCurrent Rules:"/>
 	</strings>
 	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/game_type_select/gametype_select_list_options" map="ui\shell\main_menu\settings_select\multiplayer_setup\playlist_edit\game_type_select\gametype_select_list_options">
 		<string text="CAPTURE THE FLAG" map="0"/>
@@ -737,6 +738,7 @@
 		<string text="RACE" map="4"/>
 		<string text="TERRITORIES"/>
 		<string text="INFECTION"/>
+		<string text="CTF/SLAYER"/>
 	</strings>
 	<strings name="main_menu/settings_select/multiplayer_setup/playlist_edit/territories_edit/cap_territories">
 		<string text="There will be 3 territory bases to capture on the map."/>

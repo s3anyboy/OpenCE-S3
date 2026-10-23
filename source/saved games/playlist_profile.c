@@ -448,6 +448,12 @@ boolean playlist_profile_get_display_name(
 		display_name[MAX_GAMENAME - 1] = 0;
 		return TRUE;
 	}
+	if (playlist_profile_index == CTF_SLAYER_PLAYLIST_PROFILE_INDEX)
+	{
+		ustrncpy(display_name, L"CTF/Slayer", MAX_GAMENAME - 1);
+		display_name[MAX_GAMENAME - 1] = 0;
+		return TRUE;
+	}
 
 	name = saved_game_file_get_display_name(playlist_profile_index);
 
@@ -482,6 +488,14 @@ boolean playlist_profile_get(
 		struct game_variant temporary;
 		*variant = *build_game_variant_infection(&temporary);
 		ustrncpy(variant->human_readable_game_description, L"Infection", MAXIMUM_GAME_VARIANT_NAME_LENGTH - 1);
+		variant->human_readable_game_description[MAXIMUM_GAME_VARIANT_NAME_LENGTH - 1] = 0;
+		return TRUE;
+	}
+	if (playlist_profile_index == CTF_SLAYER_PLAYLIST_PROFILE_INDEX)
+	{
+		struct game_variant temporary;
+		*variant = *build_game_variant_ctf_slayer(&temporary);
+		ustrncpy(variant->human_readable_game_description, L"CTF/Slayer", MAXIMUM_GAME_VARIANT_NAME_LENGTH - 1);
 		variant->human_readable_game_description[MAXIMUM_GAME_VARIANT_NAME_LENGTH - 1] = 0;
 		return TRUE;
 	}
@@ -529,7 +543,8 @@ boolean playlist_profile_get_options(
 
 	/* port: territories and infection synthetic profiles */
 	if (playlist_profile_index == TERRITORIES_PLAYLIST_PROFILE_INDEX ||
-		playlist_profile_index == INFECTION_PLAYLIST_PROFILE_INDEX)
+		playlist_profile_index == INFECTION_PLAYLIST_PROFILE_INDEX ||
+		playlist_profile_index == CTF_SLAYER_PLAYLIST_PROFILE_INDEX)
 	{
 		game_variant_options_default(NULL, options);
 		return TRUE;

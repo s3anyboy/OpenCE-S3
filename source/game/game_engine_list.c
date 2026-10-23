@@ -33,6 +33,8 @@ extern struct game_engine ctf_engine;
 extern struct game_engine territories_engine;
 /* port: game_engine_infection.c */
 extern struct game_engine infection_engine;
+/* port: game_engine_ctf.c */
+extern struct game_engine ctf_slayer_engine;
 
 struct game_engine *game_engines[] =
 {
@@ -48,6 +50,8 @@ struct game_engine *game_engines[] =
 	&territories_engine,
 	/* port: game_engine_infection */
 	&infection_engine,
+	/* port: game_engine_ctf_slayer */
+	&ctf_slayer_engine,
 };
 
 /* ---------- public code */

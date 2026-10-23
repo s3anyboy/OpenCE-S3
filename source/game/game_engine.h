@@ -44,9 +44,11 @@ enum game_engine_type
 	game_engine_territories,
 	/* port: infection gametype — alpha/infected vs survivors */
 	game_engine_infection,
+	/* port: ctf/slayer gametype — ctf rules, 1 point per kill, 25 per capture */
+	game_engine_ctf_slayer,
 	number_of_game_engines,
 	first_usable_game_engine_index = game_engine_ctf,
-	last_usable_game_engine_index = game_engine_infection,
+	last_usable_game_engine_index = game_engine_ctf_slayer,
 };
 
 #define game_engine_conquest game_engine_territories
@@ -762,6 +764,10 @@ extern struct game_engine *game_engine;
 real game_engine_get_damage_multiplier(
 	long damaging_player_index,
 	long damaged_player_index);
+
+/* port: ctf/slayer plays by the ctf game type's rules (flags, spawns, equipment) */
+#define GAME_ENGINE_TYPE_IS_CTF(type) ((type) == game_engine_ctf || (type) == game_engine_ctf_slayer)
+boolean game_engine_is_ctf_slayer(void);
 
 /* port: infection gametype helpers */
 boolean game_engine_is_infection(void);

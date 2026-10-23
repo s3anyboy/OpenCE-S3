@@ -69,6 +69,9 @@ struct game_variant *build_game_variant_team_king(
 	struct game_variant *variant);
 struct game_variant *build_game_variant_team_slayer(
 	struct game_variant *variant);
+/* port: ctf/slayer */
+struct game_variant *build_game_variant_ctf_slayer(
+	struct game_variant *variant);
 /* port: territories */
 struct game_variant *build_game_variant_territories(
 	struct game_variant *variant);

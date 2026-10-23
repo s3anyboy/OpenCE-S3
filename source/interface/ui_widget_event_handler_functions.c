@@ -936,7 +936,8 @@ symbols in this file:
 enum
 {
 	TERRITORIES_PLAYLIST_PROFILE_INDEX = (long)0xCFFF0001,
-	INFECTION_PLAYLIST_PROFILE_INDEX = (long)0xCFFE0001
+	INFECTION_PLAYLIST_PROFILE_INDEX = (long)0xCFFE0001,
+	CTF_SLAYER_PLAYLIST_PROFILE_INDEX = (long)0xCFFD0001
 };
 
 #define CONQUEST_PLAYLIST_PROFILE_INDEX TERRITORIES_PLAYLIST_PROFILE_INDEX
@@ -5833,6 +5834,7 @@ static boolean multiplayer_profile_set_for_game(
 		server = global_network_game_server_get();
 		if (profile_index != TERRITORIES_PLAYLIST_PROFILE_INDEX &&
 		profile_index != INFECTION_PLAYLIST_PROFILE_INDEX &&
+		profile_index != CTF_SLAYER_PLAYLIST_PROFILE_INDEX &&
 			saved_game_file_get_path_to_enclosing_directory(profile_index, directory_path))
 			saved_game_file_remember_last_used_multiplayer_variant_directory(directory_path);
 		file = fopen("d:\\variant_automation.txt", "r");
@@ -6051,6 +6053,7 @@ short ui_widget_port_gametypes(
 	{
 		static long const custom_profiles[] =
 		{
+			CTF_SLAYER_PLAYLIST_PROFILE_INDEX,
 			INFECTION_PLAYLIST_PROFILE_INDEX,
 			TERRITORIES_PLAYLIST_PROFILE_INDEX
 		};
@@ -6116,6 +6119,7 @@ boolean ui_widget_port_gametype_choose(
 	server = global_network_game_server_get();
 	if (profile_index != TERRITORIES_PLAYLIST_PROFILE_INDEX &&
 		profile_index != INFECTION_PLAYLIST_PROFILE_INDEX &&
+		profile_index != CTF_SLAYER_PLAYLIST_PROFILE_INDEX &&
 		saved_game_file_get_path_to_enclosing_directory(profile_index, directory_path))
 		saved_game_file_remember_last_used_multiplayer_variant_directory(directory_path);
 	player_ui_set_game_variant(&profile);
