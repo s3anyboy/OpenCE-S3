@@ -5477,6 +5477,13 @@ static struct gametype_option const gametype_options[] =
 		{ "true", "false" } },
 	{ "coop_ally_friendly_fire_spinner", _option_setting, 0, 0, 2, { 0 }, "network.coop_ally_friendly_fire",
 		{ "true", "false" } },
+	/* (and the campaign's timer and score, as Video Setup > Graphics has them, and how the score is kept) */
+	{ "coop_campaign_timer_spinner", _option_setting, 0, 0, 2, { 0 }, "display.campaign_timer",
+		{ "true", "false" } },
+	{ "coop_campaign_score_spinner", _option_setting, 0, 0, 2, { 0 }, "display.campaign_score",
+		{ "true", "false" } },
+	{ "coop_score_type_spinner", _option_setting, 0, 0, 2, { 0 }, "network.coop_score_type",
+		{ "cooperative", "competitive" } },
 	/* map sharing's (Server Setup's MAP SHARING: tools/port_settings.py's
 	MAP_SHARE_SETUP; map_share.c) */
 	{ "map_share_spinner", _option_setting, 0, 0, 2, { 0 }, "network.map_share", { "true", "false" } },
