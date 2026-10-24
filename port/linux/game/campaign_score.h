@@ -11,6 +11,15 @@ enemy a player kills is worth points by its actor variant.
 /* display.campaign_score, and a campaign level being played */
 boolean campaign_score_enabled(void);
 
+/* (game_state.c's game_state_revert) a checkpoint was gone back to, from the
+game time `from_time`: the level's time goes on from there */
+void campaign_score_reverted(long from_time);
+
+/* the level's time: the game time with the time that going back to
+checkpoints took off it put back, so that it never goes back (hud.c's
+campaign timer, and the time a kill's points fall with) */
+long campaign_score_level_time(void);
+
 /* (interface.c's hud_initialize_for_new_map) a map loads: a new level's
 score begins; a level just won has its summary shown over this one's start */
 void campaign_score_new_map(void);

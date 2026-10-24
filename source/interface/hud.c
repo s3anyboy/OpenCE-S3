@@ -1408,7 +1408,8 @@ first tick, which the items' respawn periods count from as well
 (game_engine_update_item_spawn's game_time_get() % respawn_period): an item
 is back on the map at every multiple of its period on the clock. In the
 campaign (display.campaign_timer, a setting of its own) it counts up from the
-level's start; the main menu's scene (ui.map) has none. */
+level's start, and goes on when a checkpoint is gone back to (it does not
+go back with the game time); the main menu's scene (ui.map) has none. */
 static boolean hud_match_timer_setting(
 	void)
 {
@@ -1442,7 +1443,9 @@ static void hud_draw_match_timer(
 
 	if (!hud_match_timer_setting() || font_index == NONE)
 		return;
-	ticks_to_unicode_time_string(game_time_get(), NUMBEROF(time_string), time_string);
+	/* (the campaign's goes on past a checkpoint gone back to: campaign_score.c) */
+	ticks_to_unicode_time_string(game_engine_running() ? game_time_get() : campaign_score_level_time(),
+		NUMBEROF(time_string), time_string);
 	/* (a time under a minute is drawn with no minutes digit, which a clock
 	counting up from zero starts at: " :07") */
 	if (time_string[0] == L' ')

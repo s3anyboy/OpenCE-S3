@@ -21,7 +21,10 @@ A kill's points fall with the level's time, as the campaign timer counts
 it: a multiplier of 1 at 0, falling in a straight line to 0.25 at 30 minutes
 and staying there. The score is a log of kills, each with the game time it happened at. Going
 back to a checkpoint puts the game time back, and the kills after it are
-forgotten with it; the totals are summed from the log.
+forgotten with it; the totals are summed from the log (a kill's points fall
+with the level's time, which does not go back). A player's deaths are
+kept: dying and going back to a checkpoint (which a single player always
+does) still counts the death.
 
 When a level is won (main_won_map) its totals, each player's score and kills
 and its best variants are written to the log, and shown over the level until
@@ -140,10 +143,17 @@ static struct
 } campaign_score_deaths[CAMPAIGN_SCORE_MAXIMUM_DEATHS];
 static long campaign_score_death_count = 0;
 static long campaign_score_player_units[CAMPAIGN_SCORE_MAXIMUM_PLAYERS];
+/* (the unit whose death each player's last death was, NONE once the player
+has a living unit again: a death is counted once, by whichever of its
+signs is seen first) */
+static long campaign_score_death_units[CAMPAIGN_SCORE_MAXIMUM_PLAYERS];
 static boolean campaign_score_units_known = FALSE;
 static boolean campaign_score_full_logged = FALSE;
 /* (the last game time seen: a smaller one is a checkpoint reverted to) */
 static long campaign_score_last_time = 0;
+/* the game time that going back to checkpoints has taken off this level's
+(campaign_score_level_time) */
+static long campaign_score_reverted_ticks = 0;
 /* a level just won, for the next one, and the one shown now */
 static char campaign_score_pending[CAMPAIGN_SCORE_SUMMARY_LINES][CAMPAIGN_SCORE_SUMMARY_LENGTH];
 static short campaign_score_pending_lines = 0;
@@ -333,7 +343,28 @@ static boolean campaign_score_button_down(
 	return FALSE;
 }
 
-/* the kills after the game time are gone: a checkpoint was reverted to */
+/* a player's death, of their unit `unit_index`: counted once for the unit */
+static void campaign_score_note_death(
+	short player_index,
+	long unit_index)
+{
+	if (player_index < 0 || player_index >= CAMPAIGN_SCORE_MAXIMUM_PLAYERS)
+		return;
+	if (unit_index != NONE && campaign_score_death_units[player_index] == unit_index)
+		return;
+	campaign_score_death_units[player_index] = unit_index;
+	if (campaign_score_death_count < CAMPAIGN_SCORE_MAXIMUM_DEATHS)
+	{
+		campaign_score_deaths[campaign_score_death_count].game_time = game_time_get();
+		campaign_score_deaths[campaign_score_death_count].player_index = player_index;
+		campaign_score_death_count++;
+	}
+
+	return;
+}
+
+/* the kills after the game time are gone: a checkpoint was reverted to (the
+deaths are kept: a single player's death always goes back to one) */
 static void campaign_score_update(
 	void)
 {
@@ -346,26 +377,31 @@ static void campaign_score_update(
 		while (campaign_score_kill_count > 0 &&
 			campaign_score_kills[campaign_score_kill_count - 1].game_time > time)
 			campaign_score_kill_count--;
-		while (campaign_score_death_count > 0 &&
-			campaign_score_deaths[campaign_score_death_count - 1].game_time > time)
-			campaign_score_death_count--;
 	}
 	campaign_score_last_time = time;
 
-	/* a player whose unit is gone since last looked at has died (not after a
-	checkpoint, which puts every unit back, nor for a player who has left) */
+	/* a player whose unit is dead (a single player's stays, dead, until the
+	checkpoint is gone back to), or gone since last looked at, has died (not
+	after a checkpoint, which puts every unit back, nor for a player who has
+	left) */
 	for (player_index = 0; player_index < CAMPAIGN_SCORE_MAXIMUM_PLAYERS; player_index++)
 	{
 		struct player_datum const *player = player_try_and_get(player_index);
 		long unit_index = player ? player->unit_index : NONE;
 
-		if (campaign_score_units_known && !reverted && player && unit_index == NONE &&
-			campaign_score_player_units[player_index] != NONE &&
-			campaign_score_death_count < CAMPAIGN_SCORE_MAXIMUM_DEATHS)
+		if (unit_index != NONE)
 		{
-			campaign_score_deaths[campaign_score_death_count].game_time = time;
-			campaign_score_deaths[campaign_score_death_count].player_index = player_index;
-			campaign_score_death_count++;
+			struct unit_datum *unit = unit_try_and_get(unit_index);
+
+			if (unit && TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+				campaign_score_note_death(player_index, unit_index);
+			else
+				campaign_score_death_units[player_index] = NONE;
+		}
+		else if (campaign_score_units_known && !reverted && player &&
+			campaign_score_player_units[player_index] != NONE)
+		{
+			campaign_score_note_death(player_index, campaign_score_player_units[player_index]);
 		}
 		campaign_score_player_units[player_index] = unit_index;
 	}
@@ -601,6 +637,23 @@ boolean campaign_score_enabled(
 	return enabled && campaign_score_level();
 }
 
+void campaign_score_reverted(
+	long from_time)
+{
+	long to_time = game_time_get();
+
+	if (from_time > to_time)
+		campaign_score_reverted_ticks += from_time - to_time;
+
+	return;
+}
+
+long campaign_score_level_time(
+	void)
+{
+	return game_time_get() + campaign_score_reverted_ticks;
+}
+
 void campaign_score_new_map(
 	void)
 {
@@ -608,10 +661,13 @@ void campaign_score_new_map(
 
 	campaign_score_kill_count = 0;
 	campaign_score_death_count = 0;
+	for (line = 0; line < CAMPAIGN_SCORE_MAXIMUM_PLAYERS; line++)
+		campaign_score_death_units[line] = NONE;
 	campaign_score_units_known = FALSE;
 	campaign_score_postgame = FALSE;
 	campaign_score_full_logged = FALSE;
 	campaign_score_last_time = 0;
+	campaign_score_reverted_ticks = 0;
 	/* (a level just won, shown now; else nothing) */
 	campaign_score_summary_lines = campaign_score_pending_lines;
 	for (line = 0; line < campaign_score_pending_lines; line++)
@@ -658,7 +714,7 @@ static short campaign_score_time_points(
 	short points)
 {
 	real limit = (real)CAMPAIGN_SCORE_TIME_MINUTES * 60.0f * (real)TICKS_PER_SECOND;
-	real fraction = (real)game_time_get() / limit;
+	real fraction = (real)campaign_score_level_time() / limit;
 	real multiplier;
 
 	fraction = fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
@@ -676,12 +732,20 @@ void campaign_score_record_kill(
 	long variant_index;
 	short points;
 
+	if (!campaign_score_level())
+		return;
+	/* (a player's own unit killed: a death, whoever killed it) */
+	unit = unit_get(unit_index);
+	if (unit->unit.player_index != NONE)
+	{
+		campaign_score_note_death((short)DATUM_INDEX_TO_ABSOLUTE_INDEX(unit->unit.player_index), unit_index);
+		return;
+	}
 	/* (a client's kills are the host's, which sends them: the AI is the host's) */
-	if (killing_player_index == NONE || !campaign_score_level() || game_connection() == _game_connection_network_client)
+	if (killing_player_index == NONE || game_connection() == _game_connection_network_client)
 		return;
 	if (killing_player_index >= CAMPAIGN_SCORE_MAXIMUM_PLAYERS || !player_try_and_get(killing_player_index))
 		return;
-	unit = unit_get(unit_index);
 	/* (a destroyed ghost, banshee or wraith is worth its own points) */
 	variant_index = NONE;
 	points = 0;
