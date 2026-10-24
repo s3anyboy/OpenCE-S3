@@ -101,6 +101,7 @@ symbols in this file:
 #include "console.h"
 #include "game_state.h"
 #include "coop_vehicles.h" /* port: preserve replacement-vehicle homes across reverts */
+#include "campaign_score.h" /* port: the level's time goes on past a revert */
 #include "game.h"
 #include "tag_files.h"
 #include "cache_files.h"
@@ -364,15 +365,25 @@ void game_state_revert(
 	}
 
 	game_state_note_event("checkpoint revert");
-	game_state_call_before_load_procs();
-	/* port: a file that is not a saved game of this build is not taken, and
-	the map starts over */
-	if (!game_state_read_from_file())
 	{
-		game_state_globals.saved_game_valid = FALSE;
-		main_reset_map();
+		/* port: the game time before going back, which the level's time
+		(campaign timer) keeps: campaign_score.c */
+		long from_time = game_time_get();
+
+		game_state_call_before_load_procs();
+		/* port: a file that is not a saved game of this build is not taken, and
+		the map starts over */
+		if (!game_state_read_from_file())
+		{
+			game_state_globals.saved_game_valid = FALSE;
+			main_reset_map();
+		}
+		else
+		{
+			campaign_score_reverted(from_time);
+		}
+		game_state_call_after_load_procs();
 	}
-	game_state_call_after_load_procs();
 
 	return;
 }

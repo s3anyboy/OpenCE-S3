@@ -1681,8 +1681,24 @@ static long select_players_to_display(
 	return MIN(maximum_count, player_count);
 }
 
-/* port: network co-op's scoreboard list (game_engine_rasterize_scoreboard):
-the players in the game, as they joined */
+/* port: whether the campaign has the scoreboard (Back held, or the keyboard's
+scores key): network co-op's, and a campaign level played on this machine
+alone (solo, or split-screen), as the main menu's scene is not */
+static boolean game_engine_campaign_scoreboard(
+	void)
+{
+	struct scenario *scenario;
+
+	if (network_coop_active())
+		return TRUE;
+	if (game_engine_running() || game_connection() != _game_connection_local || !game_in_progress())
+		return FALSE;
+	scenario = global_scenario_try_and_get();
+	return scenario != NULL && scenario->type == _scenario_type_solo;
+}
+
+/* port: network co-op's scoreboard list (game_engine_rasterize_scoreboard),
+and the campaign's on this machine: the players in the game, as they joined */
 static long populate_campaign_player_buffer(
 	struct statistic_buffer *statistic_buffer)
 {
@@ -2289,7 +2305,7 @@ static void game_engine_rasterize_scoreboard(
 	team_colors[1].blue = 0.6f;
 
 	if (campaign)
-		usprintf(title_string, L"Co-op");
+		usprintf(title_string, network ? L"Co-op" : L"Campaign");
 	else
 		game_engine_generate_title_string(title_string, player_index);
 	color.alpha = alpha;
@@ -4083,7 +4099,7 @@ static void game_engine_post_rasterize_in_game(
 	match_assert(
 		"c:\\halo\\SOURCE\\game\\game_engine.c",
 		0x771,
-		NULL != game_engine || network_coop_active());
+		NULL != game_engine || game_engine_campaign_scoreboard());
 
 	if (game_engine && player)
 		internal_rasterize_target_name(player_index);
@@ -4424,8 +4440,10 @@ void game_engine_post_rasterize(
 		}
 	}
 	/* port: network co-op's campaign has the scoreboard too, of names and
-	pings (game_engine_rasterize_scoreboard) */
-	else if (network_coop_active())
+	pings, and the campaign on this machine of its players' names
+	(game_engine_rasterize_scoreboard; with display.campaign_score, their
+	scores, kills and deaths) */
+	else if (game_engine_campaign_scoreboard())
 	{
 		game_engine_post_rasterize_in_game();
 	}
