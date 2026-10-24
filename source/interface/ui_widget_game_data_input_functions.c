@@ -410,10 +410,6 @@ enum multiplayer_game_text_string
 	_multiplayer_game_text_string_rally,
 	_multiplayer_game_text_string_waiting_for_machine = 34,
 	_multiplayer_game_text_string_waiting_for_player,
-	_multiplayer_game_text_string_territories = 191,
-#define _multiplayer_game_text_string_conquest _multiplayer_game_text_string_territories
-	_multiplayer_game_text_string_tickets = 192,
-	_multiplayer_game_text_string_infection = 193,
 };
 
 enum multiplayer_game_bitmap_frame
@@ -424,8 +420,6 @@ enum multiplayer_game_bitmap_frame
 	_multiplayer_game_bitmap_oddball,
 	_multiplayer_game_bitmap_race,
 	_multiplayer_game_bitmap_unknown,
-	_multiplayer_game_bitmap_territories,
-	_multiplayer_game_bitmap_infection,
 };
 
 /* ---------- macros */
@@ -851,7 +845,7 @@ static void playlist_gametype_select_menu_update_extended_description(
 
 		description_child = list_widget->parameters.list.extended_description->child;
 		description_child->parameters.text_box.string_list_index = index;
-		description_child->next->animation.current_frame_index = (index >= 5) ? (index + 1) : index;
+		description_child->next->animation.current_frame_index = index;
 	}
 	return;
 }
@@ -1139,14 +1133,6 @@ static void server_list_menu_update(
 					game_type_bitmap->animation.current_frame_index =
 						_multiplayer_game_bitmap_race;
 					break;
-				case game_engine_territories:
-					game_type_bitmap->animation.current_frame_index =
-						_multiplayer_game_bitmap_territories;
-					break;
-				case game_engine_infection:
-					game_type_bitmap->animation.current_frame_index =
-						_multiplayer_game_bitmap_infection;
-					break;
 				default:
 					game_type_bitmap->animation.current_frame_index =
 						_multiplayer_game_bitmap_unknown;
@@ -1213,14 +1199,6 @@ static void server_list_menu_update(
 				case game_engine_race:
 					ruleset_text->parameters.text_box.string_list_index =
 						_multiplayer_game_text_string_race;
-					break;
-				case game_engine_territories:
-					ruleset_text->parameters.text_box.string_list_index =
-						_multiplayer_game_text_string_territories;
-					break;
-				case game_engine_infection:
-					ruleset_text->parameters.text_box.string_list_index =
-						_multiplayer_game_text_string_infection;
 					break;
 				default:
 					ruleset_text->parameters.text_box.string_list_index =
@@ -2593,14 +2571,6 @@ static void multiplayer_game_set_text_box_for_game_ruleset(
 				break;
 			}
 			break;
-		case game_engine_territories:
-			widget->parameters.text_box.string_list_index =
-				_multiplayer_game_text_string_territories;
-			break;
-		case game_engine_infection:
-			widget->parameters.text_box.string_list_index =
-				_multiplayer_game_text_string_infection;
-			break;
 		default:
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_unknown_game_type;
@@ -2702,10 +2672,6 @@ static void multiplayer_game_set_text_box_for_score_limit_type(
 		case game_engine_race:
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_laps;
-			break;
-		case game_engine_territories:
-			widget->parameters.text_box.string_list_index =
-				_multiplayer_game_text_string_tickets;
 			break;
 		default:
 			widget->parameters.text_box.string_list_index =
@@ -2842,12 +2808,6 @@ static void multiplayer_game_set_bitmap_for_ruleset(
 		case game_engine_race:
 			widget->animation.current_frame_index = _multiplayer_game_bitmap_race;
 			break;
-		case game_engine_territories:
-			widget->animation.current_frame_index = _multiplayer_game_bitmap_territories;
-			break;
-		case game_engine_infection:
-			widget->animation.current_frame_index = _multiplayer_game_bitmap_infection;
-			break;
 		default:
 			widget->animation.current_frame_index = _multiplayer_game_bitmap_unknown;
 			break;
@@ -2928,14 +2888,6 @@ static void multiplayer_edit_profile_set_ruleset_textbox_string_index(
 		case game_engine_race:
 			widget->parameters.text_box.string_list_index =
 				_multiplayer_game_text_string_race;
-			break;
-		case game_engine_territories:
-			widget->parameters.text_box.string_list_index =
-				_multiplayer_game_text_string_territories;
-			break;
-		case game_engine_infection:
-			widget->parameters.text_box.string_list_index =
-				_multiplayer_game_text_string_infection;
 			break;
 		default:
 			widget->parameters.text_box.string_list_index =
@@ -3406,27 +3358,6 @@ static void mutliplayer_settings_select_list_update_displayed_items(
 				0x6C1);
 			if (label_box->parameters.text_box.text)
 				label_box->parameters.text_box.text[0] = 0;
-
-			if (profile->engine_type == game_engine_territories ||
-				profile->engine_type == game_engine_infection)
-			{
-				icon->animation.current_frame_index =
-					profile->engine_type == game_engine_territories ?
-						_multiplayer_game_bitmap_territories :
-						_multiplayer_game_bitmap_infection;
-				if (label_box->parameters.text_box.text)
-				{
-					ustrncpy(
-						label_box->parameters.text_box.text,
-						profile->engine_type == game_engine_territories ?
-							L"Capture and hold territory points to bleed the enemy's tickets to zero." :
-							L"Survive the zombie outbreak or infect every last survivor.",
-						0xFF);
-					label_box->parameters.text_box.text[0xFF] = 0;
-				}
-				description_container->visible = TRUE;
-				continue;
-			}
 
 			if (TEST_FLAG(profile->flags, 0))
 			{

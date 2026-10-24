@@ -2846,8 +2846,7 @@ void unit_died(
 	}
 
 	unit_drop_grenades(unit_index);
-	/* port: in Infection, delete the melee-only Oddball skull immediately on death */
-	if (unit->unit.weapon_drop_delay_ticks == 0 || game_engine_is_infection())
+	if (unit->unit.weapon_drop_delay_ticks == 0)
 		unit_drop_current_weapon(unit_index, TRUE);
 
 	unit->unit.animation.overlay_action_animation.index = NONE;
@@ -7726,7 +7725,6 @@ boolean unit_drop_current_weapon(
 	boolean result = FALSE;
 
 	if (current_weapon_index != NONE &&
-		!(game_engine_is_infection() && weapon_must_be_readied(current_weapon_index) && !TEST_FLAG(unit->object.damage_flags, _object_dead_bit)) &&
 		(next_index != unit->unit.current_weapon_index || immediate) &&
 		!TEST_FLAG(object_get(current_weapon_index)->object.flags, _object_invisible_bit) &&
 		weapon_put_away(current_weapon_index, immediate))
@@ -7737,9 +7735,7 @@ boolean unit_drop_current_weapon(
 		unit->unit.current_weapon_index = NONE;
 		unit->unit.desired_weapon_index = unit_weapon_next_index(unit_index, NONE, 0);
 		
-		/* port: in Infection, also delete the melee-only Oddball skull when dropped on death */
-		if (!weapon_can_be_fired(current_weapon_index) ||
-			(game_engine_is_infection() && weapon_must_be_readied(current_weapon_index)))
+		if (!weapon_can_be_fired(current_weapon_index))
 		{
 			object_delete(current_weapon_index);
 		}
@@ -7775,8 +7771,7 @@ boolean unit_drop_selected_weapon(
 	unit->unit.weapon_object_indices[slot] = NONE;
 	unit->unit.desired_weapon_index = unit->unit.current_weapon_index!=NONE ?
 		unit->unit.current_weapon_index : unit_weapon_next_index(unit_index, NONE, 0);
-	if (!weapon_can_be_fired(weapon_index) ||
-		(game_engine_is_infection() && weapon_must_be_readied(weapon_index)))
+	if (!weapon_can_be_fired(weapon_index))
 	{
 		object_delete(weapon_index);
 	}

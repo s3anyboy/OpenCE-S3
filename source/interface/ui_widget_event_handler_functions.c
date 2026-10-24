@@ -932,15 +932,11 @@ symbols in this file:
 #include "text/unicode.h"
 #include "halo_menus.h" /* port: PC_MENU_FUNCTION_BASE */
 
-/* port: territories and infection synthetic playlist profile indices */
+/* port: the ctf/slayer synthetic playlist profile index */
 enum
 {
-	TERRITORIES_PLAYLIST_PROFILE_INDEX = (long)0xCFFF0001,
-	INFECTION_PLAYLIST_PROFILE_INDEX = (long)0xCFFE0001,
 	CTF_SLAYER_PLAYLIST_PROFILE_INDEX = (long)0xCFFD0001
 };
-
-#define CONQUEST_PLAYLIST_PROFILE_INDEX TERRITORIES_PLAYLIST_PROFILE_INDEX
 
 /* ---------- constants */
 
@@ -5832,9 +5828,7 @@ static boolean multiplayer_profile_set_for_game(
 	if (playlist_profile_get(profile_index, &profile))
 	{
 		server = global_network_game_server_get();
-		if (profile_index != TERRITORIES_PLAYLIST_PROFILE_INDEX &&
-		profile_index != INFECTION_PLAYLIST_PROFILE_INDEX &&
-		profile_index != CTF_SLAYER_PLAYLIST_PROFILE_INDEX &&
+		if (profile_index != CTF_SLAYER_PLAYLIST_PROFILE_INDEX &&
 			saved_game_file_get_path_to_enclosing_directory(profile_index, directory_path))
 			saved_game_file_remember_last_used_multiplayer_variant_directory(directory_path);
 		file = fopen("d:\\variant_automation.txt", "r");
@@ -6049,28 +6043,16 @@ short ui_widget_port_gametypes(
 				*last_used = index + 1;
 		}
 	}
-	/* port: insert Territories and Infection at the top of the gametypes list */
+	/* port: insert CTF/Slayer at the top of the gametypes list */
+	if (count < (word)maximum)
 	{
-		static long const custom_profiles[] =
-		{
-			CTF_SLAYER_PLAYLIST_PROFILE_INDEX,
-			INFECTION_PLAYLIST_PROFILE_INDEX,
-			TERRITORIES_PLAYLIST_PROFILE_INDEX
-		};
-		short c;
-		for (c = 0; c < (short)NUMBEROF(custom_profiles); c++)
-		{
-			if (count < (word)maximum)
-			{
-				for (index = (short)count; index > 0; index--)
-				{
-					indices[index] = indices[index - 1];
-				}
-				indices[0] = custom_profiles[c];
-				count++;
-			}
-		}
+		for (index = (short)count; index > 0; index--)
+			indices[index] = indices[index - 1];
+		indices[0] = CTF_SLAYER_PLAYLIST_PROFILE_INDEX;
+		count++;
 	}
+	else
+		*last_used = (short)MAX(*last_used - 1, 0);
 	return (short)count;
 }
 
@@ -6117,9 +6099,7 @@ boolean ui_widget_port_gametype_choose(
 	if (!playlist_profile_get(profile_index, &profile))
 		return FALSE;
 	server = global_network_game_server_get();
-	if (profile_index != TERRITORIES_PLAYLIST_PROFILE_INDEX &&
-		profile_index != INFECTION_PLAYLIST_PROFILE_INDEX &&
-		profile_index != CTF_SLAYER_PLAYLIST_PROFILE_INDEX &&
+	if (profile_index != CTF_SLAYER_PLAYLIST_PROFILE_INDEX &&
 		saved_game_file_get_path_to_enclosing_directory(profile_index, directory_path))
 		saved_game_file_remember_last_used_multiplayer_variant_directory(directory_path);
 	player_ui_set_game_variant(&profile);
@@ -6313,8 +6293,6 @@ boolean ui_widget_port_gametype_save(
 	struct widget_instance *widget,
 	boolean *widget_deleted)
 {
-	extern void ui_widget_port_go_back(struct widget_instance *widget);
-
 	if (!player_ui_edit_profile_is_dirty())
 	{
 		player_ui_end_editing_profile();
@@ -6329,12 +6307,6 @@ boolean ui_widget_port_gametype_save(
 		player_ui_prompt_user_to_rename_edit_profile();
 		return FALSE;
 	}
-	if (!player_ui_save_profile())
-		return FALSE;
-	player_ui_end_editing_profile();
-	ui_widget_port_go_back(widget);
-	*widget_deleted = TRUE;
-	return TRUE;
+	return player_ui_save_profile();
 }
-
 

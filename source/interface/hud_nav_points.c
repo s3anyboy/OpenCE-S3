@@ -114,7 +114,6 @@ symbols in this file:
 #include "cache/texture_cache.h"
 #include "tag_files/tag_groups.h"
 #include "interface/hud.h"
-#include "interface/interface.h"
 #include "interface/hud_definitions.h"
 #include "bitmaps/bitmap_color_conversion.h"
 #include "interface/hud_draw.h"
@@ -125,12 +124,6 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "units/units.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
-#include "cutscene/cinematics.h"
-#include "game/game_engine_territories.h"
-#include "interface/hud_messaging.h"
-#include "rasterizer/rasterizer.h"
-#include "text/draw_string.h"
-#include "text/font_group.h"
 
 /* ---------- constants */
 
@@ -686,8 +679,7 @@ void custom_render_nav_point(
 	short local_player_index,
 	real_point3d const *position_pointer,
 	short nav_index,
-	short waypoint_type,
-	short team_index)
+	short waypoint_type)
 {
 	long return_eip = get_return_eip();
 	long stack_buffer[STACK_BUFFER_LENGTH];
@@ -698,19 +690,8 @@ void custom_render_nav_point(
 	real_point2d screen_position;
 	real a, b, ab, bx, ay;
 	real theta;
-	long player_index;
-	long local_team;
-	boolean is_friendly_base = FALSE;
-	real_rectangle2d friendly_clip;
-
-	friendly_clip.x0 = 0.0f;
-	friendly_clip.x1 = 1.0f;
-	friendly_clip.y0 = 0.0f;
-	friendly_clip.y1 = 1.0f;
 
 	memset(stack_buffer, 0x62, sizeof(stack_buffer));
-	player_index = local_player_get_player_index(local_player_index);
-	local_team = (player_index != NONE) ? player_get(player_index)->team_index : NONE;
 	arrow = TAG_BLOCK_GET_ELEMENT(&hud_globals->waypoint.arrows, nav_index, struct hud_waypoint_arrow);
 	position = *position_pointer;
 
@@ -771,30 +752,6 @@ void custom_render_nav_point(
 		long bitmap_index = hud_globals->waypoint.arrow_bitmap.index;
 		struct bitmap_data const *bitmap = NULL;
 		real_rectangle2d const *clip = NULL;
-		long territory_base_index = -1;
-		struct territories_base const *territory_base = NULL;
-
-		if (game_engine_is_territories())
-		{
-			long count = game_engine_territories_get_base_count();
-			long b;
-
-			for (b = 0; b < count; b++)
-			{
-				struct territories_base const *tb = game_engine_territories_get_base(b);
-				if (tb)
-				{
-					real dx = tb->center.x - position_pointer->x;
-					real dy = tb->center.y - position_pointer->y;
-					if (dx * dx + dy * dy < 0.25f)
-					{
-						territory_base_index = b;
-						territory_base = tb;
-						break;
-					}
-				}
-			}
-		}
 
 		hud_retrieve_bitmap_and_bounding_rect(bitmap_index, arrow->sequence_indices[waypoint_type], 0, &bitmap, &clip);
 		if (bitmap && _texture_cache_bitmap_get_hardware_format((struct bitmap_data *)bitmap, FALSE, TRUE))
@@ -802,222 +759,21 @@ void custom_render_nav_point(
 			point2d corner;
 			byte alpha;
 			real_rgb_color rgb_temp;
-			real fade;
 
 			corner.x = (short)screen_position.x;
 			corner.y = (short)screen_position.y;
 			alpha = PIN(255 * fast_ftol_C(arrow->opacity), 0, 255);
-			fade = 1.0f - arrow->fade;
-
-			if (territory_base_index != -1 && territory_base)
-			{
-				if (territory_base->capturing_team == TERRITORIES_CONTESTED)
-				{
-					/* Contested: pulse amber / gold */
-					if ((game_time_get() % 30) < 15)
-					{
-						rgb_temp.red = 1.0f;
-						rgb_temp.green = 0.85f;
-						rgb_temp.blue = 0.1f;
-					}
-					else
-					{
-						rgb_temp.red = 1.0f;
-						rgb_temp.green = 0.55f;
-						rgb_temp.blue = 0.05f;
-					}
-				}
-				else if (territory_base->state == territories_base_neutral)
-				{
-					/* Neutral: soft light gray / white */
-					rgb_temp.red = 0.85f;
-					rgb_temp.green = 0.85f;
-					rgb_temp.blue = 0.85f;
-				}
-				else
-				{
-					long owner_team = (territory_base->state == territories_base_red) ? territories_team_red : territories_team_blue;
-					if (local_team == territories_team_red || local_team == territories_team_blue)
-					{
-						if (owner_team == local_team)
-						{
-							/* Friendly: team green */
-							rgb_temp.red = 0.2f;
-							rgb_temp.green = 1.0f;
-							rgb_temp.blue = 0.2f;
-						}
-						else
-						{
-							/* Enemy: team red */
-							rgb_temp.red = 1.0f;
-							rgb_temp.green = 0.22f;
-							rgb_temp.blue = 0.22f;
-						}
-					}
-					else
-					{
-						if (owner_team == territories_team_red)
-						{
-							rgb_temp.red = 1.0f;
-							rgb_temp.green = 0.22f;
-							rgb_temp.blue = 0.22f;
-						}
-						else
-						{
-							rgb_temp.red = 0.25f;
-							rgb_temp.green = 0.58f;
-							rgb_temp.blue = 1.0f;
-						}
-					}
-				}
-
-				rgb_temp.red = PIN(rgb_temp.red * PIN(fade, 0.0f, 1.0f), 0.0f, 1.0f);
-				rgb_temp.green = PIN(rgb_temp.green * PIN(fade, 0.0f, 1.0f), 0.0f, 1.0f);
-				rgb_temp.blue = PIN(rgb_temp.blue * PIN(fade, 0.0f, 1.0f), 0.0f, 1.0f);
-
-				if (waypoint_type != _waypoint_off_screen)
-				{
-					/* On-screen: Draw the clean floating letter marker with no backdrop */
-					long font_index = hud_get_font_index();
-
-					if (font_index != NONE)
-					{
-						wchar_t letter_str[2];
-						struct font_header *font = font_definition_get(font_index);
-						short font_h = font ? (font->ascending_height + font->descending_height) : 14;
-						rectangle2d text_bounds;
-						real text_scale = PIN(scale, 0.75f, 1.25f);
-						real text_y = (real)corner.y - (font_h * text_scale * 0.5f);
-						real_argb_color text_argb;
-						real text_alpha = PIN(fade, 0.0f, 1.0f);
-
-						letter_str[0] = (wchar_t)(L'A' + territory_base_index);
-						letter_str[1] = L'\0';
-
-						text_bounds.x0 = (short)(corner.x - 30);
-						text_bounds.x1 = (short)(corner.x + 30);
-						text_bounds.y0 = (short)text_y;
-						text_bounds.y1 = (short)(text_y + font_h + 10);
-
-						text_argb.alpha = text_alpha;
-						text_argb.red = rgb_temp.red;
-						text_argb.green = rgb_temp.green;
-						text_argb.blue = rgb_temp.blue;
-
-						draw_string_set_draw_mode(font_index, NONE, 2 /* center */, 0, &text_argb);
-						rasterizer_text_set_scale(text_scale, (real)corner.x, text_y);
-						rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, letter_str);
-						rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
-					}
-				}
-				else
-				{
-					/* Off-screen: draw the directional arrow pointing to the base, tinted in base color */
-					hud_draw_bitmap_direct(
-						bitmap,
-						_hud_anchor_center,
-						&corner,
-						clip,
-						scale,
-						theta,
-						((pixel32)alpha<<24) | real_rgb_color_to_pixel32(&rgb_temp),
-						FALSE);
-
-					/* Also draw the letter beside the off-screen arrow */
-					{
-						long font_index = hud_get_font_index();
-						if (font_index != NONE)
-						{
-							wchar_t letter_str[2];
-							struct font_header *font = font_definition_get(font_index);
-							short font_h = font ? (font->ascending_height + font->descending_height) : 14;
-							rectangle2d text_bounds;
-							real text_scale = 0.85f * scale;
-							real text_y = (real)corner.y - (font_h * text_scale * 0.5f);
-							real_argb_color text_argb;
-
-							letter_str[0] = (wchar_t)(L'A' + territory_base_index);
-							letter_str[1] = L'\0';
-
-							text_bounds.x0 = (short)(corner.x - 20);
-							text_bounds.x1 = (short)(corner.x + 20);
-							text_bounds.y0 = (short)text_y;
-							text_bounds.y1 = (short)(text_y + font_h + 10);
-
-							text_argb.alpha = PIN(fade, 0.0f, 1.0f);
-							text_argb.red = rgb_temp.red;
-							text_argb.green = rgb_temp.green;
-							text_argb.blue = rgb_temp.blue;
-
-							draw_string_set_draw_mode(font_index, NONE, 2 /* center */, 0, &text_argb);
-							rasterizer_text_set_scale(text_scale, (real)corner.x, text_y);
-							rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, letter_str);
-							rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
-						}
-					}
-				}
-			}
-			else
-			{
-				if (is_friendly_base)
-				{
-					rgb_temp.red = 0.2f;
-					rgb_temp.green = 1.0f;
-					rgb_temp.blue = 0.2f;
-
-					interface_draw_bitmap(
-						bitmap,
-						&corner,
-						clip,
-						scale,
-						theta,
-						PIN(fade, 0.0f, 1.0f));
-				}
-				else
-				{
-					pixel32_to_real_rgb_color(arrow->color, &rgb_temp);
-					if (team_index == 0)
-					{
-						rgb_temp.red = 1.0f;
-						rgb_temp.green = 0.2f;
-						rgb_temp.blue = 0.2f;
-					}
-					else if (team_index == 1)
-					{
-						rgb_temp.red = 0.2f;
-						rgb_temp.green = 0.5f;
-						rgb_temp.blue = 1.0f;
-					}
-					else if (team_index == 2)
-					{
-						rgb_temp.red = 1.0f;
-						rgb_temp.green = 0.9f;
-						rgb_temp.blue = 0.1f;
-					}
-
-					rgb_temp.red = PIN(rgb_temp.red * PIN(fade, 0.0f, 1.0f), 0.0f, 1.0f);
-					rgb_temp.green = PIN(rgb_temp.green * PIN(fade, 0.0f, 1.0f), 0.0f, 1.0f);
-					rgb_temp.blue = PIN(rgb_temp.blue * PIN(fade, 0.0f, 1.0f), 0.0f, 1.0f);
-
-					hud_draw_bitmap_direct(
-						bitmap,
-						_hud_anchor_center,
-						&corner,
-						clip,
-						scale,
-						theta,
-						((pixel32)alpha<<24) | real_rgb_color_to_pixel32(&rgb_temp),
-						FALSE);
-				}
-			}
+			pixel32_to_real_rgb_color(arrow->color, &rgb_temp);
+			rgb_temp.red *= PIN(1.f - arrow->fade, 0.f, 1.f);
+			rgb_temp.green *= PIN(1.f - arrow->fade, 0.f, 1.f);
+			rgb_temp.blue *= PIN(1.f - arrow->fade, 0.f, 1.f);
+			hud_draw_bitmap_direct(bitmap, _hud_anchor_center, &corner, clip, scale, theta, ((pixel32)alpha << 24) | real_rgb_color_to_pixel32(&rgb_temp), FALSE);
 
 			if (waypoint_type != _waypoint_off_screen)
 			{
 				struct hud_absolute_placement_definition placement;
 				struct number_hud_element_definition numbers;
 				real fractional_value;
-				real bitmap_extent_x;
-				real bitmap_extent_y;
 
 				distance *= 3.048f;
 				memset(&placement, 0, sizeof(struct hud_absolute_placement_definition));
@@ -1029,10 +785,8 @@ void custom_render_nav_point(
 				numbers.fractional_digits = 1;
 				numbers.number_flags = FLAG(_hud_number_show_all_leading_zeros_bit) | FLAG(_hud_number_show_trailing_m_bit);
 
-				bitmap_extent_x = (territory_base_index != -1) ? 10.0f : (bitmap->width * (clip->x1 - clip->x0) / 2.f);
-				bitmap_extent_y = (territory_base_index != -1) ? 12.0f : (bitmap->height * (clip->y1 - clip->y0) / 2.f);
-				numbers.placement.offset.x = corner.x + bitmap_extent_x * scale * 0.33f;
-				numbers.placement.offset.y = corner.y + bitmap_extent_y * scale * 0.66f;
+				numbers.placement.offset.x = corner.x + (bitmap->width * (clip->x1 - clip->x0) / 2.f) * scale * 0.33f;
+				numbers.placement.offset.y = corner.y + (bitmap->height * (clip->y1 - clip->y0) / 2.f) * scale * 0.66f;
 				numbers.placement.offset.x -= render.camera.window_bounds.x0 - render.camera.viewport_bounds.x0;
 				numbers.placement.offset.y -= render.camera.window_bounds.y0 - render.camera.viewport_bounds.y0;
 
@@ -1143,8 +897,7 @@ void hud_render_nav_points(
 				local_player_index,
 				&position,
 				nav_point->nav_index,
-				nav_point->screen_type,
-				NONE);
+				nav_point->screen_type);
 		}
 	}
 

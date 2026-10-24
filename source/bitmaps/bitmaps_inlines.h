@@ -21,7 +21,7 @@ file has inline function assertions.
 /* ---------- macros */
 
 #define match_assert_valid_real_rgb_color(file, line, rgb) \
-	match_vwarn( \
+	match_vassert( \
 		file, \
 		line, \
 		valid_real_rgb_color(rgb), \
@@ -45,13 +45,9 @@ __inline pixel32 real_argb_color_to_pixel32(
 	real_argb_color const *color)
 {
 	real scale = 255.0f;
-	real alpha = PIN(color->alpha, 0.0f, 1.0f);
-	real red = PIN(color->red, 0.0f, 1.0f);
-	real green = PIN(color->green, 0.0f, 1.0f);
-	real blue = PIN(color->blue, 0.0f, 1.0f);
 	pixel32 result;
 
-	match_vwarn(
+	match_vassert(
 		"..\\bitmaps\\bitmaps_inlines.h",
 		89,
 		valid_real_argb_color(color),
@@ -64,11 +60,33 @@ __inline pixel32 real_argb_color_to_pixel32(
 			color->green,
 			color->blue));
 
-	result = (pixel32)(
-		((long)__builtin_rint((double)blue * scale) & 0xff) |
-		(((long)__builtin_rint((double)green * scale) & 0xff) << 8) |
-		(((long)__builtin_rint((double)red * scale) & 0xff) << 16) |
-		((long)__builtin_rint((double)alpha * scale) << 24));
+	{
+		long alpha;
+		long red;
+		long green;
+		long blue;
+
+		result = (pixel32)(
+			(long)__builtin_rint((double)color->blue * scale) |
+			((long)__builtin_rint((double)color->green * scale) << 8) |
+			((long)__builtin_rint((double)color->red * scale) << 16) |
+			((long)__builtin_rint((double)color->alpha * scale) << 24));
+	}
+
+	{
+		pixel32 verify;
+
+		verify = (pixel32)(
+			((long)__builtin_rint((double)color->blue * scale) & 0xff) |
+			(((long)__builtin_rint((double)color->green * scale) & 0xff) << 8) |
+			(((long)__builtin_rint((double)color->red * scale) & 0xff) << 16) |
+			((long)__builtin_rint((double)color->alpha * scale) << 24));
+
+		match_assert(
+			"..\\bitmaps\\bitmaps_inlines.h",
+			188,
+			verify == result);
+	}
 
 	return result;
 }
@@ -78,16 +96,13 @@ __inline pixel32 real_rgb_color_to_pixel32(
 {
 	pixel32 result;
 	real scale = (real)UNSIGNED_CHAR_MAX;
-	real blue = PIN(color->blue, 0.0f, 1.0f);
-	real green = PIN(color->green, 0.0f, 1.0f);
-	real red = PIN(color->red, 0.0f, 1.0f);
 
 	match_assert_valid_real_rgb_color("..\\bitmaps\\bitmaps_inlines.h", 0xC9, color);
 
 	result = (pixel32)(
-		((long)__builtin_rint((double)blue * scale) & 0xff) |
-		(((long)__builtin_rint((double)green * scale) & 0xff) << 8) |
-		(((long)__builtin_rint((double)red * scale) & 0xff) << 16));
+		((long)__builtin_rint((double)color->blue * scale) & 0xff) |
+		(((long)__builtin_rint((double)color->green * scale) & 0xff) << 8) |
+		(((long)__builtin_rint((double)color->red * scale) & 0xff) << 16));
 
 	return result;
 }
@@ -100,15 +115,14 @@ __inline pixel32 real_alpha_to_pixel32(
 	real alpha)
 {
 	real scale = 255.0f;
-	real pinned_alpha = PIN(alpha, 0.0f, 1.0f);
 	pixel32 result;
 
-	match_warn(
+	match_assert(
 		"..\\bitmaps\\bitmaps_inlines.h",
 		291,
 		alpha>=0.0f && alpha<=1.0f);
 
-	result = (pixel32)((long)__builtin_rint((double)pinned_alpha * scale) << 24);
+	result = (pixel32)((long)__builtin_rint((double)alpha * scale) << 24);
 
 	return result;
 }
