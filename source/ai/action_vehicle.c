@@ -140,6 +140,9 @@ static short action_vehicle_find_impromptu_seat(
 	real_vector3d *entry_facing,
 	real_point3d *hint_point);
 
+static boolean action_vehicle_player_aboard(
+	long vehicle_index);
+
 /* ---------- globals */
 
 /* ---------- public code */
@@ -360,21 +363,25 @@ static boolean action_vehicle_evaluate_seat(
 				}
 			}
 
+			if (result &&
+				!allow_any_seat &&
+				unit_seat_is_driver(vehicle_index, seat_index) &&
+				!actor_vehicle_ai_can_drive(vehicle_index))
+			{
+				/* port: the decompiled check here kept only its calls, so an
+				 * AI could take the wheel of a vehicle it can't drive and sit
+				 * there; only take a driver seat unasked when it can drive */
+				result = FALSE;
+			}
+
 			if (result)
 			{
-				struct unit_datum *vehicle = vehicle_get(vehicle_index);
 				real_vector2d to_seat_direction;
 				real facing_dot;
 				boolean within_range;
 				boolean correct_facing;
 				boolean could_potentially_fake;
 				real seat_weight;
-
-				if (!allow_any_seat)
-				{
-					vehicle_specific_definition_get(vehicle->definition_index);
-					unit_seat_is_driver(vehicle_index, seat_index);
-				}
 
 				vector_from_points2d(
 					(real_point2d const *)&actor->input.position.body_position,
@@ -402,6 +409,14 @@ static boolean action_vehicle_evaluate_seat(
 				else if (unit_seat_is_gunner(vehicle_index, seat_index))
 				{
 					seat_weight += 3.5f;
+				}
+
+				/* port: a player riding with nobody at the wheel wants a
+				 * driver more than another gunner or passenger */
+				if (unit_seat_is_driver(vehicle_index, seat_index) &&
+					action_vehicle_player_aboard(vehicle_index))
+				{
+					seat_weight += 10.0f;
 				}
 
 				if (entry_point)
@@ -702,6 +717,29 @@ static short action_vehicle_find_impromptu_seat(
 	}
 
 	return (short)best_seat_index;
+}
+
+static boolean action_vehicle_player_aboard(
+	long vehicle_index)
+{
+	struct unit_datum *vehicle = unit_get(vehicle_index);
+	long child_object_index = vehicle->object.first_child_object_index;
+	boolean player_aboard = FALSE;
+
+	while (child_object_index != NONE && !player_aboard)
+	{
+		struct object_datum *child_object = object_get(child_object_index);
+
+		if (TEST_FLAG(_object_mask_unit, child_object->object.type) &&
+			unit_get(child_object_index)->unit.player_index != NONE)
+		{
+			player_aboard = TRUE;
+		}
+
+		child_object_index = child_object->object.next_object_index;
+	}
+
+	return player_aboard;
 }
 
 boolean action_vehicle_setup_specific(

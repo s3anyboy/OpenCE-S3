@@ -252,6 +252,25 @@ enum
 	NUMBER_OF_ACTOR_FACINGS,
 };
 
+/* port: car-style ground driving (see
+ * actor_move_directional_ground_throttle) */
+enum
+{
+	/* a destination behind and nearer than this is reached by backing up
+	 * toward it rather than by a forward U-turn */
+	DIRECTIONAL_GROUND_REVERSE_DISTANCE = 6,
+	/* how far a car already backing up keeps backing toward its path */
+	DIRECTIONAL_GROUND_CONTINUE_REVERSE_DISTANCE = 12,
+	/* ticks of throttle without moving before the driver decides it is
+	 * stuck, and how long it then drives the other way */
+	DIRECTIONAL_GROUND_STUCK_TICKS = 45,
+	DIRECTIONAL_GROUND_UNSTICK_TICKS = 45,
+};
+
+#define DIRECTIONAL_GROUND_STUCK_SPEED 0.01f
+#define DIRECTIONAL_GROUND_PASSED_STEP_DISTANCE 3.f
+#define DIRECTIONAL_GROUND_DEFAULT_PATHFINDING_RADIUS 0.6f
+
 enum
 {
 	_actor_evade_left = 0,
@@ -367,6 +386,12 @@ static void actor_move_calculate_movement(
 	real_vector3d *desired_throttle,
 	boolean *movement_thwarted,
 	boolean *movement_complete);
+
+static void actor_move_directional_ground_throttle(
+	long actor_index);
+
+static void actor_move_directional_ground_reset(
+	long actor_index);
 
 /* ---------- globals */
 
@@ -546,7 +571,19 @@ void actor_path_input_new(
 
 		ignore_source_object_index = actor->input.vehicle_index;
 		if (vehicle_definition->ai_pathfinding_radius > 0.f)
+		{
 			pathfinding_radius = vehicle_definition->ai_pathfinding_radius;
+		}
+		else if (actor->input.vehicle_driver_type ==
+			_actor_vehicle_driver_directional_ground)
+		{
+			/* port: the stock Warthog and Scorpion tags have no AI
+			 * pathfinding radius; keep their paths off walls by about
+			 * half the car's width rather than an infantryman's */
+			pathfinding_radius = MAX(
+				pathfinding_radius,
+				DIRECTIONAL_GROUND_DEFAULT_PATHFINDING_RADIUS);
+		}
 	}
 
 	actor_find_pathfinding_location(actor_index);
@@ -1112,6 +1149,7 @@ void actor_get_stopping_distances(
 		{
 		case _actor_vehicle_driver_hovering_ground:
 		case _actor_vehicle_driver_nondirectional_ground:
+		case _actor_vehicle_driver_directional_ground:
 		{
 			struct unit_datum *vehicle = vehicle_get(actor->input.vehicle_index);
 			struct vehicle_definition *definition =
@@ -2145,6 +2183,17 @@ void actor_destination_update(
 						step_reached = magnitude_squared2d(&actor_to_point) < 0.25f*0.25f;
 					}
 				}
+				else if (actor->input.vehicle_driver_type ==
+						_actor_vehicle_driver_directional_ground &&
+					dot_product2d(&actor_to_point, &next_step) < 0.f &&
+					magnitude_squared2d(&actor_to_point) <
+						DIRECTIONAL_GROUND_PASSED_STEP_DISTANCE*DIRECTIONAL_GROUND_PASSED_STEP_DISTANCE)
+				{
+					/* port: a car that swings wide of a corner has still
+					 * turned it once it is past the corner along the next
+					 * leg; it shouldn't back up to touch it */
+					step_reached = TRUE;
+				}
 				else
 				{
 					step_reached = magnitude_squared2d(&actor_to_point) < 0.15f*0.15f;
@@ -3000,6 +3049,137 @@ static void actor_move_calculate_free(
 	return;
 }
 
+/* port: the car-style driving that January never had (the stock Warthog
+ * and Scorpion were never AI-driven). actor_move_calculate_movement has
+ * already set the desired facing, which steers the vehicle, along the
+ * movement, and a forward throttle that includes any braking for the
+ * destination. A car can't turn on the spot, so ease off through sharp
+ * turns, back up toward a point close behind (reversing, the vehicle
+ * steers its nose toward the desired facing), and when the throttle has
+ * gone nowhere for a while, drive the other way for a moment to come
+ * unstuck. The vector avoidance timers are only used by flying drivers, so
+ * a ground driver keeps its stuck count and unsticking time in them:
+ * vector_avoidance_sharp_turn_timer counts ticks without progress, and
+ * vector_avoidance_current_direction is the unsticking time, positive
+ * while backing up and negative while pulling forward. Both rest at NONE,
+ * their flying idle value, so a driver who moves on to a flying vehicle
+ * starts clean. */
+static void actor_move_directional_ground_throttle(
+	long actor_index)
+{
+	struct actor_datum *actor = actor_get(actor_index);
+	struct vehicle_datum *vehicle = vehicle_datum_get(actor->input.vehicle_index);
+	short *stuck_ticks = &actor->control.vector_avoidance_sharp_turn_timer;
+	short *unstick_ticks = &actor->control.vector_avoidance_current_direction;
+	real throttle = actor->output.throttle.i;
+	real_vector2d forward;
+	real_vector2d movement;
+	real distance;
+	real alignment;
+	real forward_speed;
+	boolean reverse;
+
+	if (*stuck_ticks < 0 || *stuck_ticks > DIRECTIONAL_GROUND_STUCK_TICKS)
+	{
+		*stuck_ticks = 0;
+	}
+	if (*unstick_ticks == NONE ||
+		*unstick_ticks < -DIRECTIONAL_GROUND_UNSTICK_TICKS ||
+		*unstick_ticks > DIRECTIONAL_GROUND_UNSTICK_TICKS)
+	{
+		*unstick_ticks = 0;
+	}
+
+	forward.i = vehicle->object.forward.i;
+	forward.j = vehicle->object.forward.j;
+	movement.i = actor->control.moving_towards_vector.i;
+	movement.j = actor->control.moving_towards_vector.j;
+	distance = normalize2d(&movement);
+
+	if (throttle <= 0.f ||
+		distance == 0.f ||
+		normalize2d(&forward) == 0.f)
+	{
+		/* stopping for the destination */
+		actor_move_directional_ground_reset(actor_index);
+		return;
+	}
+
+	alignment = dot_product2d(&forward, &movement);
+	if (vehicle->vehicle.speed < 0.f)
+	{
+		/* already backing up: keep at it until the nose comes round */
+		reverse = alignment < 0.5f &&
+			distance < (real)DIRECTIONAL_GROUND_CONTINUE_REVERSE_DISTANCE;
+	}
+	else
+	{
+		reverse = alignment < -0.25f &&
+			distance < (real)DIRECTIONAL_GROUND_REVERSE_DISTANCE;
+	}
+
+	if (*unstick_ticks > 0)
+	{
+		reverse = TRUE;
+		(*unstick_ticks)--;
+		*stuck_ticks = 0;
+	}
+	else if (*unstick_ticks < 0)
+	{
+		reverse = FALSE;
+		(*unstick_ticks)++;
+		*stuck_ticks = 0;
+	}
+	else
+	{
+		forward_speed = dot_product3d(
+			&vehicle->object.translational_velocity,
+			&vehicle->object.forward);
+		if (throttle >= 0.5f &&
+			fabs(forward_speed) < DIRECTIONAL_GROUND_STUCK_SPEED)
+		{
+			(*stuck_ticks)++;
+			if (*stuck_ticks >= DIRECTIONAL_GROUND_STUCK_TICKS)
+			{
+				*stuck_ticks = 0;
+				*unstick_ticks = reverse
+					? -DIRECTIONAL_GROUND_UNSTICK_TICKS
+					: DIRECTIONAL_GROUND_UNSTICK_TICKS;
+				reverse = !reverse;
+			}
+		}
+		else
+		{
+			*stuck_ticks = 0;
+		}
+	}
+
+	if (reverse)
+	{
+		actor->output.throttle.i = -throttle;
+	}
+	else if (alignment < 0.7f)
+	{
+		/* ease off through a sharp turn so the wheels hold */
+		actor->output.throttle.i = throttle * PIN(0.5f + 0.5f*alignment, 0.35f, 1.f);
+	}
+	actor->output.throttle.j = 0.f;
+	actor->output.throttle.k = 0.f;
+
+	return;
+}
+
+static void actor_move_directional_ground_reset(
+	long actor_index)
+{
+	struct actor_datum *actor = actor_get(actor_index);
+
+	actor->control.vector_avoidance_sharp_turn_timer = NONE;
+	actor->control.vector_avoidance_current_direction = NONE;
+
+	return;
+}
+
 void actor_move_update(
 	long actor_index)
 {
@@ -3236,6 +3416,17 @@ void actor_move_update(
 			crouch = FALSE;
 			break;
 
+		case _actor_vehicle_driver_directional_ground:
+			/* port: steer like a player driving: face (steer) along the
+			 * movement and throttle forward, however sharp the turn, since a
+			 * car only turns while it rolls.
+			 * actor_move_directional_ground_throttle then eases off,
+			 * reverses or backs out of trouble. */
+			override_facing = _actor_facing_forward;
+			allow_all_moving_turns = TRUE;
+			crouch = FALSE;
+			break;
+
 		case _actor_vehicle_driver_directional_flying:
 			{
 				real_vector3d stuck_direction;
@@ -3385,6 +3576,19 @@ void actor_move_update(
 			&actor->control.movement_complete);
 		if (actor->control.movement_complete)
 			actor->control.moving = FALSE;
+	}
+
+	if (actor->input.vehicle_driver_type ==
+		_actor_vehicle_driver_directional_ground)
+	{
+		if (actor->control.moving)
+		{
+			actor_move_directional_ground_throttle(actor_index);
+		}
+		else
+		{
+			actor_move_directional_ground_reset(actor_index);
+		}
 	}
 
 	if (actor->control.moving)

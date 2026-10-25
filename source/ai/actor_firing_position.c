@@ -1925,6 +1925,11 @@ short actor_select_firing_position(
 			evaluation_context->directional_driving= TRUE;
 			evaluation_context->directional_driving_cannot_stop= TRUE;
 		}
+		else if (actor->input.vehicle_driver_type==_actor_vehicle_driver_directional_ground)
+		{
+			/* port: a car prefers positions ahead of it, but it can stop */
+			evaluation_context->directional_driving= TRUE;
+		}
 
 		evaluation_context->avoid_point_count= 0;
 		if (actor->firing_positions.last_discarded_firing_position_valid)
