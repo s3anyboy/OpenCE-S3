@@ -171,10 +171,6 @@ enum actor_vehicle_driver_type
 	_actor_vehicle_driver_hovering_ground,
 	_actor_vehicle_driver_nondirectional_ground,
 	_actor_vehicle_driver_directional_flying,
-	/* port: car-style ground driving (Warthog, Scorpion); appended so the
-	 * January values, some of which are compared as literals, keep their
-	 * numbers */
-	_actor_vehicle_driver_directional_ground,
 	NUMBER_OF_ACTOR_VEHICLE_DRIVER_TYPES,
 };
 
@@ -1058,12 +1054,6 @@ void actor_find_pathfinding_location(
 	long actor_index);
 real actor_destination_tolerance(
 	long actor_index);
-/* port: how an actor in the driver seat of this vehicle drives it */
-short actor_vehicle_get_driver_type(
-	long vehicle_index);
-/* port: whether an AI may take this vehicle's driver seat on its own */
-boolean actor_vehicle_ai_can_drive(
-	long vehicle_index);
 void actor_input_sample_position(
 	long actor_index,
 	long unit_index,

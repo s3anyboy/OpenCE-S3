@@ -364,13 +364,6 @@ enum
 	_vehicle_ai_driver_hovering_bit,
 };
 
-/* vehicle_definition.vehicle_type; vehicles.c keeps the full enum private */
-enum
-{
-	_vehicle_type_human_tank = 0,
-	_vehicle_type_human_jeep,
-};
-
 /* projectile_datum.flags; projectiles.c currently owns the otherwise private
  * enum, so actors keeps the shared January bit spelling local for now. */
 enum
@@ -528,14 +521,9 @@ struct vehicle_definition
 {
 	struct unit_definition unit;
 	unsigned long flags;
-	short vehicle_type;
-	short __pad2F6;
-	byte __unknown2F8[0x8C];
+	byte __unknown2F4[0x90];
 	real ai_destination_radius;
 };
-
-typedef char vehicle_definition_vehicle_type_offset_assert[
-	offsetof(struct vehicle_definition, vehicle_type) == 0x2F4 ? 1 : -1];
 
 typedef char vehicle_definition_flags_offset_assert[
 	offsetof(struct vehicle_definition, flags) == 0x2F0 ? 1 : -1];
@@ -1462,9 +1450,8 @@ void actor_find_pathfinding_location(
 			{
 				enum actor_vehicle_driver_type vehicle_driver_type = actor->input.vehicle_driver_type;
 
-				if ((vehicle_driver_type >= _actor_vehicle_driver_hovering_ground &&
-					vehicle_driver_type <= _actor_vehicle_driver_nondirectional_ground) ||
-					vehicle_driver_type == _actor_vehicle_driver_directional_ground)
+				if (vehicle_driver_type >= _actor_vehicle_driver_hovering_ground &&
+					vehicle_driver_type <= _actor_vehicle_driver_nondirectional_ground)
 				{
 					actor->input.pathfinding_surface_index = vehicle_find_pathfinding_surface_index(
 						actor->input.vehicle_index,
@@ -1481,51 +1468,6 @@ void actor_find_pathfinding_location(
 	}
 
 	return;
-}
-
-short actor_vehicle_get_driver_type(
-	long vehicle_index)
-{
-	struct unit_datum *vehicle = vehicle_get(vehicle_index);
-	struct vehicle_definition *vehicle_definition =
-		vehicle_specific_definition_get(vehicle->definition_index);
-	short driver_type = _actor_vehicle_driver_unknown;
-
-	if (TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_enable_bit) &&
-		TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_flying_bit))
-	{
-		driver_type = _actor_vehicle_driver_directional_flying;
-	}
-	else if (TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_enable_bit) &&
-		TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_nondirectional_bit))
-	{
-		driver_type =
-			TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_hovering_bit)
-				? _actor_vehicle_driver_hovering_ground
-				: _actor_vehicle_driver_nondirectional_ground;
-	}
-	else if (vehicle_definition->vehicle_type == _vehicle_type_human_jeep ||
-		vehicle_definition->vehicle_type == _vehicle_type_human_tank)
-	{
-		/* port: January had no AI driving for car-style vehicles, and the
-		 * stock Warthog and Scorpion tags leave their AI driver flags clear,
-		 * so an AI in either driver seat sat still. Drive them by steering
-		 * toward the path and throttling, the way a player drives them. */
-		driver_type = _actor_vehicle_driver_directional_ground;
-	}
-
-	return driver_type;
-}
-
-boolean actor_vehicle_ai_can_drive(
-	long vehicle_index)
-{
-	struct unit_datum *vehicle = vehicle_get(vehicle_index);
-	struct vehicle_definition *vehicle_definition =
-		vehicle_specific_definition_get(vehicle->definition_index);
-
-	return TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_enable_bit) ||
-		actor_vehicle_get_driver_type(vehicle_index) > _actor_vehicle_driver_unknown;
 }
 
 real actor_destination_tolerance(
@@ -1552,14 +1494,6 @@ real actor_destination_tolerance(
 	if (actor->state.action == _actor_action_vehicle)
 	{
 		return 0.7f;
-	}
-
-	/* port: a car can't turn on the spot, so a destination inside its
-	 * turning circle would leave it circling */
-	if (actor->input.vehicle_index != NONE &&
-		actor->input.vehicle_driver_type == _actor_vehicle_driver_directional_ground)
-	{
-		tolerance = MAX(tolerance, 1.5f);
 	}
 
 	return MAX(tolerance, 0.2f);
@@ -1654,6 +1588,8 @@ static void actor_input_update(
 		if (parent_object && parent_object->object.type == _object_type_vehicle)
 		{
 			struct unit_datum *vehicle = (struct unit_datum *)parent_object;
+			struct vehicle_definition *vehicle_definition =
+				vehicle_specific_definition_get(vehicle->definition_index);
 
 			actor->input.vehicle_index = vehicle_index;
 			actor->input.vehicle_gunner = FALSE;
@@ -1663,11 +1599,24 @@ static void actor_input_update(
 			if (vehicle->unit.driver_object_index == actor->meta.unit_index)
 			{
 				actor->input.vehicle_driver_type =
-					actor_vehicle_get_driver_type(vehicle_index);
-				if (actor->input.vehicle_driver_type ==
-					_actor_vehicle_driver_directional_flying)
+					_actor_vehicle_driver_unknown;
+				if (TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_enable_bit))
 				{
-					actor->state.flying = TRUE;
+					if (TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_flying_bit))
+					{
+						actor->input.vehicle_driver_type =
+							_actor_vehicle_driver_directional_flying;
+						actor->state.flying = TRUE;
+					}
+					else if (TEST_FLAG(
+						vehicle_definition->flags,
+						_vehicle_ai_driver_nondirectional_bit))
+					{
+						actor->input.vehicle_driver_type =
+							TEST_FLAG(vehicle_definition->flags, _vehicle_ai_driver_hovering_bit)
+								? _actor_vehicle_driver_hovering_ground
+								: _actor_vehicle_driver_nondirectional_ground;
+					}
 				}
 			}
 

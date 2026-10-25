@@ -3843,13 +3843,8 @@ boolean actor_action_handle_vehicle_entry(
 				struct unit_datum *vehicle =
 					vehicle_try_and_get(prop->vehicle_index);
 
-				/* port: also when the player rides a Warthog or Scorpion with
-				 * nobody at the wheel, so a marine comes to drive it */
 				if (vehicle &&
-					(vehicle->unit.driver_object_index == prop->unit_index ||
-						(vehicle->unit.driver_object_index == NONE &&
-							actor_vehicle_get_driver_type(prop->vehicle_index) ==
-								_actor_vehicle_driver_directional_ground)))
+					vehicle->unit.driver_object_index == prop->unit_index)
 				{
 					real_point3d vehicle_origin;
 					real distance_squared;
