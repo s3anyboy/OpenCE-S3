@@ -308,12 +308,6 @@ wchar_t const *game_modes_kind_name(
 		{ L"HARDCORE ODDBALL", L"HC ODDBALL" },
 		{ L"HARDCORE KING", L"HC KING" },
 		{ L"HARDCORE RACE", L"HC RACE" },
-		/* (6 to 9 have none; 10 is CTF/Slayer: game_engine_ctf_slayer) */
-		{ NULL, NULL },
-		{ NULL, NULL },
-		{ NULL, NULL },
-		{ NULL, NULL },
-		{ L"HARDCORE CTF/SLAYER", L"HC CTF/SLAYER" },
 	};
 	boolean hardcore = (kind & GAME_MODES_KIND_HARDCORE) != 0;
 	short mode = (short)(kind & ~GAME_MODES_KIND_HARDCORE);
