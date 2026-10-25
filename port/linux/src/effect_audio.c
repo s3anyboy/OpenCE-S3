@@ -136,6 +136,11 @@ static int effect_load(
 	{
 		unsigned long length = effect_u32(data + offset + 4);
 
+		/* (a chunk longer than the file is the file's end: a bad length would
+		wrap the offset around) */
+		if (length > (unsigned long)size - offset - 8)
+			length = (unsigned long)size - offset - 8;
+
 		if (!memcmp(data + offset, "fmt ", 4) && length >= 16 && offset + 8 + length <= (unsigned long)size)
 		{
 			format = effect_u16(data + offset + 8);

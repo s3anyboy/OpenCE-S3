@@ -6816,7 +6816,8 @@ struct game_variant *build_game_variant_ctf_slayer(
 	result.universal_variant.odd_man_out = FALSE;
 	result.universal_variant.respawn_time = 300;
 	result.universal_variant.respawn_time_growth = 0;
-	result.universal_variant.score_to_win = 4;
+	/* (3: one of the editor's captures to win, 1, 3, 5, 10 and 15) */
+	result.universal_variant.score_to_win = 3;
 	result.universal_variant.suicide_penalty = 150;
 	result.universal_variant.weapon_set = _game_engine_weapons_normal;
 	result.universal_variant.vehicle_set = _game_engine_vehicles_warthog;

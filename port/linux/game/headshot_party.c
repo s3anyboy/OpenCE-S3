@@ -64,6 +64,7 @@ struct party_burst
 /* port_config.c's, cinematics.c's / cseries_windows.c's, xbox_files.c's,
 rasterizer's */
 int config_boolean(const char *name);
+double config_real(const char *name);
 unsigned long config_changes(void);
 unsigned long system_milliseconds(void);
 const char *platform_data_root(void);
@@ -113,6 +114,23 @@ static boolean party_unit_is_grunt(
 		actor_definition_get(variant->actor_reference.index)->type == _actor_grunt;
 }
 
+/* the game's volume for a sound effect: audio.volume times
+audio.effects_volume (sound_manager.c's and dsound_sdl.c's), each 0 to 1 */
+static real party_volume(
+	void)
+{
+	static unsigned long changes = (unsigned long)-1;
+	static real volume = 1.0f;
+
+	if (changes != config_changes())
+	{
+		changes = config_changes();
+		volume = PIN((real)config_real("audio.volume"), 0.0f, 1.0f) *
+			PIN((real)config_real("audio.effects_volume"), 0.0f, 1.0f);
+	}
+	return volume;
+}
+
 /* a random number from 0 to 1, from a seed that it moves on */
 static real party_random(
 	unsigned long *seed)
@@ -149,7 +167,8 @@ static void party_begin(
 	burst->seed = now ^ seed;
 	burst->world = *world;
 	snprintf(path, sizeof(path), "%s/party.wav", platform_data_root());
-	effect_audio_play_file(path, PARTY_GAIN);
+	/* (as loud as the game's other sounds: the volume, then the effects') */
+	effect_audio_play_file(path, PARTY_GAIN * party_volume());
 
 	return;
 }

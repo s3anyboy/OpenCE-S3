@@ -63,8 +63,8 @@ enum
 {
 	/* the kills one level logs (a level places a few hundred enemies) */
 	CAMPAIGN_SCORE_MAXIMUM_KILLS = 8192,
-	/* the players a score is kept for */
-	CAMPAIGN_SCORE_MAXIMUM_PLAYERS = 16,
+	/* the players a score is kept for: every player a network game can have */
+	CAMPAIGN_SCORE_MAXIMUM_PLAYERS = HALO_PORT_MAXIMUM_NETWORK_PLAYERS,
 	/* the deaths one level logs */
 	CAMPAIGN_SCORE_MAXIMUM_DEATHS = 2048,
 	/* the kinds of variant the summary tells apart */
@@ -124,8 +124,10 @@ void platform_log(char const *format, ...);
 /* network_coop.c's: co-op is a network game on a campaign level; the host's
 kills and its win are sent to the clients (campaign_score_network_kill, ...) */
 boolean network_coop_active(void);
-void network_coop_note_score_kill(short player_index, long variant_index, short points, boolean competitive);
+void network_coop_note_score_kill(short player_index, long variant_index, short points, boolean competitive,
+	long game_time);
 void network_coop_note_score_won(boolean competitive);
+void network_coop_note_score_reverted(long game_time);
 /* port_config.c's */
 char const *config_string(char const *name);
 
@@ -292,6 +294,30 @@ static short campaign_score_variant_points(
 	/* (up to a multiple of 5: an enemy worth any is worth at least 5) */
 	points = (points + 499) / 500 * 5;
 	return (short)points;
+}
+
+/* whether an enemy (an actor worth points: campaign_score_variant_points)
+drives or mans a vehicle */
+static boolean campaign_score_vehicle_enemy_crewed(
+	struct unit_datum const *vehicle)
+{
+	long crew[2];
+	long index;
+
+	crew[0] = vehicle->unit.driver_object_index;
+	crew[1] = vehicle->unit.gunner_object_index;
+	for (index = 0; index < 2; index++)
+	{
+		struct unit_datum *rider = crew[index] != NONE ? unit_try_and_get(crew[index]) : NULL;
+		long actor_index;
+
+		if (!rider || rider->unit.player_index != NONE)
+			continue;
+		actor_index = rider->unit.swarm_actor_index != NONE ? rider->unit.swarm_actor_index : rider->unit.actor_index;
+		if (actor_index != NONE && campaign_score_variant_points(actor_get(actor_index)->meta.variant_definition_index) > 0)
+			return TRUE;
+	}
+	return FALSE;
 }
 
 /* a vehicle's worth (the ghost, banshee and wraith), scaled by difficulty
@@ -642,6 +668,10 @@ void campaign_score_reverted(
 {
 	long to_time = game_time_get();
 
+	/* (a network co-op host's clock is put forward again at once, to where it
+	was: network_coop_reverted; its clients' never goes back) */
+	if (game_connection() == _game_connection_network_server && network_coop_active())
+		return;
 	if (from_time > to_time)
 		campaign_score_reverted_ticks += from_time - to_time;
 
@@ -678,11 +708,13 @@ void campaign_score_new_map(
 	return;
 }
 
-/* a kill is logged (the host's own, or one it sent): FALSE if the log is full */
+/* a kill is logged at a game time (the host's own, or one it sent, at the
+host's time): FALSE if the log is full */
 static boolean campaign_score_append(
 	long variant_index,
 	short player_index,
-	short points)
+	short points,
+	long game_time)
 {
 	campaign_score_update();
 	if (campaign_score_kill_count >= CAMPAIGN_SCORE_MAXIMUM_KILLS)
@@ -695,7 +727,7 @@ static boolean campaign_score_append(
 		}
 		return FALSE;
 	}
-	campaign_score_kills[campaign_score_kill_count].game_time = game_time_get();
+	campaign_score_kills[campaign_score_kill_count].game_time = game_time;
 	campaign_score_kills[campaign_score_kill_count].variant_index = variant_index;
 	campaign_score_kills[campaign_score_kill_count].player_index = player_index;
 	campaign_score_kills[campaign_score_kill_count].points = points;
@@ -731,6 +763,7 @@ void campaign_score_record_kill(
 	long actor_index;
 	long variant_index;
 	short points;
+	short killer;
 
 	if (!campaign_score_level())
 		return;
@@ -744,12 +777,15 @@ void campaign_score_record_kill(
 	/* (a client's kills are the host's, which sends them: the AI is the host's) */
 	if (killing_player_index == NONE || game_connection() == _game_connection_network_client)
 		return;
-	if (killing_player_index >= CAMPAIGN_SCORE_MAXIMUM_PLAYERS || !player_try_and_get(killing_player_index))
+	/* (a player's datum index: its absolute index is the log's) */
+	killer = (short)DATUM_INDEX_TO_ABSOLUTE_INDEX(killing_player_index);
+	if (killer < 0 || killer >= CAMPAIGN_SCORE_MAXIMUM_PLAYERS || !player_try_and_get(killing_player_index))
 		return;
-	/* (a destroyed ghost, banshee or wraith is worth its own points) */
+	/* (a destroyed ghost, banshee or wraith is worth its own points, when an
+	enemy drove or manned it: not one left empty, nor one a player had) */
 	variant_index = NONE;
 	points = 0;
-	if (unit->object.type == _object_type_vehicle)
+	if (unit->object.type == _object_type_vehicle && campaign_score_vehicle_enemy_crewed(unit))
 	{
 		variant_index = unit->definition_index;
 		points = campaign_score_vehicle_points(variant_index);
@@ -767,8 +803,8 @@ void campaign_score_record_kill(
 	/* (the host scores the kill, and sends the points: a client's log is the same) */
 	points = campaign_score_time_points(points);
 	campaign_score_competitive = campaign_score_type_competitive();
-	if (campaign_score_append(variant_index, (short)killing_player_index, points) && network_coop_active())
-		network_coop_note_score_kill((short)killing_player_index, variant_index, points, campaign_score_competitive);
+	if (campaign_score_append(variant_index, killer, points, game_time_get()) && network_coop_active())
+		network_coop_note_score_kill(killer, variant_index, points, campaign_score_competitive, game_time_get());
 
 	return;
 }
@@ -778,12 +814,48 @@ void campaign_score_network_kill(
 	short player_index,
 	long variant_index,
 	short points,
-	boolean competitive)
+	boolean competitive,
+	long game_time)
 {
 	if (!campaign_score_level() || player_index < 0 || player_index >= CAMPAIGN_SCORE_MAXIMUM_PLAYERS || points <= 0)
 		return;
 	campaign_score_competitive = competitive;
-	campaign_score_append(variant_index, player_index, points);
+	/* (at the host's time, as the host logged it: NONE from a host that did
+	not send it, the time it came) */
+	campaign_score_append(variant_index, player_index, points, game_time != NONE ? game_time : game_time_get());
+
+	return;
+}
+
+/* the kills after a game time are forgotten (the checkpoint gone back to was
+saved then) */
+static void campaign_score_forget_after(
+	long game_time)
+{
+	while (campaign_score_kill_count > 0 &&
+		campaign_score_kills[campaign_score_kill_count - 1].game_time > game_time)
+		campaign_score_kill_count--;
+
+	return;
+}
+
+void campaign_score_coop_reverted(
+	long restored_time)
+{
+	if (!campaign_score_level())
+		return;
+	campaign_score_forget_after(restored_time);
+	network_coop_note_score_reverted(restored_time);
+
+	return;
+}
+
+void campaign_score_network_reverted(
+	long restored_time)
+{
+	if (!campaign_score_level())
+		return;
+	campaign_score_forget_after(restored_time);
 
 	return;
 }

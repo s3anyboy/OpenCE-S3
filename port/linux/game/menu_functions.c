@@ -6203,7 +6203,7 @@ static boolean gametype_engine_set(struct widget_instance *item)
 				/* ctf/slayer: ctf's rules, scored by kills and captures (the
 				limit is in captures, each worth the capture points) */
 				if (changed)
-					variant->universal_variant.score_to_win = 4;
+					variant->universal_variant.score_to_win = 3;
 				if (changed || variant->game_engine_variant.ctf.points_per_capture <= 0)
 					variant->game_engine_variant.ctf.points_per_capture = 25;
 				variant->universal_variant.teams = 1;

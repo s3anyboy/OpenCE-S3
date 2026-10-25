@@ -55,7 +55,13 @@ boolean campaign_score_player_stats(long player_index, long *score, long *kills,
 
 /* (network_coop.c) network co-op: the host scores the kills and sends each
 to the clients, and when the level is won */
-void campaign_score_network_kill(short player_index, long variant_index, short points, boolean competitive);
+void campaign_score_network_kill(short player_index, long variant_index, short points, boolean competitive,
+	long game_time);
+/* (network_coop.c's network_coop_reverted) a network co-op host went back to a
+checkpoint saved at `restored_time`: the kills after it are forgotten, and its
+clients are told; and on a client, as the host tells it */
+void campaign_score_coop_reverted(long restored_time);
+void campaign_score_network_reverted(long restored_time);
 void campaign_score_network_won(boolean competitive);
 
 #endif

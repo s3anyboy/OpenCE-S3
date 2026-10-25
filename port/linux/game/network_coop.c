@@ -224,6 +224,10 @@ enum
 	/* a grunt's headshot party: reals the head's position (old clients ignore
 	an event kind they do not know) */
 	_coop_event_headshot_party,
+	/* the host went back to a checkpoint: tag_index the game time it was
+	saved at, after which the campaign score's kills are forgotten
+	(campaign_score.c) */
+	_coop_event_score_reverted,
 };
 
 /* distributed_coop_event.type of an effect: at a cutscene flag (value), or on
@@ -1896,7 +1900,12 @@ static void client_apply_event(
 		}
 		break;
 	case _coop_event_score_kill:
-		campaign_score_network_kill(event->value, event->tag_index, event->frame, event->target == 1);
+		/* (definition_index the host's game time of the kill) */
+		campaign_score_network_kill(event->value, event->tag_index, event->frame, event->target == 1,
+			event->definition_index);
+		break;
+	case _coop_event_score_reverted:
+		campaign_score_network_reverted(event->tag_index);
 		break;
 	case _coop_event_score_won:
 		campaign_score_network_won(event->target == 1);
@@ -2465,7 +2474,8 @@ void network_coop_note_score_kill(
 	short player_index,
 	long variant_index,
 	short points,
-	boolean competitive)
+	boolean competitive,
+	long game_time)
 {
 	struct distributed_coop_event *event = event_new(_coop_event_score_kill);
 
@@ -2475,6 +2485,16 @@ void network_coop_note_score_kill(
 	event->value = player_index;
 	event->frame = points;
 	event->tag_index = variant_index;
+	event->definition_index = game_time;
+}
+
+void network_coop_note_score_reverted(
+	long game_time)
+{
+	struct distributed_coop_event *event = event_new(_coop_event_score_reverted);
+
+	if (event)
+		event->tag_index = game_time;
 }
 
 void network_coop_note_score_won(
@@ -2766,6 +2786,9 @@ void network_coop_reverted(
 
 	if (!coop_host())
 		return;
+	/* (the campaign score's kills after the checkpoint's time are gone, the
+	enemies being back, here and on the clients) */
+	campaign_score_coop_reverted(game_time_get());
 	ticks = now - game_time_get();
 	if (ticks > 0)
 	{
