@@ -141,6 +141,7 @@ symbols in this file:
 #include "sound/sound_definitions.h"
 #include "units/bipeds.h"
 #include "units/units.h"
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_magic.c */
 /* port: port/linux/game/overshield_effect.c */
 boolean overshield_effect_active(long object_index);
 boolean overshield_effect_hit_effect_allowed(long effect_index);
@@ -1497,6 +1498,10 @@ static void projectile_detonate(
 		_ai_spatial_effect_weapon_detonation,
 		definition->projectile.detonation_noise,
 		1);
+
+	/* port: the Shadowrun prototype's projectiles that bring about a spell
+	where they detonate, on its maps (port/linux/game/shadowrun_magic.c) */
+	shadowrun_projectile_detonate(projectile_index, &marker_points[0]);
 
 	return;
 }

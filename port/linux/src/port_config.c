@@ -744,9 +744,9 @@ static const struct config_setting config_settings[] =
 	{ "debug.test_input", _config_string, "\"\"", "HALO_TEST_INPUT", _environment_value, _platform_all,
 		"\"bot:<seed>\" plays controller 1 with a scripted pattern (automated\n"
 		"network tests); \"look:<seed>\" stands still, only turning and looking\n"
-		"up and down; \"menu:<buttons>\" presses menu buttons one a second (a,\n"
-		"b, x, y, up, down, left, right, start, back or wait, separated by\n"
-		"spaces or commas), for testing the menus; empty for none." },
+		"up and down; \"menu:<buttons>\" presses buttons one a second (a, b,\n"
+		"x, y, black, white, lt, rt, up, down, left, right, start, back or wait,\n"
+		"separated by spaces or commas), for testing the menus; empty for none." },
 	{ "debug.bot_trace", _config_integer, "0", "HALO_BOT_TRACE", _environment_value, _platform_all,
 		"Log each bot's state (bots.count) every this many seconds: where it is\n"
 		"and goes, its path, target and weapon; 0 never." },

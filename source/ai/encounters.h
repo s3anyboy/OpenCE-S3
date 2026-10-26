@@ -142,6 +142,9 @@ void encounter_create(
 	long encounter_index,
 	short desired_platoon_index,
 	short desired_squad_index);
+/* port: one actor of the encounter's first squad (encounters.c) */
+long encounter_port_create_actor(
+	long encounter_index);
 short encounter_get_actor_starting_location(
 	long encounter_index,
 	long squad_index,

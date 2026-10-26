@@ -139,6 +139,7 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "units/vehicles.h"
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_magic.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -1164,6 +1165,61 @@ static void object_damage_aftermath(
 	return;
 }
 
+/* port: an object whose body's vitality the Shadowrun prototype's trees of
+life change themselves dies, or is destroyed, as damage would have it
+(port/linux/game/shadowrun_magic.c; its executable's 0x1BBC00) */
+void object_port_check_body(
+	long object_index)
+{
+	struct object_datum *object = object_get(object_index);
+	struct object_definition *object_definition = object_definition_get(object->definition_index);
+
+	if (object_definition->object.collision_model.index != NONE)
+	{
+		struct collision_model *collision_model =
+			collision_model_definition_get(object_definition->object.collision_model.index);
+		struct damage_resistance const *damage_resistance = &collision_model->resistance;
+		real body_vitality = object_get_actual_body_vitality(object_index, FALSE);
+
+		if (damage_resistance->body_destroyed_threshold < 0.f &&
+			body_vitality < damage_resistance->body_destroyed_threshold)
+		{
+			object_destroy(object_index);
+		}
+		else if (body_vitality < 0.f)
+		{
+			if (!TEST_FLAG(object->object.damage_flags, _object_dead_bit))
+			{
+				short dying_region_index;
+
+				for (dying_region_index = 0;
+					dying_region_index < MIN(damage_resistance->regions.count, MAXIMUM_REGIONS_PER_OBJECT);
+					dying_region_index++)
+				{
+					struct damage_region const *region = TAG_BLOCK_GET_ELEMENT(
+						&damage_resistance->regions,
+						dying_region_index,
+						struct damage_region);
+
+					if (TEST_FLAG(region->flags, _object_region_dies_when_object_dies_bit))
+						object_destroy_region(object_index, dying_region_index);
+				}
+				object_deplete_body(object_index);
+			}
+		}
+		else if (body_vitality < damage_resistance->body_damaged_effect_threshold &&
+			!TEST_FLAG(object->object.damage_flags, _object_passed_body_damage_threshold_bit))
+		{
+			damage_effect_new_on_object(
+				damage_resistance->body_damaged_effect.index,
+				object_index);
+			SET_FLAG(object->object.damage_flags, _object_passed_body_damage_threshold_bit, TRUE);
+		}
+	}
+
+	return;
+}
+
 static void object_damage_body(
 	long object_index,
 	short region_index,
@@ -1468,6 +1524,12 @@ void object_cause_damage(
 
 	/* port: a player who is gone is credited with nothing */
 	damage_data_validate_owner(damage);
+
+	/* port: on the Shadowrun prototype's maps, a unit hidden in its smoke
+	deals no damage, and takes none once its smoke has it camouflaged, nor
+	while it takes a spirit animal's form (port/linux/game/shadowrun_magic.c) */
+	if (!shadowrun_damage_allowed(damage->owner_object_index, object_index))
+		return;
 
 	damage_effect = damage_effect_definition_get(damage->definition_index);
 	damage_definition = &damage_effect->damage;

@@ -1,0 +1,494 @@
+/*
+SHADOWRUN_DEFINITIONS.H
+
+The Shadowrun prototype's own tags, as its executable (cachesym.xbe, build
+01.12.07.0132) reads them: the unit's (srud), which a biped names, and its
+magic's (m1ed, m2ed, m3ed). Only what the game reads is named; the rest is
+padding of the right size. The offsets are the executable's, and each
+structure is checked against them below. The tag validator checks these
+groups as it checks this build's (tag_schema_shadowrun.c).
+
+Each spell has a block of five levels, chosen by the unit's race (a unit's
+srud has a race block of the same length): what it costs, what it holds back
+while it lasts and how long it waits before it can be cast again.
+*/
+
+#ifndef __SHADOWRUN_DEFINITIONS_H
+#define __SHADOWRUN_DEFINITIONS_H
+#pragma once
+
+/* ---------- headers */
+
+#include "tag_files/tag_groups.h"
+
+#include <stddef.h>
+
+/* ---------- constants */
+
+enum
+{
+	SHADOWRUN_UNIT_DEFINITION_TAG = 'srud',
+	SHADOWRUN_MAGIC1_DEFINITION_TAG = 'm1ed',
+	SHADOWRUN_MAGIC2_DEFINITION_TAG = 'm2ed',
+	SHADOWRUN_MAGIC3_DEFINITION_TAG = 'm3ed',
+	SHADOWRUN_BUY_MENU_DEFINITION_TAG = 'buym',
+
+	/* the races a unit definition has (and the levels of each spell) */
+	MAXIMUM_SHADOWRUN_RACES = 5,
+
+	/* the spells, as the executable numbers them (its names, at 0x4865e8) */
+	_shadowrun_spell_teleport = 0,
+	_shadowrun_spell_gust,
+	_shadowrun_spell_tree_of_life,
+	_shadowrun_spell_resurrection,
+	_shadowrun_spell_strangle,
+	_shadowrun_spell_summon_elemental,
+	_shadowrun_spell_spirit_animal,
+	_shadowrun_spell_pillar_of_salt,
+	_shadowrun_spell_smoke,
+	NUMBER_OF_SHADOWRUN_SPELLS,
+
+	/* the magic and tech a unit may have, each with its own wait */
+	MAXIMUM_SHADOWRUN_POWERS = 18,
+};
+
+/* ---------- structures */
+
+/* a spell's level: what one race pays for it (0x200 bytes) */
+struct shadowrun_spell_level
+{
+	byte unused0[0x100];
+	/* the mana it takes */
+	long mana_cost;
+	/* the mana it takes each second while it lasts (smoke) */
+	real mana_cost_per_second;
+	/* the capacity it holds back while it lasts (resurrection's zombies) */
+	long capacity_reserved;
+	/* how long it is before this spell can be cast again (ticks) */
+	long cooldown_ticks;
+	byte unused1[0xF0];
+};
+
+/* m1ed: teleport, gust and tree of life (0x700 bytes) */
+struct shadowrun_magic1_definition
+{
+	byte unused0[0x80];
+
+	/* teleport */
+	long teleport_cooldown_ticks;
+	/* the unit moves when the cooldown is down to this */
+	long teleport_move_ticks;
+	long unused1;
+	real teleport_distance;
+	struct tag_reference teleport_windup_effect;
+	struct tag_reference teleport_windup_damage;
+	struct tag_reference teleport_before_effect;
+	struct tag_reference teleport_before_damage;
+	struct tag_reference teleport_after_effect;
+	struct tag_reference teleport_after_damage;
+	struct tag_block teleport_levels;
+	short teleport_ai_unit_effect;
+	short unused2;
+	byte unused3[0x80];
+
+	/* gust */
+	struct tag_reference gust_cast_damage;
+	struct tag_reference gust_cast_effect;
+	struct tag_reference gust_projectile;
+	struct tag_reference gust_effect;
+	long gust_cooldown_ticks;
+	long unused4;
+	/* how far it reaches, and how far from its line it pushes */
+	real gust_range;
+	real gust_maximum_distance;
+	/* within this of its line it pushes as hard as it can */
+	real gust_full_force_distance;
+	real gust_near_force;
+	real gust_far_force;
+	real gust_vehicle_force_scale;
+	struct tag_block gust_levels;
+	struct tag_reference gust_damage;
+	/* how hard the AI takes the push */
+	real gust_ai_damage_fraction;
+	short gust_ai_damage_category;
+	short gust_ai_unit_effect;
+	/* how long a unit it pushes cannot be strangled (ticks) */
+	long gust_strangle_break_ticks;
+	byte unused5[0x78];
+
+	/* tree of life: a tree grows where the caster's grenade lands (an
+	actor's, where it aims) and heals those near it, withering as it does */
+	struct tag_reference tree_of_life_scenery;
+	long tree_of_life_cooldown_ticks;
+	long tree_of_life_growth_ticks;
+	long unused6;
+	/* how far an actor's aim reaches */
+	real tree_of_life_range;
+	real unused7;
+	/* a tree's scale grown, at random between these */
+	real tree_of_life_minimum_scale;
+	real tree_of_life_maximum_scale;
+	/* the most trees standing */
+	long tree_of_life_maximum_count;
+	/* how far a tree heals, and how much of a body's vitality a tick */
+	real tree_of_life_heal_radius;
+	real tree_of_life_heal_rate;
+	struct tag_reference tree_projectile;
+	/* what one healed takes (each second) and the effect on it */
+	struct tag_reference tree_of_life_heal_damage;
+	struct tag_reference tree_of_life_heal_effect;
+	struct tag_reference tree_of_life_cast_damage;
+	struct tag_reference tree_of_life_cast_effect;
+	long unused8;
+	struct tag_block tree_of_life_levels;
+	short tree_of_life_ai_unit_effect;
+	short unused9;
+	/* the vitality a tree loses each tick, the caster's last four and the
+	older */
+	real tree_of_life_decay;
+	real tree_of_life_old_decay;
+	byte unused10[0x3DC];
+};
+
+/* m2ed: resurrection, strangle and summon elemental (0x700 bytes) */
+struct shadowrun_magic2_definition
+{
+	byte unused0[0x80];
+
+	/* resurrection: a ball grows before the caster, and the bodies it
+	reaches in front of the caster rise, as actors of the encounter named
+	here on the caster's side */
+	struct tag_reference resurrection_finish_damage;
+	struct tag_reference resurrection_finish_effect;
+	/* how long the ball grows (ticks), and its radius grown */
+	long resurrection_cooldown_ticks;
+	real resurrection_radius;
+	char resurrection_encounter[32];
+	byte unused1[0x8];
+	struct tag_reference resurrection_effect;
+	struct tag_reference resurrection_damage;
+	real unused2;
+	struct tag_reference resurrection_projectile;
+	long unused10;
+	struct tag_block resurrection_levels;
+	short resurrection_ai_unit_effect;
+	short unused3;
+	/* the ball (scenery) */
+	struct tag_reference resurrection_ball;
+	/* what a raised body takes each tick once it is to die (a newer one
+	took its place), and a raised player's corpse in a team game */
+	struct tag_reference resurrection_doomed_damage;
+	struct tag_reference resurrection_corpse_damage;
+	/* how long an actor's ball grows (ticks) */
+	long resurrection_actor_cooldown_ticks;
+	/* the capacity the raised hold back (single player) */
+	long resurrection_capacity_reserved;
+	/* what a raised body takes each tick once it is dead again */
+	struct tag_reference resurrection_dead_damage;
+	byte unused4[0x20];
+
+	/* strangle: thorns grow where the caster aims, about a line across its
+	aim, on the floor, the ceiling and the walls */
+	struct tag_reference strangle_scenery;
+	long strangle_cooldown_ticks;
+	long strangle_growth_ticks;
+	long unused13;
+	real strangle_range;
+	/* how high above where it aims the line is, and the thorns' spacing on
+	it and scatter about it (world units) */
+	real strangle_height;
+	real unused14;
+	real strangle_spacing;
+	real strangle_scatter;
+	/* how far a thorn may lean (radians), about either axis */
+	real strangle_lean_i;
+	real strangle_lean_j;
+	/* a thorn's scale grown, of a random scale between these */
+	real strangle_scale;
+	real strangle_minimum_scale;
+	real strangle_maximum_scale;
+	/* how far from its point a thorn looks for a surface */
+	real strangle_reach;
+	/* the thorns a cast makes, and the most kept */
+	long strangle_count;
+	long strangle_maximum_count;
+	byte unused15[0x8];
+	struct tag_reference strangle_damage;
+	struct tag_reference strangle_projectile;
+	struct tag_reference strangle_cast_damage;
+	struct tag_reference strangle_cast_effect;
+	struct tag_block strangle_levels;
+	short strangle_ai_unit_effect;
+	short unused6;
+	byte unused7[0x58];
+
+	/* summon elemental: an actor of the encounter named here, on the
+	caster's side */
+	long summon_cooldown_ticks;
+	real summon_range;
+	char summon_encounter[32];
+	byte unused8[0x8];
+	struct tag_reference summon_birth_effect;
+	struct tag_reference summon_birth_damage;
+	real summon_lifetime;
+	struct tag_reference summon_projectile;
+	struct tag_reference summon_cast_damage;
+	struct tag_reference summon_cast_effect;
+	long unused11;
+	struct tag_block summon_levels;
+	/* the names a summon is given (one at random) */
+	struct tag_reference summon_names;
+	short summon_ai_unit_effect;
+	short unused12;
+	/* what a summon takes each tick once its time is up, or its caster is
+	dead */
+	struct tag_reference summon_dying_damage;
+	byte unused9[0x48];
+
+	/* firewall (strangle's other form, which the fire flag of a projectile
+	brings about where it detonates): fires burn on the surfaces about where
+	the caster aims, for the definition's time, hurting those of the other
+	sides in their reach */
+	struct tag_reference firewall_scenery;
+	long firewall_cooldown_ticks;
+	long firewall_lifetime_ticks;
+	real firewall_range;
+	real firewall_height;
+	real unused16;
+	real firewall_spacing;
+	real firewall_scatter;
+	real unused17[2];
+	real firewall_reach;
+	long firewall_count;
+	/* how far a fire hurts, and over how many ticks its damage is dealt */
+	real firewall_damage_radius;
+	long firewall_damage_ticks;
+	struct tag_reference firewall_damage;
+	struct tag_reference firewall_projectile;
+	struct tag_reference firewall_cast_damage;
+	struct tag_reference firewall_cast_effect;
+	struct tag_reference firewall_effect;
+	byte unused18[0x2EC];
+};
+
+/* m3ed: spirit animal and smoke (0x700 bytes) */
+struct shadowrun_magic3_definition
+{
+	byte unused0[0x80];
+
+	/* spirit animal: the caster takes its animal's form, growing, while its
+	mana lasts; dead, it becomes the biped here */
+	long spirit_animal_cooldown_ticks;
+	struct tag_reference spirit_animal_damage;
+	struct tag_reference spirit_animal_effect;
+	real unused1;
+	struct tag_reference spirit_animal_cast_damage;
+	struct tag_reference spirit_animal_cast_effect;
+	long unused2;
+	struct tag_block spirit_animal_levels;
+	struct tag_reference spirit_animal_biped;
+	struct tag_reference spirit_animal_cast_sound;
+	struct tag_reference spirit_animal_sound;
+	char spirit_animal_encounter[32];
+	byte unused3[0x158];
+
+	/* smoke: the caster is hidden and camouflaged, while its mana lasts */
+	long smoke_cooldown_ticks;
+	byte unused4[0x8];
+	/* how long the caster takes to be camouflaged, and to be seen again
+	(seconds), and how camouflaged it is (its race's head hidden too) */
+	real smoke_camouflage_time;
+	real smoke_uncamouflage_time;
+	real smoke_camouflage;
+	struct tag_reference smoke_cast_damage;
+	struct tag_reference smoke_effect;
+	struct tag_reference smoke_cast_effect;
+	struct tag_block smoke_levels;
+	short smoke_ai_unit_effect;
+	short unused5;
+	byte unused6[0x428];
+};
+
+/* srud: a Shadowrun unit (0x600 bytes) */
+struct shadowrun_unit_definition
+{
+	byte unused0[0x100];
+	struct tag_reference magic1;
+	struct tag_reference magic2;
+	struct tag_reference magic3;
+	struct tag_reference tech1;
+	struct tag_reference tech2;
+	struct tag_reference tech3;
+	struct tag_block races;
+	byte unused1[0xB4];
+	struct tag_reference default_weapon_data;
+	byte unused2[0x2C0];
+	struct tag_reference buy_menu;
+	byte unused3[0x100];
+};
+
+/* a race of a Shadowrun unit (0xA00 bytes) */
+struct shadowrun_race
+{
+	byte unused0[0xFC];
+	unsigned long flags;
+	/* the unit's scale, and the scenery it wears on its head */
+	real scale;
+	struct tag_reference head;
+	byte unused3[0x14];
+	/* its body's vitality (a player's: an actor's is its actor's) */
+	real maximum_body_vitality;
+	byte unused4[0x30];
+	/* how hard a gust pushes it, in the air and on the ground */
+	real gust_airborne_scale;
+	real gust_scale;
+	byte unused1[0x29C];
+	/* the most mana it has, which magic and tech held back take from */
+	long mana_capacity;
+	/* mana it regains each second, after it has waited this long (seconds)
+	since it last spent any */
+	real mana_regeneration_per_second;
+	real mana_regeneration_delay;
+	byte unused2[0x5F4];
+};
+
+/* buym: the buy menu (only its sound for a spell that fails: 0x7D0 bytes) */
+struct shadowrun_buy_menu_definition
+{
+	byte unused0[0x6F0];
+	struct tag_reference cast_failed_sound;
+	byte unused1[0xD0];
+};
+
+/* ---------- the executable's offsets */
+
+typedef char shadowrun_spell_level_size_assert[sizeof(struct shadowrun_spell_level) == 0x200 ? 1 : -1];
+typedef char shadowrun_spell_level_cost_assert[offsetof(struct shadowrun_spell_level, mana_cost) == 0x100 ? 1 : -1];
+typedef char shadowrun_spell_level_cooldown_assert[offsetof(struct shadowrun_spell_level, cooldown_ticks) == 0x10C ? 1 : -1];
+
+typedef char shadowrun_magic1_size_assert[sizeof(struct shadowrun_magic1_definition) == 0x700 ? 1 : -1];
+typedef char shadowrun_magic1_teleport_damage_assert[
+	offsetof(struct shadowrun_magic1_definition, teleport_after_damage.index) == 0xEC ? 1 : -1];
+typedef char shadowrun_magic1_teleport_levels_assert[
+	offsetof(struct shadowrun_magic1_definition, teleport_levels) == 0xF0 ? 1 : -1];
+typedef char shadowrun_magic1_teleport_ai_assert[
+	offsetof(struct shadowrun_magic1_definition, teleport_ai_unit_effect) == 0xFC ? 1 : -1];
+typedef char shadowrun_magic1_gust_projectile_assert[
+	offsetof(struct shadowrun_magic1_definition, gust_projectile.index) == 0x1AC ? 1 : -1];
+typedef char shadowrun_magic1_gust_cooldown_assert[
+	offsetof(struct shadowrun_magic1_definition, gust_cooldown_ticks) == 0x1C0 ? 1 : -1];
+typedef char shadowrun_magic1_gust_levels_assert[
+	offsetof(struct shadowrun_magic1_definition, gust_levels) == 0x1E0 ? 1 : -1];
+typedef char shadowrun_magic1_gust_damage_assert[
+	offsetof(struct shadowrun_magic1_definition, gust_damage.index) == 0x1F8 ? 1 : -1];
+typedef char shadowrun_magic1_gust_strangle_assert[
+	offsetof(struct shadowrun_magic1_definition, gust_strangle_break_ticks) == 0x204 ? 1 : -1];
+typedef char shadowrun_magic1_tree_scenery_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_of_life_scenery) == 0x280 ? 1 : -1];
+typedef char shadowrun_magic1_tree_cooldown_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_of_life_cooldown_ticks) == 0x290 ? 1 : -1];
+typedef char shadowrun_magic1_tree_projectile_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_projectile) == 0x2B8 ? 1 : -1];
+typedef char shadowrun_magic1_tree_heal_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_of_life_heal_rate) == 0x2B4 ? 1 : -1];
+typedef char shadowrun_magic1_tree_heal_damage_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_of_life_heal_damage.index) == 0x2D4 ? 1 : -1];
+typedef char shadowrun_magic1_tree_cast_effect_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_of_life_cast_effect.index) == 0x304 ? 1 : -1];
+typedef char shadowrun_magic1_tree_levels_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_of_life_levels) == 0x30C ? 1 : -1];
+typedef char shadowrun_magic1_tree_shrink_assert[
+	offsetof(struct shadowrun_magic1_definition, tree_of_life_old_decay) == 0x320 ? 1 : -1];
+
+typedef char shadowrun_magic2_size_assert[sizeof(struct shadowrun_magic2_definition) == 0x700 ? 1 : -1];
+typedef char shadowrun_magic2_resurrection_finish_assert[
+	offsetof(struct shadowrun_magic2_definition, resurrection_finish_effect.index) == 0x9C ? 1 : -1];
+typedef char shadowrun_magic2_resurrection_encounter_assert[
+	offsetof(struct shadowrun_magic2_definition, resurrection_encounter) == 0xA8 ? 1 : -1];
+typedef char shadowrun_magic2_resurrection_levels_assert[
+	offsetof(struct shadowrun_magic2_definition, resurrection_levels) == 0x108 ? 1 : -1];
+typedef char shadowrun_magic2_resurrection_ball_assert[
+	offsetof(struct shadowrun_magic2_definition, resurrection_ball.index) == 0x124 ? 1 : -1];
+typedef char shadowrun_magic2_resurrection_capacity_assert[
+	offsetof(struct shadowrun_magic2_definition, resurrection_capacity_reserved) == 0x14C ? 1 : -1];
+typedef char shadowrun_magic2_resurrection_dead_assert[
+	offsetof(struct shadowrun_magic2_definition, resurrection_dead_damage.index) == 0x15C ? 1 : -1];
+typedef char shadowrun_magic2_strangle_cooldown_assert[
+	offsetof(struct shadowrun_magic2_definition, strangle_cooldown_ticks) == 0x190 ? 1 : -1];
+typedef char shadowrun_magic2_strangle_range_assert[
+	offsetof(struct shadowrun_magic2_definition, strangle_range) == 0x19C ? 1 : -1];
+typedef char shadowrun_magic2_strangle_reach_assert[
+	offsetof(struct shadowrun_magic2_definition, strangle_reach) == 0x1C4 ? 1 : -1];
+typedef char shadowrun_magic2_strangle_maximum_assert[
+	offsetof(struct shadowrun_magic2_definition, strangle_maximum_count) == 0x1CC ? 1 : -1];
+typedef char shadowrun_magic2_strangle_cast_effect_assert[
+	offsetof(struct shadowrun_magic2_definition, strangle_cast_effect.index) == 0x214 ? 1 : -1];
+typedef char shadowrun_magic2_strangle_levels_assert[
+	offsetof(struct shadowrun_magic2_definition, strangle_levels) == 0x218 ? 1 : -1];
+typedef char shadowrun_magic2_summon_cooldown_assert[
+	offsetof(struct shadowrun_magic2_definition, summon_cooldown_ticks) == 0x280 ? 1 : -1];
+typedef char shadowrun_magic2_summon_encounter_assert[
+	offsetof(struct shadowrun_magic2_definition, summon_encounter) == 0x288 ? 1 : -1];
+typedef char shadowrun_magic2_summon_cast_effect_assert[
+	offsetof(struct shadowrun_magic2_definition, summon_cast_effect.index) == 0x300 ? 1 : -1];
+typedef char shadowrun_magic2_summon_names_assert[
+	offsetof(struct shadowrun_magic2_definition, summon_names.index) == 0x320 ? 1 : -1];
+typedef char shadowrun_magic2_summon_ai_assert[
+	offsetof(struct shadowrun_magic2_definition, summon_ai_unit_effect) == 0x324 ? 1 : -1];
+typedef char shadowrun_magic2_summon_dying_assert[
+	offsetof(struct shadowrun_magic2_definition, summon_dying_damage.index) == 0x334 ? 1 : -1];
+typedef char shadowrun_magic2_firewall_scenery_assert[
+	offsetof(struct shadowrun_magic2_definition, firewall_scenery.index) == 0x38C ? 1 : -1];
+typedef char shadowrun_magic2_firewall_reach_assert[
+	offsetof(struct shadowrun_magic2_definition, firewall_reach) == 0x3B4 ? 1 : -1];
+typedef char shadowrun_magic2_firewall_damage_assert[
+	offsetof(struct shadowrun_magic2_definition, firewall_damage.index) == 0x3D0 ? 1 : -1];
+typedef char shadowrun_magic2_firewall_effect_assert[
+	offsetof(struct shadowrun_magic2_definition, firewall_effect.index) == 0x410 ? 1 : -1];
+typedef char shadowrun_magic2_summon_levels_assert[
+	offsetof(struct shadowrun_magic2_definition, summon_levels) == 0x308 ? 1 : -1];
+
+typedef char shadowrun_magic3_size_assert[sizeof(struct shadowrun_magic3_definition) == 0x700 ? 1 : -1];
+typedef char shadowrun_magic3_spirit_animal_effect_assert[
+	offsetof(struct shadowrun_magic3_definition, spirit_animal_effect.index) == 0xA0 ? 1 : -1];
+typedef char shadowrun_magic3_spirit_animal_levels_assert[
+	offsetof(struct shadowrun_magic3_definition, spirit_animal_levels) == 0xCC ? 1 : -1];
+typedef char shadowrun_magic3_spirit_animal_biped_assert[
+	offsetof(struct shadowrun_magic3_definition, spirit_animal_biped.index) == 0xE4 ? 1 : -1];
+typedef char shadowrun_magic3_spirit_animal_encounter_assert[
+	offsetof(struct shadowrun_magic3_definition, spirit_animal_encounter) == 0x108 ? 1 : -1];
+typedef char shadowrun_magic3_smoke_cooldown_assert[
+	offsetof(struct shadowrun_magic3_definition, smoke_cooldown_ticks) == 0x280 ? 1 : -1];
+typedef char shadowrun_magic3_smoke_camouflage_assert[
+	offsetof(struct shadowrun_magic3_definition, smoke_camouflage) == 0x294 ? 1 : -1];
+typedef char shadowrun_magic3_smoke_effect_assert[
+	offsetof(struct shadowrun_magic3_definition, smoke_effect.index) == 0x2B4 ? 1 : -1];
+typedef char shadowrun_magic3_smoke_levels_assert[
+	offsetof(struct shadowrun_magic3_definition, smoke_levels) == 0x2C8 ? 1 : -1];
+typedef char shadowrun_magic3_smoke_ai_assert[
+	offsetof(struct shadowrun_magic3_definition, smoke_ai_unit_effect) == 0x2D4 ? 1 : -1];
+
+typedef char shadowrun_unit_size_assert[sizeof(struct shadowrun_unit_definition) == 0x600 ? 1 : -1];
+typedef char shadowrun_unit_magic1_assert[
+	offsetof(struct shadowrun_unit_definition, magic1.index) == 0x10C ? 1 : -1];
+typedef char shadowrun_unit_tech3_assert[
+	offsetof(struct shadowrun_unit_definition, tech3.index) == 0x15C ? 1 : -1];
+typedef char shadowrun_unit_races_assert[offsetof(struct shadowrun_unit_definition, races) == 0x160 ? 1 : -1];
+typedef char shadowrun_unit_weapon_assert[
+	offsetof(struct shadowrun_unit_definition, default_weapon_data.index) == 0x22C ? 1 : -1];
+typedef char shadowrun_unit_buy_menu_assert[
+	offsetof(struct shadowrun_unit_definition, buy_menu.index) == 0x4FC ? 1 : -1];
+
+typedef char shadowrun_race_size_assert[sizeof(struct shadowrun_race) == 0xA00 ? 1 : -1];
+typedef char shadowrun_race_scale_assert[offsetof(struct shadowrun_race, scale) == 0x100 ? 1 : -1];
+typedef char shadowrun_race_head_assert[offsetof(struct shadowrun_race, head.index) == 0x110 ? 1 : -1];
+typedef char shadowrun_race_vitality_assert[offsetof(struct shadowrun_race, maximum_body_vitality) == 0x128 ? 1 : -1];
+typedef char shadowrun_race_gust_assert[offsetof(struct shadowrun_race, gust_scale) == 0x160 ? 1 : -1];
+typedef char shadowrun_race_mana_assert[offsetof(struct shadowrun_race, mana_capacity) == 0x400 ? 1 : -1];
+typedef char shadowrun_race_delay_assert[offsetof(struct shadowrun_race, mana_regeneration_delay) == 0x408 ? 1 : -1];
+
+typedef char shadowrun_buy_menu_size_assert[sizeof(struct shadowrun_buy_menu_definition) == 0x7D0 ? 1 : -1];
+typedef char shadowrun_buy_menu_sound_assert[
+	offsetof(struct shadowrun_buy_menu_definition, cast_failed_sound.index) == 0x6FC ? 1 : -1];
+
+#endif

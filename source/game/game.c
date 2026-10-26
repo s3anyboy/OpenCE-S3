@@ -187,6 +187,7 @@ struct game_options;
 #include "profile_console.h" /* port: port/linux/game/profile_console.c */
 #endif
 #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -299,6 +300,8 @@ void game_initialize(
 	decals_initialize();
 	collision_log_initialize();
 	players_initialize();
+	/* port: the Shadowrun prototype's players (port/linux/game/shadowrun_units.c) */
+	shadowrun_initialize();
 	contrails_initialize();
 	particles_initialize();
 	effects_initialize();
@@ -389,6 +392,9 @@ void game_tick(
 		profile_scope(game_tick_hs_section, hs_update();)
 	profile_scope(game_tick_recorded_animations_section, recorded_animations_update();)
 	profile_scope(game_tick_objects_section, objects_update();)
+	/* port: the Shadowrun prototype's trees of life, on its maps
+	(port/linux/game/shadowrun_magic.c) */
+	shadowrun_game_tick();
 	profile_scope(game_tick_players_after_section, players_update_after_game();)
 	profile_scope(game_tick_hud_section, hud_update();)
 	profile_scope(game_tick_player_effect_section, player_effect_update();)
@@ -667,6 +673,8 @@ void game_initialize_for_new_map(
 	interface_initialize_for_new_map();
 	game_allegiance_initialize_for_new_map();
 	players_initialize_for_new_map();
+	/* port: (port/linux/game/shadowrun_units.c) */
+	shadowrun_initialize_for_new_map();
 	scenario_initialize_for_new_map();
 	objects_initialize_for_new_map();
 	/* nothing of the distributed netcode's carried into the new game

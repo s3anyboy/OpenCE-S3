@@ -212,6 +212,7 @@ symbols in this file:
 #include "real_math.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c; after the limit2d alias above */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 
 /* ---------- constants */
 
@@ -727,6 +728,13 @@ static void handle_one_player_input(
 				player->desired_grenade_index))
 		{
 			player->desired_grenade_index = unit->unit.desired_grenade_index;
+		}
+		/* port: on the Shadowrun prototype's maps the control also chooses the
+		spell the grenade control casts (port/linux/game/shadowrun_units.c) */
+		if (TEST_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit) &&
+			shadowrun_unit_rotate_selection(player->unit_index, player->desired_grenade_index))
+		{
+			SET_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit, FALSE);
 		}
 		if (TEST_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit) ||
 			!unit_get_grenade_count(

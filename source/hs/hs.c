@@ -2846,6 +2846,7 @@ symbols in this file:
 #include "profile_console.h" /* port: port/linux/game/profile_console.c */
 #endif
 #include "structure_culling.h" /* port: port/linux/game/structure_culling.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 
 /* ---------- constants */
 
@@ -3384,7 +3385,7 @@ typedef void (*hs_token_enumerator)(
 
 struct hs_function_table_storage
 {
-	struct hs_function_definition const *functions[418 + 7];
+	struct hs_function_definition const *functions[418 + 10];
 	struct profile_section profile;
 	hs_token_enumerator token_enumerators[18];
 };
@@ -11792,7 +11793,82 @@ static struct hs_function_definition_with_1_parameter const debug_structure_cull
 	},
 };
 
-long const hs_function_table_count= 418 + 7;
+/* port: the Shadowrun prototype's magic, which its maps' scripts call
+(port/linux/game/shadowrun_units.c); on other maps they do nothing */
+static void hs_player_set_magic(
+	long spell)
+{
+	shadowrun_players_set_magic((short)spell);
+
+	return;
+}
+
+static void hs_player_change_magic(
+	long spell)
+{
+	shadowrun_players_change_magic((short)spell);
+
+	return;
+}
+
+static void hs_game_set_assignment_scheme(
+	long scheme)
+{
+	shadowrun_game_set_assignment_scheme((short)scheme);
+
+	return;
+}
+
+HS_EVALUATE_VOID_LONG(hs_player_set_magic_evaluate, hs_player_set_magic)
+HS_EVALUATE_VOID_LONG(hs_player_change_magic_evaluate, hs_player_change_magic)
+HS_EVALUATE_VOID_LONG(hs_game_set_assignment_scheme_evaluate, hs_game_set_assignment_scheme)
+
+static struct hs_function_definition_with_1_parameter const player_set_magic_definition=
+{
+	{
+		_hs_type_void,
+		0,
+		"player_set_magic",
+		hs_macro_function_parse,
+		hs_player_set_magic_evaluate,
+		"the Shadowrun prototype's: gives the players the magic (its id) the grenade control casts.",
+		NULL,
+		1,
+		{ _hs_type_long_integer },
+	},
+};
+
+static struct hs_function_definition_with_1_parameter const player_change_magic_definition=
+{
+	{
+		_hs_type_void,
+		0,
+		"player_change_magic",
+		hs_macro_function_parse,
+		hs_player_change_magic_evaluate,
+		"the Shadowrun prototype's: will add magic to the players, first parameter is the magic id",
+		NULL,
+		1,
+		{ _hs_type_long_integer },
+	},
+};
+
+static struct hs_function_definition_with_1_parameter const game_set_assignment_scheme_definition=
+{
+	{
+		_hs_type_void,
+		0,
+		"game_set_assignment_scheme",
+		hs_macro_function_parse,
+		hs_game_set_assignment_scheme_evaluate,
+		"the Shadowrun prototype's: sets the current magic/tech assignment scheme, first parameter is the scheme: 0=no assignment, 1=periodic table, 2=twin columns, 3=improved toggle radial, 4=radio-style radial, 5=improved hold radial",
+		NULL,
+		1,
+		{ _hs_type_long_integer },
+	},
+};
+
+long const hs_function_table_count= 418 + 10;
 
 struct hs_enum_definition const hs_enum_table[]=
 {
@@ -12231,6 +12307,9 @@ struct hs_function_table_storage hs_function_table=
 		&mods_list_definition,
 		&structure_culling_definition.definition, /* port: local structure culling switch */
 		&debug_structure_culling_definition.definition, /* port: local culling debug view */
+		&player_set_magic_definition.definition, /* port: the Shadowrun prototype's */
+		&player_change_magic_definition.definition,
+		&game_set_assignment_scheme_definition.definition,
 	},
 	{
 		"hs_update",
@@ -12741,6 +12820,11 @@ static boolean const hs_function_allowed_in_maps[]=
 	/* port: local structure rendering */
 	FALSE, /* structure_culling: this machine's rendering */
 	FALSE, /* debug_structure_culling: this machine's rendering */
+
+	/* port: the Shadowrun prototype's, for its maps */
+	TRUE, /* player_set_magic */
+	TRUE, /* player_change_magic */
+	TRUE, /* game_set_assignment_scheme */
 };
 typedef char verify_hs_function_allowed_in_maps_size[
 	NUMBEROF(hs_function_allowed_in_maps) == NUMBEROF(hs_function_table.functions) ? 1 : -1];

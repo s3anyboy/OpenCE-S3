@@ -139,6 +139,7 @@ symbols in this file:
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
 #include "cache_file_formats.h" /* port: CUSTOM_EDITION_TAG_CACHE_BYTES */
 #include "map_share.h" /* port: port/linux/game/map_share.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 
 /* ---------- constants */
 
@@ -783,6 +784,8 @@ void scenario_tags_unload(
 	else
 		tags_header_deregister_vertex_and_index_buffers(cache_file_globals.tag_header);
 	cache_file_globals.tags_loaded = FALSE;
+	/* port: (port/linux/game/shadowrun_units.c) */
+	shadowrun_tags_loaded(FALSE);
 	/* port: and the next map's tags are placed and its bsps moved anew
 	(cache_files_tags_place, cache_files_structure_bsps_place) */
 	cache_file_tag_data = NULL;
@@ -1506,6 +1509,9 @@ long scenario_tags_load(
 			global_tag_count = cache_file_globals.tag_header->tag_count;
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
 			cache_file_globals.tags_loaded = TRUE;
+			/* port: a Shadowrun prototype map plays its own game (port/linux/game/shadowrun_units.c) */
+			shadowrun_tags_loaded(cache_file_other_build &&
+				shadowrun_cache_tag_data((uint32_t)(unsigned long)cache_file_tag_data));
 			/* port: a PAL map played as the NTSC maps are (port/linux/game/pal_tags.c) */
 			{
 				extern void pal_tags_loaded(char const *build);
@@ -1789,4 +1795,26 @@ unsigned long tag_get_group_tag(
 	long tag_index)
 {
 	return cache_get_tag_instance(tag_index)->group_tag;
+}
+
+/* port: the group of the tag a map's data names, NONE when the index is not
+one of its tags (cache_get_tag_instance would assert) */
+unsigned long cache_file_tag_index_group_tag(
+	long tag_index)
+{
+	short absolute_index = (short)tag_index;
+	struct cache_file_tag_instance *tag_instance;
+
+	if (!cache_file_globals.tags_loaded || !global_tag_instances ||
+		absolute_index < 0 || absolute_index >= global_tag_count)
+	{
+		return (unsigned long)NONE;
+	}
+	tag_instance = &global_tag_instances[absolute_index];
+	if (tag_instance->tag_index != tag_index)
+	{
+		return (unsigned long)NONE;
+	}
+
+	return tag_instance->group_tag;
 }

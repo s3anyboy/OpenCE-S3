@@ -57,6 +57,7 @@ OBJECTS.C
 #include "sound/game_sound.h"
 #include "structures/structure_bsp_definitions.h"
 #include "units/units.h"
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 /* port: object_bounds_cache.c's */
 void object_bounds_cache_update(long object_index, real_point3d const *center, real radius);
 /* port: port/linux/game/first_person_legs.c's */
@@ -3484,8 +3485,10 @@ long object_new(
 		struct object_definition *object_definition = object_definition_get(definition_index);
 		struct object_type_definition *type_definition = object_type_definition_get(object_definition->object.type);
 
+		/* port: and on a Shadowrun prototype map what it adds to a unit after
+		the datum (port/linux/game/shadowrun_units.c) */
 		object_index = object_header_new(object_header_data, network_objects_new_object_index(),
-			type_definition->game_datum_size);
+			type_definition->game_datum_size + shadowrun_object_extra_size(object_definition->object.type));
 
 		if (object_index!=NONE)
 		{
@@ -3913,6 +3916,16 @@ static boolean object_update(
 	}
 
 	return result;
+}
+
+/* port: an object updated once more, outside the objects' update: the Shadowrun
+prototype settles a body it raises so (port/linux/game/shadowrun_magic.c) */
+void object_port_update(
+	long object_index)
+{
+	object_update(object_index);
+
+	return;
 }
 
 void object_compute_node_matrices_recursive(

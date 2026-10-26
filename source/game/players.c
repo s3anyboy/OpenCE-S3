@@ -239,6 +239,7 @@ symbols in this file:
 #include "devices/devices.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "bots.h" /* port: port/linux/game/bots.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 #include "cutscene/cinematics.h" /* port: network co-op's first spawns */
 #include "editor/editor_stubs.h"
 #include "effects/effects.h"
@@ -1525,6 +1526,10 @@ static void player_spawn(
 		player->powerup_durations,
 		0,
 		sizeof(player->powerup_durations));
+	/* port: on the Shadowrun prototype's maps, the unit's race, magic and
+	pool (port/linux/game/shadowrun_units.c) */
+	if (player->unit_index != NONE)
+		shadowrun_player_spawned(player_index);
 	player2 = player_get(player_index);
 	player2->action_result = _player_action_result_reload;
 	player2->action_object_index = NONE;

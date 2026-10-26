@@ -282,6 +282,8 @@ extern struct tag_schema_group const tag_schema_collision_groups[];
 extern struct tag_schema_group const tag_schema_render_groups[];
 extern struct tag_schema_group const tag_schema_effect_groups[];
 extern struct tag_schema_group const tag_schema_scenario_groups[];
+/* the Shadowrun prototype's own groups (tag_schema_shadowrun.c) */
+extern struct tag_schema_group const tag_schema_shadowrun_groups[];
 /* the groups a Custom Edition map's tags are of where they are laid out
 otherwise than this build's, as they are checked (tag_schema_models.c:
 gbxmodels, 'mod2', which the game takes as models, 'mode') */

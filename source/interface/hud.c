@@ -114,6 +114,7 @@ symbols in this file:
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_hud.c */
 
 /* ---------- constants */
 
@@ -1508,6 +1509,9 @@ void hud_draw_screen(
 				hud_show_action_response(player_index);
 				hud_play_unit_sounds(player, hud_scripted_globals->show_hud);
 				hud_render_unit_interface(player);
+				/* port: the Shadowrun prototype's magic, on its maps
+				(port/linux/game/shadowrun_hud.c) */
+				shadowrun_hud_draw(render.local_player_index, player->unit_index);
 				hud_render_nav_points(render.local_player_index);
 				hud_render_damage_indicators(render.local_player_index);
 			}

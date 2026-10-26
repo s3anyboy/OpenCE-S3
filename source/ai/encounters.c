@@ -2290,6 +2290,70 @@ void encounter_create(
 	return;
 }
 
+/* port: the Shadowrun prototype's spells raise and summon their actors one
+at a time, from an encounter of the map named for it, and keep them
+(port/linux/game/shadowrun_magic.c): one actor of the encounter's first
+squad, placed as encounter_create places it. Returns the actor, or NONE. (Its
+executable makes the encounter's definition have one squad, and gives the
+actor no unique leader's variant: its spells' encounters are of zombies and
+elementals.) */
+long encounter_port_create_actor(
+	long encounter_index)
+{
+	long actor_index = NONE;
+
+	if (ai_globals->ai_initialized_for_map)
+	{
+		struct encounter_definition *encounter_definition = TAG_BLOCK_GET_ELEMENT(
+			&global_scenario_get()->ai_encounters, DATUM_INDEX_TO_ABSOLUTE_INDEX(encounter_index), struct encounter_definition);
+
+		if (encounter_definition->squads.count > 0)
+		{
+			struct squad_definition *squad_definition = TAG_BLOCK_GET_ELEMENT(
+				&encounter_definition->squads, 0, struct squad_definition);
+			short starting_location_index = encounter_get_actor_starting_location(encounter_index, 0, FALSE);
+
+			if (starting_location_index != NONE)
+			{
+				struct actor_starting_location *starting_location = TAG_BLOCK_GET_ELEMENT(
+					&squad_definition->starting_locations, starting_location_index, struct actor_starting_location);
+				short actor_palette_index = starting_location->actor_variant_index != NONE ?
+					starting_location->actor_variant_index : squad_definition->actor_palette_index;
+				struct scenario *scenario = global_scenario_get();
+
+				if (VALID_INDEX(actor_palette_index, scenario->ai_actor_palette.count))
+				{
+					struct tag_reference *actor_palette_entry = TAG_BLOCK_GET_ELEMENT(
+						&scenario->ai_actor_palette, actor_palette_index, struct tag_reference);
+
+					if (actor_palette_entry->index != NONE)
+					{
+						struct actor_variant_definition *actor_variant_definition =
+							actor_variant_definition_get(actor_palette_entry->index);
+						boolean upgrade_major = FALSE;
+
+						if (actor_variant_definition->major_upgrade_reference.index != NONE)
+						{
+							boolean random = FALSE;
+							real chance = 0.f;
+
+							ai_get_major_upgrade_chance(squad_definition->major_upgrade, &upgrade_major, &random, &chance);
+							if (random)
+								upgrade_major = ai_consider_major_upgrade(encounter_index, 0, chance);
+						}
+						actor_index = actor_place(actor_palette_entry->index, encounter_index, 0, starting_location,
+							upgrade_major, 0);
+					}
+				}
+			}
+		}
+		encounter_update_status(encounter_index);
+		encounters_test_activation();
+	}
+
+	return actor_index;
+}
+
 void encounters_update(
 	void)
 {

@@ -696,6 +696,7 @@ symbols in this file:
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "coop_enemies.h" /* port: port/linux/game/coop_enemies.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 
 /* port: the control and animation impulses the host's actors give their
 units go to the clients' copies (port/linux/game/network_actors.c) */
@@ -1082,6 +1083,10 @@ void unit_kill_no_statistics(
 void unit_delete(
 	long unit_index)
 {
+	/* port: the scenery the Shadowrun prototype's units carry, on its maps
+	(port/linux/game/shadowrun_units.c) */
+	shadowrun_unit_delete(unit_index);
+
 	return;
 }
 
@@ -2520,6 +2525,10 @@ boolean unit_new(
 		unit_definition_get(unit->definition_index);
 	result = FALSE;
 
+	/* port: the state the Shadowrun prototype adds to a unit, on its maps
+	(port/linux/game/shadowrun_units.c) */
+	shadowrun_unit_new(unit_index);
+
 	if (unit_definition->object.animation_graph.index!=NONE)
 	{
 		unit->unit.equipment_object_index = NONE;
@@ -2854,6 +2863,10 @@ void unit_died(
 	unit->unit.melee_attack_state = 0;
 	if (unit->unit.grenade_throw_state == 1)
 		unit->unit.grenade_throw_state = 0;
+
+	/* port: what the Shadowrun prototype's spells leave of a unit dead for
+	good, on its maps (port/linux/game/shadowrun_units.c) */
+	shadowrun_unit_died(unit_index);
 
 	return;
 }
@@ -5627,7 +5640,13 @@ boolean unit_update(
 			jetpack_cheat_active = TRUE;
 		}
 
-		if (TEST_FLAG(unit->unit.flags, _unit_active_camouflaged_bit))
+		/* port: on the Shadowrun prototype's maps a unit with its smoke comes
+		and goes at the smoke's own rates, up to the smoke's camouflage
+		(port/linux/game/shadowrun_magic.c) */
+		if (shadowrun_unit_camouflage_update(unit_index))
+		{
+		}
+		else if (TEST_FLAG(unit->unit.flags, _unit_active_camouflaged_bit))
 		{
 			real active_camo_change_this_tick;
 
@@ -5677,7 +5696,6 @@ boolean unit_update(
 				unit->unit.active_camouflage = 0.f;
 			}
 		}
-
 		if (TEST_FLAG(unit->unit.flags, _unit_super_camouflaged_bit))
 		{
 			unit->unit.active_camouflage_super_amount += 1.f/90.f;
@@ -5942,6 +5960,11 @@ boolean unit_update(
 		match_assert_valid_real_normal3d("c:\\halo\\SOURCE\\units\\units.c", 1076, &unit->unit.looking_vector);
 
 		unit_verify_vectors(unit_index, "unit-update-postvector");
+
+		/* port: the Shadowrun prototype's mana and spells, on its maps; its
+		grenade control casts a unit's spell, if it has one
+		(port/linux/game/shadowrun_units.c) */
+		shadowrun_unit_update(unit_index);
 
 		if (!jetpack_cheat_active)
 		{

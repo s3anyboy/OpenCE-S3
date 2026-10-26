@@ -46,8 +46,8 @@ Shadowrun's `ui.map` also runs as the game's `ui.map`, and the main menu
 loads from it.
 
 The level's encounters are all placed by its scripts, as the player walks
-into their trigger volumes. Its scripts call Shadowrun's magic functions,
-which do nothing here (see [Scripts](#scripts)).
+into their trigger volumes. Its scripts give the player magic with
+Shadowrun's own functions (see [Scripts](#scripts) and [Magic](#magic)).
 
 ## What differs, and what is done
 
@@ -162,8 +162,7 @@ type. Of the prototype's functions, these are missing here:
 
 | Function | What it did |
 | --- | --- |
-| `player_set_magic`, `player_change_magic`, `player_change_tech` | give the players magic or tech |
-| `game_set_assignment_scheme` | how magic and tech are assigned |
+| `player_change_tech` | give the players tech |
 | `ai_drop_equipment_when_dead` | an actor drops a spell's powerup |
 | `drop_grenade` | a grenade dropped at a cutscene flag |
 | `cheats_loadout`, `player_action_test_loadout` | the loadout menu |
@@ -173,24 +172,59 @@ type. Of the prototype's functions, these are missing here:
 
 So are the engine globals `dynamic_difficulty_enabled`,
 `rasterizer_DXTC_noise` and `rasterizer_splitscreen_VB_optimization`.
-Missionlet's scripts make 110 calls; `player_set_magic` and
-`player_change_magic` (three times each) are the ones made inert. The
-`ui.map`'s make 36, all of them this build's.
+This build has `player_set_magic`, `player_change_magic` and
+`game_set_assignment_scheme`, as the prototype's (see [Magic](#magic)); on
+other maps they do nothing. Missionlet's scripts make 110 calls, all of
+them this build's now. The `ui.map`'s make 36, all of them this build's.
 
 Maps whose tags are linked to the tag cache's base (every Xbox map this
 build ran before) are loaded exactly as they were.
 
+## Magic
+
+The prototype's magic is ported from its executable
+(`port/linux/game/shadowrun_*.c`), and plays on its maps only: a map is
+Shadowrun's when its tags have Shadowrun's groups. A unit whose biped has an
+`srud` (Shadowrun unit definition) gets its race (`srac`'s by the srud's
+races), its head, a pool of mana and the spells of its race's magic tags
+(`m1ed`, `m2ed`, `m3ed`):
+
+| Spell | What it does |
+| --- | --- |
+| Teleport | the caster vanishes and reappears a way off, the way it moves |
+| Gust | a blast that throws back what is before the caster |
+| Tree of Life | a thrown seed grows a tree that heals those near it, and withers |
+| Resurrection | raises the dead near the caster as undead on its side |
+| Strangle | thorns grow from the surfaces where the caster aims, and hold |
+| Summon Elemental | an elemental (an encounter of the map) fights for the caster for a time |
+| Spirit Animal | the caster grows into its animal form while its mana lasts |
+| Smoke | the caster fades into smoke, unseen and unharmed, while its mana lasts |
+
+A spell costs mana and holds back some of the pool while it lasts; mana
+comes back over time. A projectile flagged for it grows a tree of life where
+it lands (the Tree of Life grenade), or a firewall (the fireball's): fires
+that burn those of other sides. Magic shows at the bottom of the HUD: the
+spell, the mana, a cell a point (what spells hold back in dark red).
+
+Its controls are simpler than the prototype's, whose radial menu assigned
+spells to slots on the triggers and buttons: the grenade control casts the
+current spell, and the switch-grenade control goes through the known spells
+and then the grenades. The scripts' `player_set_magic` and
+`player_change_magic` give the players spells; `game_set_assignment_scheme`
+is kept but only the one scheme plays.
+
 ## What does not work
 
-This build runs the prototype's maps on Halo's game code, so Shadowrun's own
-systems are not there:
+This build runs the prototype's maps on Halo's game code; of Shadowrun's own
+systems these are not there:
 
-- magic and tech (the spells, their effects and the `m?ed`/`t?ed` tags),
-  essence, the buy menu, and resurrection;
-- Shadowrun's weapons and units as Shadowrun defined them (`srwd`, `srud`):
-  the weapons and bipeds play as Halo's do from their Halo tags;
+- tech (the `t?ed` tags), anti-magic, the troll's rage, essence and the buy
+  menu;
+- Shadowrun's weapons as Shadowrun defined them (`srwd`): they play as
+  Halo's do from their Halo tags;
 - Shadowrun's AI behaviours for its new actor types (they play as the types
-  above), and its extra AI state;
+  above), its extra AI state, and the actors' spells (the elf mage's and the
+  ninja's teleport);
 - dynamic difficulty (the prototype's `dyndiff.log`), and the magic
   grenades and powerups, which become Halo's;
 - network games: not tried. The prototype's maps examined are single player

@@ -1,0 +1,107 @@
+/*
+SHADOWRUN.H
+
+The Shadowrun prototype's own game, played on its maps (docs/shadowrun_caches.md):
+what its executable (cachesym.xbe, build 01.12.07.0132) adds to Halo's units.
+This is its magic: mana, the spells and casting them, and the scripts that
+give them. It runs only while one of its maps is loaded.
+
+A unit on such a map carries the state Shadowrun adds to a unit after its own
+datum, in the object's memory (so checkpoints keep it): its datum is made
+larger by shadowrun_object_extra_size. A player's lasts across its units, in
+the game state.
+*/
+
+#ifndef __SHADOWRUN_H
+#define __SHADOWRUN_H
+#pragma once
+
+/* ---------- prototypes/SHADOWRUN_UNITS.C */
+
+/* the game state's, at startup (game_initialize) */
+void shadowrun_initialize(
+	void);
+/* at each map (game_initialize_for_new_map) */
+void shadowrun_initialize_for_new_map(
+	void);
+
+/* the tags just loaded and checked: whether they are a Shadowrun prototype
+map's (cache_files.c) */
+void shadowrun_tags_loaded(
+	boolean shadowrun);
+
+/* whether the map loaded is the Shadowrun prototype's */
+boolean shadowrun_map_loaded(
+	void);
+
+/* the bytes an object of the type carries after its datum (objects.c,
+object_new): Shadowrun's state of a unit, on its maps; 0 otherwise */
+short shadowrun_object_extra_size(
+	short object_type);
+
+/* a unit made (unit_new) */
+void shadowrun_unit_new(
+	long unit_index);
+
+/* each tick of a unit, before its grenade is thrown (unit_update): its mana,
+waits and spells; and the grenade control casts its spell, if it has one */
+void shadowrun_unit_update(
+	long unit_index);
+/* a unit dead for good (unit_died), and deleted (unit_delete) */
+void shadowrun_unit_died(
+	long unit_index);
+void shadowrun_unit_delete(
+	long unit_index);
+
+/* a player spawned with a new unit (players.c, player_spawn): its race, the
+magic it knows, a full pool */
+void shadowrun_player_spawned(
+	long player_index);
+
+/* ---------- prototypes/SHADOWRUN_HUD.C */
+
+/* the unit's magic on the HUD, the local player's view's (hud.c) */
+void shadowrun_hud_draw(
+	short local_player_index,
+	long unit_index);
+
+/* ---------- prototypes/SHADOWRUN_UNITS.C */
+
+/* whether damage of the owner reaches the object (damage.c): not from a unit
+hidden in smoke, nor to one camouflaged in it or taking a spirit animal's
+form */
+boolean shadowrun_damage_allowed(
+	long owner_object_index,
+	long object_index);
+
+/* each tick of the game, after the objects' (game.c): the trees of life heal */
+void shadowrun_game_tick(
+	void);
+
+/* a projectile detonated (projectiles.c): its spell's (a tree of life grows) */
+void shadowrun_projectile_detonate(
+	long projectile_index,
+	real_point3d const *position);
+
+/* a unit's camouflage this tick (units.c): a unit of the prototype's with its
+smoke's definition comes and goes at the smoke's rates, up to the smoke's
+camouflage. FALSE for others, whose camouflage is this build's */
+boolean shadowrun_unit_camouflage_update(
+	long unit_index);
+
+/* the switch-grenade control (player_control.c): it also chooses the spell
+the grenade control casts. TRUE when it was taken for that */
+boolean shadowrun_unit_rotate_selection(
+	long unit_index,
+	short desired_grenade_index);
+
+/* the scripts' player_set_magic, player_change_magic and
+game_set_assignment_scheme */
+void shadowrun_players_set_magic(
+	short spell);
+void shadowrun_players_change_magic(
+	short spell);
+void shadowrun_game_set_assignment_scheme(
+	short scheme);
+
+#endif

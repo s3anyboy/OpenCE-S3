@@ -536,6 +536,15 @@ boolean rider_ejection = TRUE;
 
 static struct profile_section biped_update_section = {"biped_update", NONE, TRUE};
 
+/* port: a biped faced where it was turned (port/linux/game/shadowrun_magic.c) */
+void biped_port_snap_facing(
+	long biped_index)
+{
+	biped_snap_facing(biped_index);
+
+	return;
+}
+
 /* port: coop_scripts.c sets this around one teleport */
 static boolean biped_fix_ignores_players;
 
