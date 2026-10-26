@@ -65,7 +65,43 @@ void shadowrun_hud_draw(
 	short local_player_index,
 	long unit_index);
 
-/* ---------- prototypes/SHADOWRUN_UNITS.C */
+/* ---------- prototypes/SHADOWRUN_RACES.C */
+
+struct damage_data;
+struct damage_definition;
+
+/* the damage an object takes, of total_damage (damage.c, as it is reckoned):
+as its race takes it, and its rage; the damage makes it rage */
+real shadowrun_damage_scale(
+	struct damage_data const *damage,
+	struct damage_definition const *definition,
+	long object_index,
+	real total_damage);
+/* the material the damage strikes, of the object (damage.c): a troll's rage
+looks as a jackal's shield */
+void shadowrun_damage_material(
+	struct damage_data *damage,
+	long object_index);
+/* a player's biped's speed and acceleration (bipeds.c): its race's with its
+weapon, and its rage's */
+void shadowrun_biped_movement_scales(
+	long biped_index,
+	real *movement_scale,
+	real *acceleration_scale);
+/* how fast a player's unit turns (player_control.c): its rage's */
+real shadowrun_unit_turning_scale(
+	long unit_index);
+/* an actor attached to its unit (actors.c, actor_attach_unit): the unit
+takes its variant's race */
+void shadowrun_actor_attached(
+	long actor_variant_definition_index,
+	long unit_index);
+/* an actor's unit given its variant's change colour (actors.c) */
+void shadowrun_actor_change_color(
+	long unit_index,
+	short change_color_index);
+
+/* ---------- prototypes/SHADOWRUN_MAGIC.C */
 
 /* whether damage of the owner reaches the object (damage.c): not from a unit
 hidden in smoke, nor to one camouflaged in it or taking a spirit animal's

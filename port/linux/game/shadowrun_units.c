@@ -16,6 +16,7 @@ each function names the one it is (its address in the executable).
 #include "cache/cache_files.h"
 #include "game/game.h"
 #include "game/players.h"
+#include "items/weapon_definitions.h"
 #include "objects/damage.h"
 #include "objects/objects.h"
 #include "objects/object_types.h"
@@ -37,7 +38,16 @@ enum
 	/* where a biped's definition names its srud: a tag index in what this
 	build's bipd has as unused (the reference's index, 0x468) */
 	SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET = 0x45C,
+	/* where a weapon's definition names its srwd: in what this build's weap
+	has as unused, after its heat illumination (the reference's index,
+	0x370) */
+	SHADOWRUN_WEAPON_DATA_OFFSET = 0x364,
 };
+
+typedef char shadowrun_weapon_data_offset_assert[
+	SHADOWRUN_WEAPON_DATA_OFFSET == offsetof(struct weapon_definition, weapon.heat_unused) &&
+	SHADOWRUN_WEAPON_DATA_OFFSET + sizeof(struct tag_reference) <=
+		offsetof(struct weapon_definition, weapon.heat_unused) + sizeof(((struct weapon_definition *)0)->weapon.heat_unused) ? 1 : -1];
 
 typedef char shadowrun_biped_unit_definition_offset_assert[
 	SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET >= offsetof(struct biped_definition, biped.unused) &&
@@ -58,6 +68,8 @@ static struct
 
 static struct tag_reference *shadowrun_biped_unit_definition_reference(
 	struct biped_definition *definition);
+static struct tag_reference *shadowrun_weapon_data_reference(
+	struct weapon_definition *definition);
 static void shadowrun_unit_mana_update(
 	long unit_index);
 static void shadowrun_unit_new_head(
@@ -116,6 +128,25 @@ void shadowrun_tags_loaded(
 		if (corrected)
 		{
 			error(_error_silent, "shadowrun: %ld bipeds named no Shadowrun unit", corrected);
+		}
+		/* each weapon's srwd, likewise */
+		corrected = 0;
+		tag_iterator_new(&iterator, WEAPON_DEFINITION_TAG);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		{
+			struct tag_reference *reference =
+				shadowrun_weapon_data_reference(tag_get(WEAPON_DEFINITION_TAG, tag_index));
+
+			if (reference->index != NONE &&
+				cache_file_tag_index_group_tag(reference->index) != SHADOWRUN_WEAPON_DATA_TAG)
+			{
+				reference->index = NONE;
+				corrected++;
+			}
+		}
+		if (corrected)
+		{
+			error(_error_silent, "shadowrun: %ld weapons named no Shadowrun weapon data", corrected);
 		}
 	}
 
@@ -214,6 +245,9 @@ void shadowrun_unit_new(
 		}
 		shadowrun_unit->spell_effect_index = NONE;
 		shadowrun_unit->smoke_end_time = -SMOKE_RECAST_WAIT;
+		shadowrun_unit->rage_damage_scale = 1.f;
+		shadowrun_unit->rage_movement_scale = 1.f;
+		shadowrun_unit->rage_turning_scale = 1.f;
 	}
 
 	return;
@@ -288,14 +322,44 @@ struct shadowrun_magic3_definition *shadowrun_magic3_get(
 		tag_get(SHADOWRUN_MAGIC3_DEFINITION_TAG, definition->magic3.index) : NULL;
 }
 
-/* 0x264AD0: how much a heal heals the unit (its race's rage, not played,
-would change it) */
+/* 0x264AD0: how much a heal heals the unit: as much as damage hurts it (a
+troll's rage keeps off both) */
 real shadowrun_unit_heal_scale(
 	long unit_index)
 {
-	(void)unit_index;
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
-	return 1.f;
+	return shadowrun_unit ? shadowrun_unit->rage_damage_scale : 1.f;
+}
+
+/* 0x25E9A0: the srwd of the biped's weapon in hand (the smartlinked one when
+it is smartlinked: Shadowrun's tech, not played), else its srud's */
+struct shadowrun_weapon_data *shadowrun_unit_weapon_data_get(
+	long unit_index)
+{
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	struct shadowrun_weapon_data *result = NULL;
+
+	if (definition)
+	{
+		struct unit_datum *unit = unit_get(unit_index);
+		long weapon_index = unit->unit.current_weapon_index != NONE ?
+			unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index) : NONE;
+		struct object_datum *weapon = weapon_index != NONE ? object_get(weapon_index) : NULL;
+		long data_index = weapon ?
+			shadowrun_weapon_data_reference(weapon_definition_get(weapon->definition_index))->index : NONE;
+
+		if (data_index != NONE)
+		{
+			result = tag_get(SHADOWRUN_WEAPON_DATA_TAG, data_index);
+		}
+		else if (definition->default_weapon_data.index != NONE)
+		{
+			result = tag_get(SHADOWRUN_WEAPON_DATA_TAG, definition->default_weapon_data.index);
+		}
+	}
+
+	return result;
 }
 
 /* 0x285040, 0x2850A0: the race's head hidden, or seen */
@@ -706,6 +770,7 @@ void shadowrun_unit_update(
 			shadowrun_summoned_update(unit_index);
 		}
 		shadowrun_unit_mana_update(unit_index);
+		shadowrun_unit_rage_update(unit_index);
 
 		if (unit->object.type == _object_type_biped)
 		{
@@ -1020,6 +1085,12 @@ static struct tag_reference *shadowrun_biped_unit_definition_reference(
 	struct biped_definition *definition)
 {
 	return (struct tag_reference *)((byte *)definition + SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET);
+}
+
+static struct tag_reference *shadowrun_weapon_data_reference(
+	struct weapon_definition *definition)
+{
+	return (struct tag_reference *)((byte *)definition + SHADOWRUN_WEAPON_DATA_OFFSET);
 }
 
 /* 0x2604A0's: mana comes back, after a wait, up to what the capacity has

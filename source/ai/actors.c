@@ -318,6 +318,7 @@ symbols in this file:
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
 #include "networking/network_game_globals.h"
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_races.c */
 
 /* ---------- constants */
 
@@ -2434,6 +2435,9 @@ void actor_customize_unit(
 				real_seed_random(get_global_random_seed_address()));
 			unit->object.outgoing_change_colors[change_color_index] =
 				unit->object.base_change_colors[change_color_index];
+			/* port: kept for the Shadowrun prototype's rage
+			(port/linux/game/shadowrun_races.c) */
+			shadowrun_actor_change_color(unit_index, change_color_index);
 		}
 	}
 
@@ -3811,6 +3815,9 @@ void actor_attach_unit(
 
 		actor->meta.unit_index = unit_index;
 		unit->unit.actor_index = actor_index;
+		/* port: on the Shadowrun prototype's maps, the unit takes its
+		variant's race (port/linux/game/shadowrun_races.c) */
+		shadowrun_actor_attached(actor->meta.variant_definition_index, unit_index);
 
 		if (actor->meta.encounter_index != NONE)
 		{

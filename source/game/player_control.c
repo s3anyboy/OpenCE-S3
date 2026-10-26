@@ -212,7 +212,7 @@ symbols in this file:
 #include "real_math.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c; after the limit2d alias above */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
-#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c, shadowrun_races.c */
 
 /* ---------- constants */
 
@@ -1984,6 +1984,11 @@ static void player_control_modify_desired_angles(
 		0x494,
 		valid_euler_angles2d(&player->desired_angles));
 	player_control_get_unit_camera_info(local_player_index, &camera_info);
+
+	/* port: on the Shadowrun prototype's maps, a raging unit turns slower
+	(port/linux/game/shadowrun_races.c) */
+	delta_yaw *= shadowrun_unit_turning_scale(camera_info.unit_index);
+	delta_pitch *= shadowrun_unit_turning_scale(camera_info.unit_index);
 
 	player->desired_angles.yaw += delta_yaw;
 	if (camera_info.seat_index != NONE)

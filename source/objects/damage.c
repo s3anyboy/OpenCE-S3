@@ -139,7 +139,7 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "units/vehicles.h"
-#include "shadowrun.h" /* port: port/linux/game/shadowrun_magic.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_magic.c, shadowrun_races.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -1556,6 +1556,10 @@ void object_cause_damage(
 			damage->multiplier;
 	}
 
+	/* port: on the Shadowrun prototype's maps, as the object's race takes
+	the damage, and its rage (port/linux/game/shadowrun_races.c) */
+	total_damage = shadowrun_damage_scale(damage, damage_definition, object_index, total_damage);
+
 	if (damage->owner_object_index != NONE)
 	{
 		struct unit_datum *attacker =
@@ -1837,6 +1841,9 @@ void object_cause_damage(
 				}
 
 				damage->material_type = damage_material->material_type;
+				/* port: a raging troll's, as a shield's
+				(port/linux/game/shadowrun_races.c) */
+				shadowrun_damage_material(damage, object_index);
 
 				if (cheat.omnipotent && damage->owner_player_index != NONE)
 					force_kill = TRUE;

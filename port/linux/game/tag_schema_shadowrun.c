@@ -2,8 +2,8 @@
 TAG_SCHEMA_SHADOWRUN.C
 
 The schemas (tag_schema.h) of the Shadowrun prototype's own groups that the
-game reads (shadowrun_definitions.h): srud, m1ed, m2ed, m3ed and buym. Only
-its maps have tags of them. The rest of its groups (srwd, srac, t1ed, t2ed,
+game reads (shadowrun_definitions.h): srud, srwd, m1ed, m2ed, m3ed and buym.
+Only its maps have tags of them. The rest of its groups (srac, t1ed, t2ed,
 t3ed) nothing reads yet; they are left as they are.
 */
 
@@ -145,13 +145,34 @@ static struct tag_schema_field const shadowrun_unit_fields[] =
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, tech2, TAG_SCHEMA_GROUPS('t2ed')),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, tech3, TAG_SCHEMA_GROUPS('t3ed')),
 	TAG_SCHEMA_BLOCK(struct shadowrun_unit_definition, races, shadowrun_race_schema, MAXIMUM_SHADOWRUN_RACES),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, default_weapon_data, TAG_SCHEMA_GROUPS('srwd')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, default_weapon_data, TAG_SCHEMA_GROUPS(SHADOWRUN_WEAPON_DATA_TAG)),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, buy_menu, TAG_SCHEMA_GROUPS(SHADOWRUN_BUY_MENU_DEFINITION_TAG)),
 	TAG_SCHEMA_END
 };
 
 static struct tag_schema_definition const shadowrun_unit_schema =
 	TAG_SCHEMA_DEFINITION(shadowrun_unit, struct shadowrun_unit_definition, shadowrun_unit_fields);
+
+/* srwd */
+
+static struct tag_schema_field const shadowrun_weapon_data_race_fields[] =
+{
+	TAG_SCHEMA_END
+};
+
+static struct tag_schema_definition const shadowrun_weapon_data_race_schema =
+	TAG_SCHEMA_DEFINITION(shadowrun_weapon_data_race, struct shadowrun_weapon_data_race,
+		shadowrun_weapon_data_race_fields);
+
+static struct tag_schema_field const shadowrun_weapon_data_fields[] =
+{
+	TAG_SCHEMA_BLOCK(struct shadowrun_weapon_data, races, shadowrun_weapon_data_race_schema, MAXIMUM_SHADOWRUN_RACES),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_weapon_data, smartlinked, TAG_SCHEMA_GROUPS(SHADOWRUN_WEAPON_DATA_TAG)),
+	TAG_SCHEMA_END
+};
+
+static struct tag_schema_definition const shadowrun_weapon_data_schema =
+	TAG_SCHEMA_DEFINITION(shadowrun_weapon_data, struct shadowrun_weapon_data, shadowrun_weapon_data_fields);
 
 /* buym */
 
@@ -172,6 +193,7 @@ struct tag_schema_group const tag_schema_shadowrun_groups[] =
 	{ SHADOWRUN_MAGIC1_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic1_schema },
 	{ SHADOWRUN_MAGIC2_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic2_schema },
 	{ SHADOWRUN_MAGIC3_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic3_schema },
+	{ SHADOWRUN_WEAPON_DATA_TAG, { NONE, NONE }, &shadowrun_weapon_data_schema },
 	{ SHADOWRUN_BUY_MENU_DEFINITION_TAG, { NONE, NONE }, &shadowrun_buy_menu_schema },
 	{ 0 }
 };

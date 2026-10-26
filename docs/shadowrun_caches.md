@@ -213,15 +213,31 @@ and then the grenades. The scripts' `player_set_magic` and
 `player_change_magic` give the players spells; `game_set_assignment_scheme`
 is kept but only the one scheme plays.
 
+## Races
+
+A unit's race (a player's chosen race, an actor's from its variant) sets
+how it takes damage: its own scale of damage and of melee, and a player's
+melee is dealt at its race's scale. A player moves at its race's speed with
+the weapon in its hand (the weapon's `srwd`, else its `srud`'s): a human is
+a little slower with an assault rifle, a troll slower with all of them.
+
+The troll rages. Hurt enough over half a second, it rages more with each
+hit, up to all the way; half a second after the last hit its rage goes down
+again, slowly. As it rages it takes less damage (a fifth of it, raging
+fully) and is healed less, moves and turns more slowly, grows larger, and
+its colours go pale; past a little rage, in the campaign, what hits it
+strikes as on a jackal's shield. A player troll pays mana for its rage (an
+actor's spells and rage cost nothing). A race may also keep off with its
+rage only the damage from before it; the troll's keeps off all of it.
+
 ## What does not work
 
 This build runs the prototype's maps on Halo's game code; of Shadowrun's own
 systems these are not there:
 
-- tech (the `t?ed` tags), anti-magic, the troll's rage, essence and the buy
-  menu;
-- Shadowrun's weapons as Shadowrun defined them (`srwd`): they play as
-  Halo's do from their Halo tags;
+- tech (the `t?ed` tags), anti-magic, essence and the buy menu;
+- Shadowrun's weapons as Shadowrun defined them (`srwd`): but for each
+  race's speed with them, they play as Halo's do from their Halo tags;
 - Shadowrun's AI behaviours for its new actor types (they play as the types
   above), its extra AI state, and the actors' spells (the elf mage's and the
   ninja's teleport);

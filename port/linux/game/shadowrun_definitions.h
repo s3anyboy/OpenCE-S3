@@ -32,6 +32,7 @@ enum
 	SHADOWRUN_MAGIC2_DEFINITION_TAG = 'm2ed',
 	SHADOWRUN_MAGIC3_DEFINITION_TAG = 'm3ed',
 	SHADOWRUN_BUY_MENU_DEFINITION_TAG = 'buym',
+	SHADOWRUN_WEAPON_DATA_TAG = 'srwd',
 
 	/* the races a unit definition has (and the levels of each spell) */
 	MAXIMUM_SHADOWRUN_RACES = 5,
@@ -50,6 +51,12 @@ enum
 
 	/* the magic and tech a unit may have, each with its own wait */
 	MAXIMUM_SHADOWRUN_POWERS = 18,
+
+	/* a race's flags (those the game reads): it rages (the troll), and its
+	rage keeps off only the damage of those before it (within two radians
+	of where it looks; the executable truncates the angle) */
+	_shadowrun_race_rages_bit = 2,
+	_shadowrun_race_rage_guards_front_bit = 5,
 };
 
 /* ---------- structures */
@@ -335,14 +342,42 @@ struct shadowrun_race
 	/* the unit's scale, and the scenery it wears on its head */
 	real scale;
 	struct tag_reference head;
-	byte unused3[0x14];
+	byte unused3[0x8];
+	/* the damage it takes (of all but melee) */
+	real damage_scale;
+	byte unused5[0x8];
 	/* its body's vitality (a player's: an actor's is its actor's) */
 	real maximum_body_vitality;
 	byte unused4[0x30];
 	/* how hard a gust pushes it, in the air and on the ground */
 	real gust_airborne_scale;
 	real gust_scale;
-	byte unused1[0x29C];
+	/* the melee damage it takes, and deals */
+	real melee_damage_scale;
+	real melee_scale;
+	byte unused6[0x94];
+	/* rage (its flags' rage): the damage it takes (each damage's
+	definition's active camouflage damage, as the executable reads it) over
+	the last half second (15 ticks), more than the threshold, makes it rage,
+	and it waits the ticks before its rage goes down by the decay each tick.
+	As it rages it takes the damage, moves and turns as the raging scales,
+	as the calm ones calm, and grows to the raging scale at the speed (each
+	second). Its rage costs it mana (the cost a point); past the material
+	threshold the damage it takes looks as it does on a jackal's shield */
+	real rage_threshold;
+	real raging_damage_scale;
+	real calm_damage_scale;
+	real raging_movement_scale;
+	real calm_movement_scale;
+	real rage_decay;
+	real rage_wait_ticks;
+	real raging_turning_scale;
+	real calm_turning_scale;
+	real rage_mana_cost;
+	real raging_scale;
+	real rage_scale_speed;
+	real rage_material_threshold;
+	byte unused1[0x1CC];
 	/* the most mana it has, which magic and tech held back take from */
 	long mana_capacity;
 	/* mana it regains each second, after it has waited this long (seconds)
@@ -350,6 +385,30 @@ struct shadowrun_race
 	real mana_regeneration_per_second;
 	real mana_regeneration_delay;
 	byte unused2[0x5F4];
+};
+
+/* a race's speed with a weapon (0x600 bytes) */
+struct shadowrun_weapon_data_race
+{
+	byte unused0[0x100];
+	/* its movement's speed, and how fast it gets there (as a player: 0 or
+	less leaves it be) */
+	real movement_scale;
+	real acceleration_scale;
+	byte unused1[0x4F8];
+};
+
+/* srwd: Shadowrun's weapon data, which a weapon names (and a unit's srud, for
+when it has none of its own): what each race's movement is with it (0x600
+bytes, its races' blocks after it) */
+struct shadowrun_weapon_data
+{
+	byte unused0[0x500];
+	struct tag_block races;
+	/* the data a smartlinked unit uses instead (Shadowrun's tech: not
+	played, so it is not chosen) */
+	struct tag_reference smartlinked;
+	byte unused1[0xE4];
 };
 
 /* buym: the buy menu (only its sound for a spell that fails: 0x7D0 bytes) */
@@ -484,6 +543,18 @@ typedef char shadowrun_race_scale_assert[offsetof(struct shadowrun_race, scale) 
 typedef char shadowrun_race_head_assert[offsetof(struct shadowrun_race, head.index) == 0x110 ? 1 : -1];
 typedef char shadowrun_race_vitality_assert[offsetof(struct shadowrun_race, maximum_body_vitality) == 0x128 ? 1 : -1];
 typedef char shadowrun_race_gust_assert[offsetof(struct shadowrun_race, gust_scale) == 0x160 ? 1 : -1];
+typedef char shadowrun_race_damage_assert[offsetof(struct shadowrun_race, damage_scale) == 0x11C ? 1 : -1];
+typedef char shadowrun_race_melee_assert[offsetof(struct shadowrun_race, melee_damage_scale) == 0x164 ? 1 : -1];
+typedef char shadowrun_weapon_data_race_size_assert[sizeof(struct shadowrun_weapon_data_race) == 0x600 ? 1 : -1];
+typedef char shadowrun_weapon_data_race_movement_assert[
+	offsetof(struct shadowrun_weapon_data_race, movement_scale) == 0x100 ? 1 : -1];
+typedef char shadowrun_weapon_data_size_assert[sizeof(struct shadowrun_weapon_data) == 0x600 ? 1 : -1];
+typedef char shadowrun_weapon_data_races_assert[offsetof(struct shadowrun_weapon_data, races) == 0x500 ? 1 : -1];
+typedef char shadowrun_weapon_data_smartlinked_assert[
+	offsetof(struct shadowrun_weapon_data, smartlinked.index) == 0x518 ? 1 : -1];
+typedef char shadowrun_race_rage_assert[offsetof(struct shadowrun_race, rage_threshold) == 0x200 ? 1 : -1];
+typedef char shadowrun_race_rage_material_assert[
+	offsetof(struct shadowrun_race, rage_material_threshold) == 0x230 ? 1 : -1];
 typedef char shadowrun_race_mana_assert[offsetof(struct shadowrun_race, mana_capacity) == 0x400 ? 1 : -1];
 typedef char shadowrun_race_delay_assert[offsetof(struct shadowrun_race, mana_regeneration_delay) == 0x408 ? 1 : -1];
 

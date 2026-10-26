@@ -275,6 +275,7 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_races.c */
 
 /* port: port/linux/game/network_objects.c's (a client deletes the host's
 objects on the host's word alone) */
@@ -3772,6 +3773,8 @@ static void biped_update_moving(
 				real forward_speed;
 				real sideways_speed;
 				real acceleration;
+				real shadowrun_movement_scale;
+				real shadowrun_acceleration_scale;
 
 				if (cinematic_in_progress() ||
 					TEST_FLAG(
@@ -3838,6 +3841,14 @@ static void biped_update_moving(
 				{
 					physics.forward = biped->unit.desired_facing_vector;
 				}
+
+				/* port: on the Shadowrun prototype's maps, at its race's speed
+				with its weapon, and its rage's (port/linux/game/shadowrun_races.c) */
+				shadowrun_biped_movement_scales(biped_index, &shadowrun_movement_scale, &shadowrun_acceleration_scale);
+				physics.movement_desired.i *= shadowrun_movement_scale;
+				physics.movement_desired.j *= shadowrun_movement_scale;
+				physics.acceleration_maximum *= shadowrun_acceleration_scale;
+				physics.airborne_acceleration_maximum *= shadowrun_acceleration_scale;
 
 				if (game_players_are_double_speed())
 				{

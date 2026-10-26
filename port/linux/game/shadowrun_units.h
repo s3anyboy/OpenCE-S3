@@ -45,6 +45,9 @@ enum
 	MAXIMUM_SHADOWRUN_TREES = 4,
 	MAXIMUM_SHADOWRUN_OLD_TREES = 10,
 	MAXIMUM_SHADOWRUN_STANDING_TREES = 64,
+
+	/* rage counts the damage of the last half second, a tick each */
+	SHADOWRUN_RAGE_DAMAGE_TICKS = 15,
 };
 
 /* ---------- structures */
@@ -180,6 +183,22 @@ definition (0x10F0) */
 	/* (0x1068) more than 0 in the air: Shadowrun's tech sets it; until it
 	is played, it stays 0 */
 	real biped_airborne_tech;
+
+	/* rage (a race that rages: the troll's): how far it rages, 0 to 1
+	(0x7A4), and what that makes of the damage it takes (0x7A8), its
+	movement (0x7AC) and its turning (0x7B0); the damage it took each of the
+	last fifteen ticks (0x7BC), this tick's (0x7B4), and the ticks it waits
+	before its rage goes down (0x7B8) */
+	real rage;
+	real rage_damage_scale;
+	real rage_movement_scale;
+	real rage_turning_scale;
+	real rage_damage[SHADOWRUN_RAGE_DAMAGE_TICKS];
+	char rage_damage_tick;
+	byte pad9[3];
+	long rage_wait_ticks;
+	/* an actor's change colours, as its variant gave them (0x614) */
+	real_rgb_color actor_change_colors[NUMBER_OF_OBJECT_CHANGE_COLORS];
 };
 
 /* a player's (in its datum) */
@@ -219,8 +238,11 @@ struct shadowrun_magic2_definition *shadowrun_magic2_get(
 	long unit_index);
 struct shadowrun_magic3_definition *shadowrun_magic3_get(
 	long unit_index);
-/* how much a heal heals the unit */
+/* how much a heal heals the unit (its rage's damage scale) */
 real shadowrun_unit_heal_scale(
+	long unit_index);
+/* the srwd of the unit's weapon (else its srud's), or NULL */
+struct shadowrun_weapon_data *shadowrun_unit_weapon_data_get(
 	long unit_index);
 /* the unit's race's head seen or hidden */
 void shadowrun_unit_show_head(
@@ -296,6 +318,12 @@ void shadowrun_unit_cast_feedback(
 	long unit_index,
 	long damage_definition_index,
 	long effect_definition_index);
+
+/* ---------- prototypes/SHADOWRUN_RACES.C */
+
+/* each tick of a unit, after its mana's: its rage */
+void shadowrun_unit_rage_update(
+	long unit_index);
 
 /* ---------- prototypes/SHADOWRUN_MAGIC.C */
 
