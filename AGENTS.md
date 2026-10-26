@@ -26,7 +26,7 @@ end.
 | `port/third_party/` | Vendored libraries, each with a README naming its upstream, version and checksum |
 | `port/tools/` | Stand-alone tools (`cache_file_report.c`) |
 | `tools/` | Build scripts (`linux_build.py`, `windows_build.py`, `android_build.py`, `web_build.py`, `ci_build.py`, `web_serve.py`), generators (`ce_menus.py`, `port_settings.py`, `hud_assets.py`, `title_assets.py`, `embed_assets.py`, `xdk_headers.py`), tests, and `stagekit/` (scenarios staged and instrumented on the real engine, no retail assets) |
-| `docs/` | Longer design notes (`custom_edition_caches.md`, `mods.md`) |
+| `docs/` | Longer design notes (`custom_edition_caches.md`, `shadowrun_caches.md`, `mods.md`) |
 | `pgo/` | Profile-guided optimisation profiles |
 | `assets/` | Game data for local runs (gitignored: `maps/`, `custom_maps/`) |
 | `.github/workflows/` | CI: builds every platform on each push, publishes releases from `main` |
@@ -87,7 +87,7 @@ python -m pytest -q tools/stagekit/tests                    # scenarios on the r
 python -m pytest -q tools/test_linux_port.py                # the build, the maps' checks (needs assets/maps)
 python -m pytest -q tools/test_mods.py                      # mods played over a map (needs assets/maps)
 python -m pytest -q tools/test_bots.py                      # the bots in local games (needs assets/maps)
-python -m pytest -q tools/test_cache_file_formats.py tools/test_bmp_files.py tools/test_profile.py
+python -m pytest -q tools/test_cache_file_formats.py tools/test_shadowrun_caches.py tools/test_bmp_files.py tools/test_profile.py
 python tools/test_touch_layout.py                           # the Android touch layout (JDK 17+)
 python tools/test_light_storage.py
 python tools/test_death_timing.py
@@ -185,6 +185,13 @@ OpenSauce's header runs as stock Custom Edition runs it. Map files are
 untrusted input: read them through bounds-checked readers. See
 `docs/custom_edition_caches.md`.
 
+The Shadowrun prototype's maps are Xbox caches of another build of the
+engine, linked higher in the tag cache: their tags are moved where they are
+linked, their structure BSPs into the tag cache's free room with their
+pointers moved (`tag_validate_relocate_structure_bsp`), and their scripts
+given this build's indices by name. Maps linked to the tag cache's base load
+as they always did. See `docs/shadowrun_caches.md`.
+
 ### Settings
 
 A setting is an entry in `port/linux/src/port_config.c`, with a default, an
@@ -231,6 +238,7 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [port/web/README.md](port/web/README.md) | The web build, the page, the game data in the browser, limits, how it operates, hosting on GitHub Pages |
 | [port/include/xdk/README.md](port/include/xdk/README.md) | How the SDK declarations were written and are checked |
 | [docs/custom_edition_caches.md](docs/custom_edition_caches.md) | Loading and converting Custom Edition maps, and the evidence for each layout |
+| [docs/shadowrun_caches.md](docs/shadowrun_caches.md) | Running the Shadowrun prototype's maps: where they are linked, what is converted, what does not work |
 | [docs/mods.md](docs/mods.md) | Mods: folders of Halo PC tag files whose sounds, bitmaps, text and models play over a map's on one machine |
 | [port/assets/text_filter/README.md](port/assets/text_filter/README.md) | Streamer mode's words: Surge AI's list, the review, the allowed words |
 | [port/assets/menus/README.md](port/assets/menus/README.md) | The menu files' format and how to write them again |

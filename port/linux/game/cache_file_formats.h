@@ -3,7 +3,9 @@ CACHE_FILE_FORMATS.H
 
 Recognition, validation and loading of the Halo 1 map files that this build
 did not ship with: Halo Custom Edition caches (version 609) and the Custom
-Edition resource maps bitmaps.map, sounds.map and loc.map. A cache that
+Edition resource maps bitmaps.map, sounds.map and loc.map, and where the
+Xbox caches of other builds of the engine are linked (the Shadowrun
+prototype's, docs/shadowrun_caches.md). A cache that
 needs OpenSauce (its header asks for memory upgrades, mod data files and the
 like) is refused; one that only carries OpenSauce's header and tags is run as
 stock Custom Edition runs it, without them. docs/custom_edition_caches.md
@@ -512,5 +514,89 @@ void custom_edition_cache_combine_resource_offsets(
 	uint32_t loaded_bytes,
 	uint32_t bitmaps_offset,
 	uint32_t sounds_offset);
+
+/* ---------- Xbox caches of other builds of the engine
+
+An Xbox cache's tag data is linked to the address the game reads it to, and
+its structure BSPs to where they load. This build's maps link both to the
+Xbox's tag cache, 0x803A6000 to 0x819A6000, their tag data at its base. A
+build of the engine with a larger game state links them higher: the
+Shadowrun prototype (Halo's engine, build 01.12.07.0132) links its tag data
+to 0x8069E000, still inside that tag cache, and its BSPs above it, past
+where this build's game state begins (docs/shadowrun_caches.md). */
+
+#define XBOX_TAG_CACHE_ADDRESS 0x803A6000UL
+#define XBOX_TAG_CACHE_BYTES 0x01600000UL
+/* the tag header (cache_files.c, cache_file_tag_header): the tag table it
+names follows it */
+#define XBOX_CACHE_TAG_HEADER_BYTES 0x24
+
+/* The address the tag data at `tag_data` (`tag_data_bytes` of a cache's tag
+data, as read from the file) is linked to: its tag header's first field, the
+address of the tag table, less the header's size. _cache_file_status_ok with
+the address in `*address` when the tag data fits the tag cache of
+`tag_cache_bytes` at `tag_cache_address` there, aligned to 4 bytes (this
+build's maps are at its base);
+_cache_file_status_bad_tag_instances_range otherwise. */
+enum cache_file_status xbox_cache_tag_data_address(
+	uint8_t const *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_cache_address,
+	uint32_t tag_cache_bytes,
+	uint32_t *address);
+
+/* Where a structure BSP of `read_bytes` (its size rounded up to whole
+sectors, as it is read), linked to `linked_address`, loads in the free part
+of the tag cache, the `free_bytes` at `free_address` after the tag data: at
+its own address when it fits there, otherwise as low as it fits with the
+same offset in its 4096-byte page (so that every alignment within it holds).
+_cache_file_status_ok with the address in `*address`;
+_cache_file_status_bad_structure_bsp_range when it fits nowhere. */
+enum cache_file_status xbox_cache_structure_bsp_address(
+	uint32_t linked_address,
+	uint32_t read_bytes,
+	uint32_t free_address,
+	uint32_t free_bytes,
+	uint32_t *address);
+
+/* ---------- the Shadowrun prototype's caches
+
+The Shadowrun prototype's maps are Xbox caches linked to 0x8069E000 (above),
+of the engine as it was in December 2001 with Shadowrun's additions. The
+tags this build knows are laid out as its own; Shadowrun's own groups
+(magic and tech effect data, its weapons, units and actors, the buy menu)
+are left as they are, and nothing reads them. What it adds to enums this
+build reads is changed before the tags are checked, where this build has a
+near equivalent (docs/shadowrun_caches.md); the rest the tag validator
+corrects as it would any value past an enum's end. */
+
+#define SHADOWRUN_TAG_DATA_ADDRESS 0x8069E000UL
+/* the actor types Shadowrun adds after Halo's 16 (hologram, dog, ninja,
+mook, guard, necro, dwarf, and one past the names it lists) */
+#define SHADOWRUN_FIRST_ACTOR_TYPE 16
+#define SHADOWRUN_ACTOR_TYPE_COUNT 8
+
+struct shadowrun_conversion_report
+{
+	/* actor definitions of Shadowrun's actor types, given one of this build's */
+	int32_t actors_retyped;
+};
+
+/* Whether a cache's tag data, linked to `tag_data_address`
+(xbox_cache_tag_data_address), is the Shadowrun prototype's. */
+int shadowrun_cache_tag_data(
+	uint32_t tag_data_address);
+
+/* Converts the Shadowrun prototype's tag data at `tag_data` (`tag_data_bytes`
+of it, linked to `tag_data_address`, where it now is) for this build, before
+the tag validator checks it: each actor definition of one of Shadowrun's
+actor types gets this build's nearest. _cache_file_status_ok, or
+_cache_file_status_bad_tag_instances_range when its tag table does not lie
+in it (the validator would refuse it too). */
+enum cache_file_status shadowrun_cache_convert(
+	uint8_t *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	struct shadowrun_conversion_report *report);
 
 #endif

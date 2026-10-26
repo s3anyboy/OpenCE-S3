@@ -3929,3 +3929,158 @@ void custom_edition_cache_combine_resource_offsets(
 
 	return;
 }
+
+/* ---------- Xbox caches of other builds of the engine */
+
+enum cache_file_status xbox_cache_tag_data_address(
+	uint8_t const *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_cache_address,
+	uint32_t tag_cache_bytes,
+	uint32_t *address)
+{
+	uint32_t tag_table;
+	uint32_t linked;
+
+	if (!tag_data || tag_data_bytes < XBOX_CACHE_TAG_HEADER_BYTES || tag_data_bytes > tag_cache_bytes)
+	{
+		return _cache_file_status_bad_tag_data_range;
+	}
+	tag_table = read_u32(tag_data);
+	if (tag_table < tag_cache_address + XBOX_CACHE_TAG_HEADER_BYTES)
+	{
+		return _cache_file_status_bad_tag_instances_range;
+	}
+	linked = tag_table - XBOX_CACHE_TAG_HEADER_BYTES;
+	if ((linked & 3) ||
+		!range_fits(linked - tag_cache_address, tag_data_bytes, tag_cache_bytes))
+	{
+		return _cache_file_status_bad_tag_instances_range;
+	}
+	*address = linked;
+
+	return _cache_file_status_ok;
+}
+
+enum cache_file_status xbox_cache_structure_bsp_address(
+	uint32_t linked_address,
+	uint32_t read_bytes,
+	uint32_t free_address,
+	uint32_t free_bytes,
+	uint32_t *address)
+{
+	uint32_t page_offset = linked_address & 0xFFF;
+	uint32_t lowest;
+
+	if (read_bytes == 0)
+	{
+		return _cache_file_status_bad_structure_bsp_range;
+	}
+	if (linked_address >= free_address &&
+		range_fits(linked_address - free_address, read_bytes, free_bytes))
+	{
+		*address = linked_address;
+		return _cache_file_status_ok;
+	}
+	/* (the first address at or after free_address with the BSP's offset in
+	its page) */
+	if (free_address > UINT32_MAX - 0x1000)
+	{
+		return _cache_file_status_bad_structure_bsp_range;
+	}
+	lowest = (free_address & ~(uint32_t)0xFFF) + page_offset;
+	if (lowest < free_address)
+	{
+		lowest += 0x1000;
+	}
+	if (!range_fits(lowest - free_address, read_bytes, free_bytes))
+	{
+		return _cache_file_status_bad_structure_bsp_range;
+	}
+	*address = lowest;
+
+	return _cache_file_status_ok;
+}
+
+/* ---------- the Shadowrun prototype's caches */
+
+/* the Xbox tag header's fields (cache_files.c, cache_file_tag_header) */
+#define XBOX_TAG_HEADER_INSTANCES_OFFSET 0x00
+#define XBOX_TAG_HEADER_COUNT_OFFSET 0x0C
+#define XBOX_TAG_HEADER_SIGNATURE_OFFSET 0x20
+#define ACTOR_GROUP_TAG 'actr'
+/* an actor definition's type (ai/actor_definitions.h) */
+#define ACTOR_DEFINITION_TYPE_OFFSET 0x14
+
+/* this build's actor type (ai/actor_types.h) for each of Shadowrun's, by
+what its actors do: the spirit dog charges with its teeth as the flood's
+combat forms do, the ninja dodges and closes in as an elite does, and the
+rest are soldiers with guns, as marines are */
+static int16_t const shadowrun_actor_types[SHADOWRUN_ACTOR_TYPE_COUNT] =
+{
+	7, /* hologram: marine */
+	9, /* dog: combat form */
+	0, /* ninja: elite */
+	7, /* mook: marine */
+	7, /* guard (its trolls too): marine */
+	7, /* necro: marine */
+	7, /* dwarf: marine */
+	7, /* (unnamed: its commanders and mages): marine */
+};
+
+int shadowrun_cache_tag_data(
+	uint32_t tag_data_address)
+{
+	return tag_data_address == SHADOWRUN_TAG_DATA_ADDRESS;
+}
+
+enum cache_file_status shadowrun_cache_convert(
+	uint8_t *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	struct shadowrun_conversion_report *report)
+{
+	uint32_t instances_offset;
+	int32_t tag_count;
+	int32_t index;
+
+	memset(report, 0, sizeof(*report));
+	if (!tag_data || tag_data_bytes < XBOX_CACHE_TAG_HEADER_BYTES ||
+		read_u32(tag_data + XBOX_TAG_HEADER_SIGNATURE_OFFSET) != TAG_INDEX_SIGNATURE)
+	{
+		return _cache_file_status_bad_tag_index_signature;
+	}
+	instances_offset = read_u32(tag_data + XBOX_TAG_HEADER_INSTANCES_OFFSET) - tag_data_address;
+	tag_count = read_s32(tag_data + XBOX_TAG_HEADER_COUNT_OFFSET);
+	if (tag_count <= 0 || (uint32_t)tag_count > tag_data_bytes / TAG_INSTANCE_BYTES ||
+		!range_fits(instances_offset, (uint32_t)tag_count * TAG_INSTANCE_BYTES, tag_data_bytes))
+	{
+		return _cache_file_status_bad_tag_instances_range;
+	}
+	for (index = 0; index < tag_count; index++)
+	{
+		uint8_t const *instance = tag_data + instances_offset + (uint32_t)index * TAG_INSTANCE_BYTES;
+		uint32_t definition_offset;
+		int16_t type;
+
+		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != ACTOR_GROUP_TAG)
+		{
+			continue;
+		}
+		definition_offset = read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET) - tag_data_address;
+		/* (a definition outside the tag data is the validator's to refuse) */
+		if (!range_fits(definition_offset, ACTOR_DEFINITION_TYPE_OFFSET + 2, tag_data_bytes))
+		{
+			continue;
+		}
+		type = read_s16(tag_data + definition_offset + ACTOR_DEFINITION_TYPE_OFFSET);
+		if (type >= SHADOWRUN_FIRST_ACTOR_TYPE && type < SHADOWRUN_FIRST_ACTOR_TYPE + SHADOWRUN_ACTOR_TYPE_COUNT)
+		{
+			write_u16(tag_data + definition_offset + ACTOR_DEFINITION_TYPE_OFFSET,
+				(uint16_t)shadowrun_actor_types[type - SHADOWRUN_FIRST_ACTOR_TYPE]);
+			report->actors_retyped++;
+		}
+	}
+
+	return _cache_file_status_ok;
+}

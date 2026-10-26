@@ -298,6 +298,46 @@ boolean tag_validate_tags(
 	long file_length,
 	char const *map_name);
 
+/* as tag_validate_tags, for tags linked to an address in the tag cache past
+its base (an Xbox cache of another build of the engine,
+cache_file_formats.h: xbox_cache_tag_data_address), tag_cache_size bytes
+from tag_header to the tag cache's end: what the bsps load in */
+boolean tag_validate_linked_tags(
+	void *tag_header,
+	long tag_data_size,
+	unsigned long tag_cache_size,
+	long file_length,
+	char const *map_name);
+
+/* a structure bsp read to base (size bytes) that was linked to
+linked_address: every pointer the structure bsp's schema names (and its
+header's, and its buffers' data), where it points into the bytes as linked,
+moved to where they are. Before tag_validate_structure_bsp checks it. NONE
+if its header is damaged or the two ranges overlap; otherwise how many words
+of it still hold an address where it was linked (none should, but for
+numbers that look like one) */
+long tag_validate_relocate_structure_bsp(
+	void *base,
+	long size,
+	unsigned long linked_address);
+
+/* (tag_schema_structure_bsp_vertex_buffer_pointers) whether count elements
+of element_size bytes at address may be read; and a pointer to visit */
+typedef boolean (*tag_schema_loaded_proc)(void *context, void const *address, long count, unsigned long element_size);
+typedef void (*tag_schema_pointer_proc)(void *context, void **pointer);
+
+/* (tag_schema_collision.c) each pointer of a structure bsp's materials that
+the schema checks (structure_vertex_buffer_check) but does not name as a
+field: their vertices' and lightmap vertices' base addresses and hardware
+buffers, which point into the bsp. visit is called with each, in elements
+loaded says may be read */
+struct structure_bsp;
+void tag_schema_structure_bsp_vertex_buffer_pointers(
+	struct structure_bsp *structure_bsp,
+	tag_schema_loaded_proc loaded,
+	tag_schema_pointer_proc visit,
+	void *context);
+
 /* the tags of a Custom Edition map, as custom_edition_cache_load loaded and
 custom_edition_cache_convert converted them (loaded_size bytes at
 tag_header, the start of a tag cache of tag_cache_size bytes), whose bitmap

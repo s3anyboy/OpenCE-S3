@@ -1213,10 +1213,24 @@ boolean tag_validate_tags(
 	long file_length,
 	char const *map_name)
 {
+	return tag_validate_linked_tags(tag_header, tag_data_size, TAG_CACHE_SIZE, file_length, map_name);
+}
+
+boolean tag_validate_linked_tags(
+	void *tag_header,
+	long tag_data_size,
+	unsigned long tag_cache_size,
+	long file_length,
+	char const *map_name)
+{
 	struct tag_validate_header *header = tag_header;
 	struct tag_validation validation;
 
-	validation_begin(&validation, tag_header, tag_data_size, TAG_CACHE_SIZE, FALSE, map_name);
+	/* (the tag cache from the tags to its end: all of it for this build's
+	maps, whose tags are at its base) */
+	if (tag_cache_size > TAG_CACHE_SIZE)
+		tag_cache_size = TAG_CACHE_SIZE;
+	validation_begin(&validation, tag_header, tag_data_size, tag_cache_size, FALSE, map_name);
 	tag_validate_globals.file_ranges[0].offset = 0;
 	tag_validate_globals.file_ranges[0].size = file_length < 0 ? 0 : (unsigned long)file_length;
 	tag_validate_globals.file_range_count = 1;
@@ -1226,7 +1240,7 @@ boolean tag_validate_tags(
 		tag_validate_refuse(&validation, "cannot be checked: a tag schema is wrong");
 		return FALSE;
 	}
-	if (tag_data_size < (long)sizeof(*header) || tag_data_size > TAG_CACHE_SIZE ||
+	if (tag_data_size < (long)sizeof(*header) || (unsigned long)tag_data_size > tag_cache_size ||
 		header->signature != TAG_HEADER_SIGNATURE ||
 		header->tag_count <= 0 || header->tag_count > UNSIGNED_SHORT_MAX ||
 		!region_contains(&validation, header->instances, header->tag_count * sizeof(struct tag_validate_instance)))
@@ -1338,6 +1352,190 @@ boolean tag_validate_structure_bsp(
 	tag_validate_globals.corrections += validation.corrections;
 
 	return !validation.refused;
+}
+
+/* a structure bsp's relocation (tag_validate_relocate_structure_bsp): the
+pointers into the bytes it was linked to are moved by delta */
+struct structure_bsp_relocation
+{
+	byte *base;
+	unsigned long size;
+	unsigned long linked_address;
+	long delta;
+	/* the elements the walk may still visit */
+	unsigned long budget;
+};
+
+/* moves *pointer to the bsp's bytes where they are, if it points into where
+they were linked */
+static void relocation_pointer(
+	struct structure_bsp_relocation *relocation,
+	void **pointer)
+{
+	unsigned long address = (unsigned long)*pointer;
+
+	if (address - relocation->linked_address < relocation->size)
+		*pointer = (byte *)*pointer + relocation->delta;
+
+	return;
+}
+
+/* whether count elements of element_size bytes at address lie in the bsp's
+bytes where they are */
+static boolean relocation_loaded(
+	struct structure_bsp_relocation const *relocation,
+	void const *address,
+	long count,
+	unsigned long element_size)
+{
+	unsigned long offset = (unsigned long)address - (unsigned long)relocation->base;
+
+	return count >= 0 && element_size > 0 && offset < relocation->size &&
+		(unsigned long)count <= (relocation->size - offset) / element_size;
+}
+
+/* (relocation_loaded and relocation_pointer for the schema's walks) */
+static boolean relocation_loaded_proc(
+	void *context,
+	void const *address,
+	long count,
+	unsigned long element_size)
+{
+	return relocation_loaded(context, address, count, element_size);
+}
+
+static void relocation_pointer_proc(
+	void *context,
+	void **pointer)
+{
+	relocation_pointer(context, pointer);
+
+	return;
+}
+
+/* every block and data pointer of an element (base, of definition): those
+the schema names are all the pointers the game follows */
+static void relocation_fields(
+	struct structure_bsp_relocation *relocation,
+	byte *base,
+	struct tag_schema_definition const *definition,
+	short depth)
+{
+	struct tag_schema_field const *field;
+
+	if (depth >= MAXIMUM_VALIDATION_DEPTH)
+		return;
+	for (field = definition->fields; field->type != _tag_schema_terminator; field++)
+	{
+		short index;
+
+		for (index = 0; index < field->count; index++)
+		{
+			byte *address = base + field->offset + index * field->size;
+
+			switch (field->type)
+			{
+			case _tag_schema_struct:
+				relocation_fields(relocation, address, field->definition, depth);
+				break;
+
+			case _tag_schema_block:
+			{
+				struct tag_block *block = (struct tag_block *)address;
+				struct tag_schema_definition const *element = field->definition;
+				long element_index;
+
+				relocation_pointer(relocation, &block->address);
+				/* (a block elsewhere, or past the bsp, is the
+				validator's to refuse) */
+				if (!relocation_loaded(relocation, block->address, block->count, (unsigned long)element->size))
+					break;
+				for (element_index = 0; element_index < block->count && relocation->budget; element_index++)
+				{
+					relocation->budget--;
+					relocation_fields(relocation, (byte *)block->address + element_index * element->size,
+						element, (short)(depth + 1));
+				}
+				break;
+			}
+
+			case _tag_schema_data:
+			case _tag_schema_file_data:
+				relocation_pointer(relocation, &((struct tag_data *)address)->address);
+				break;
+
+			default:
+				break;
+			}
+		}
+	}
+
+	return;
+}
+
+long tag_validate_relocate_structure_bsp(
+	void *base,
+	long size,
+	unsigned long linked_address)
+{
+	struct structure_bsp_relocation relocation;
+	struct tag_validate_structure_bsp_header *bsp_header = base;
+	struct tag_schema_group const *group = schema_group_get(STRUCTURE_BSP_GROUP_TAG);
+	unsigned long address = (unsigned long)base;
+	long buffer_index;
+	long leftovers = 0;
+	unsigned long offset;
+
+	if (size < (long)sizeof(*bsp_header) || !group || !group->definition ||
+		bsp_header->signature != STRUCTURE_BSP_HEADER_SIGNATURE)
+	{
+		return NONE;
+	}
+	if (address == linked_address)
+		return 0;
+	/* (the two ranges apart: a pointer moved into where the bsp was linked
+	would be moved again) */
+	if (address - linked_address < (unsigned long)size || linked_address - address < (unsigned long)size)
+		return NONE;
+	relocation.base = base;
+	relocation.size = (unsigned long)size;
+	relocation.linked_address = linked_address;
+	relocation.delta = (long)(address - linked_address);
+	relocation.budget = (unsigned long)size / 4;
+
+	relocation_pointer(&relocation, &bsp_header->base_address);
+	relocation_pointer(&relocation, (void **)&bsp_header->vertex_buffers);
+	relocation_pointer(&relocation, (void **)&bsp_header->index_buffers);
+	/* (each buffer's Data, its bytes' address before it is registered) */
+	if (relocation_loaded(&relocation, bsp_header->vertex_buffers, bsp_header->vertex_buffer_count, BUFFER_SIZE))
+	{
+		for (buffer_index = 0; buffer_index < bsp_header->vertex_buffer_count; buffer_index++)
+			relocation_pointer(&relocation, (void **)(bsp_header->vertex_buffers + buffer_index * BUFFER_SIZE + 4));
+	}
+	if (relocation_loaded(&relocation, bsp_header->index_buffers, bsp_header->index_buffer_count, BUFFER_SIZE))
+	{
+		for (buffer_index = 0; buffer_index < bsp_header->index_buffer_count; buffer_index++)
+			relocation_pointer(&relocation, (void **)(bsp_header->index_buffers + buffer_index * BUFFER_SIZE + 4));
+	}
+	if (relocation_loaded(&relocation, bsp_header->base_address, 1, (unsigned long)group->definition->size))
+	{
+		relocation_fields(&relocation, bsp_header->base_address, group->definition, 0);
+		/* (and what the schema's checks follow but its fields don't name) */
+		tag_schema_structure_bsp_vertex_buffer_pointers(bsp_header->base_address, relocation_loaded_proc,
+			relocation_pointer_proc, &relocation);
+	}
+
+	/* (what still points where the bsp was linked: none, when the schema
+	names every pointer, but for numbers that happen to look like one) */
+	for (offset = 0; offset + 4 <= relocation.size; offset += 4)
+	{
+		unsigned long word = *(unsigned long *)(relocation.base + offset);
+
+		if (word - linked_address < relocation.size)
+			leftovers++;
+	}
+
+	return leftovers;
 }
 
 long tag_validate_corrections(

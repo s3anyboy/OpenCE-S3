@@ -1713,3 +1713,39 @@ static boolean structure_bsp_check(
 
 	return TRUE;
 }
+
+/* ---------- public code */
+
+void tag_schema_structure_bsp_vertex_buffer_pointers(
+	struct structure_bsp *structure_bsp,
+	tag_schema_loaded_proc loaded,
+	tag_schema_pointer_proc visit,
+	void *context)
+{
+	long lightmap_index;
+
+	if (!loaded(context, structure_bsp->lightmaps.address, structure_bsp->lightmaps.count,
+		sizeof(struct structure_lightmap)))
+	{
+		return;
+	}
+	for (lightmap_index = 0; lightmap_index < structure_bsp->lightmaps.count; lightmap_index++)
+	{
+		struct structure_lightmap *lightmap = (struct structure_lightmap *)structure_bsp->lightmaps.address + lightmap_index;
+		long material_index;
+
+		if (!loaded(context, lightmap->materials.address, lightmap->materials.count, sizeof(struct structure_material)))
+			continue;
+		for (material_index = 0; material_index < lightmap->materials.count; material_index++)
+		{
+			struct structure_material *material = (struct structure_material *)lightmap->materials.address + material_index;
+
+			visit(context, &material->vertices.base_address);
+			visit(context, &material->vertices.hardware_format);
+			visit(context, &material->lightmap_vertices.base_address);
+			visit(context, &material->lightmap_vertices.hardware_format);
+		}
+	}
+
+	return;
+}

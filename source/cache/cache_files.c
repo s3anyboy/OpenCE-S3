@@ -133,6 +133,7 @@ symbols in this file:
 #include "texture_cache.h"
 #include "interface/ui_widget.h"
 #include "scenario/scenario_definitions.h"
+#include "scenario/scenario.h" /* port: MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO */
 #include "sound/sound_manager.h"
 #include "tag_schema.h"
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
@@ -262,6 +263,25 @@ extern struct cache_file_tag_instance *global_tag_instances;
 the table (port/linux/game/menu_tags.c); the map's tag header keeps its own,
 which a Custom Edition map's loader goes on reading. */
 static long global_tag_count;
+/* port: where the loaded map's tags are in the tag cache: at its base, or
+past it for a map of a build of the engine that links them higher (the
+Shadowrun prototype's, cache_files_tags_place) */
+static byte *cache_file_tag_data;
+/* port: whether the loaded map is of another build of the engine, one that
+links its tags elsewhere in the tag cache (the Shadowrun prototype's), whose
+scripts are given this build's indices by name
+(port/linux/game/custom_edition_scripts.c). Every map that links them to the
+tag cache's base is taken as it always was */
+static boolean cache_file_other_build;
+/* port: the structure bsps that load lower than they are linked, past the
+tag cache's free room (the Shadowrun prototype's), and where each is
+linked: moved there as each is read (cache_files_structure_bsps_place) */
+static struct
+{
+	struct scenario_structure_bsp_reference *reference;
+	void *linked_address;
+} cache_file_moved_structure_bsps[MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO];
+static short cache_file_moved_structure_bsp_count;
 static char const *data_00316820[] =
 {
 	"d:\\maps_de\\",
@@ -383,8 +403,145 @@ boolean cache_file_tag_cache_contains(
 	return tag_cache && size > 0 && cache_file_region_contains(tag_cache, tag_cache_size, address, 1, size);
 }
 
+/* port: the bytes from address to the tag cache's end */
+static unsigned long cache_file_tag_cache_room(
+	void const *address)
+{
+	unsigned long tag_cache = (unsigned long)physical_memory_get_tag_cache_base_address();
+	unsigned long offset = (unsigned long)address - tag_cache;
+
+	return offset < TAG_CACHE_SIZE ? TAG_CACHE_SIZE - offset : 0;
+}
+
+/* port: the tags just read to the tag cache's base, where they are linked
+(port/linux/game/cache_file_formats.h, xbox_cache_tag_data_address): this
+build's maps link them there; a map of a build of the engine with a larger
+game state links them higher, and they are moved there (the Shadowrun
+prototype's, to 0x8069E000, whose tags are also converted for this build:
+shadowrun_cache_convert). NULL if they are linked outside the tag cache */
+static byte *cache_files_tags_place(
+	byte *tag_cache,
+	long tag_data_size,
+	char const *scenario_name)
+{
+	uint32_t linked_address;
+	byte *tag_data;
+
+	if (xbox_cache_tag_data_address(tag_cache, (uint32_t)tag_data_size, (uint32_t)(unsigned long)tag_cache,
+		TAG_CACHE_SIZE, &linked_address) != _cache_file_status_ok)
+	{
+		error(_error_silent, "the cache file '%s' is damaged: its tags are linked outside the tag cache", scenario_name);
+		return NULL;
+	}
+	tag_data = (byte *)(unsigned long)linked_address;
+	if (tag_data != tag_cache)
+	{
+		memmove(tag_data, tag_cache, (size_t)tag_data_size);
+		csmemset(tag_cache, 0xCD, (long)MIN(tag_data - tag_cache, tag_data_size));
+		error(_error_silent, "'%s' is a map of another build of the engine: its tags are linked to %08lx",
+			scenario_name, (unsigned long)linked_address);
+		if (shadowrun_cache_tag_data(linked_address))
+		{
+			struct shadowrun_conversion_report conversion;
+
+			if (shadowrun_cache_convert(tag_data, (uint32_t)tag_data_size, linked_address, &conversion) !=
+				_cache_file_status_ok)
+			{
+				error(_error_silent, "the cache file '%s' is damaged: its tag header is wrong", scenario_name);
+				return NULL;
+			}
+			error(_error_silent, "'%s' is a Shadowrun prototype map: %ld of its actor definitions were given this build's actor types",
+				scenario_name, (long)conversion.actors_retyped);
+		}
+	}
+
+	return tag_data;
+}
+
+/* port: each structure bsp of the scenario (the checked tags') that would
+load past the tag cache's free room, after the tags, loads as low in it as
+it fits instead (port/linux/game/cache_file_formats.h,
+xbox_cache_structure_bsp_address), and is moved there as it is read
+(cache_files_structure_bsp_relocate). This build's maps' bsps load where
+they are linked */
+static void cache_files_structure_bsps_place(
+	struct cache_file_tag_header *tag_header,
+	long tag_data_size)
+{
+	long scenario_absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(tag_header->scenario_tag_index);
+	struct scenario *scenario = tag_header->tag_instances[scenario_absolute_index].base_address;
+	byte *free_room = (byte *)tag_header + tag_data_size;
+	long index;
+
+	cache_file_moved_structure_bsp_count = 0;
+	for (index = 0;
+		scenario && index < MIN(scenario->structure_bsp_references.count, MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO);
+		index++)
+	{
+		struct scenario_structure_bsp_reference *reference =
+			(struct scenario_structure_bsp_reference *)scenario->structure_bsp_references.address + index;
+		unsigned long read_size;
+		uint32_t address;
+
+		if (reference->file_size <= 0)
+			continue;
+		read_size = ((unsigned long)reference->file_size + CACHE_FILE_SECTOR_SIZE - 1) & ~(unsigned long)(CACHE_FILE_SECTOR_SIZE - 1);
+		/* (one that fits nowhere is left where it is linked, and refused as
+		it loads: cache_file_structure_bsp_reference_verify) */
+		if (xbox_cache_structure_bsp_address((uint32_t)(unsigned long)reference->base_address, (uint32_t)read_size,
+			(uint32_t)(unsigned long)free_room, (uint32_t)cache_file_tag_cache_room(free_room), &address) !=
+			_cache_file_status_ok ||
+			(void *)(unsigned long)address == reference->base_address)
+		{
+			continue;
+		}
+		error(_error_silent, "structure bsp %ld, linked to %08lx, loads to %08lx", index,
+			(unsigned long)reference->base_address, (unsigned long)address);
+		cache_file_moved_structure_bsps[cache_file_moved_structure_bsp_count].reference = reference;
+		cache_file_moved_structure_bsps[cache_file_moved_structure_bsp_count].linked_address = reference->base_address;
+		cache_file_moved_structure_bsp_count++;
+		reference->base_address = (void *)(unsigned long)address;
+	}
+
+	return;
+}
+
+/* port: a structure bsp just read where cache_files_structure_bsps_place
+moved it: its pointers moved with it (port/linux/game/tag_validate.c,
+tag_validate_relocate_structure_bsp). FALSE if it cannot be */
+static boolean cache_files_structure_bsp_relocate(
+	struct scenario_structure_bsp_reference *reference)
+{
+	short index;
+
+	for (index = 0; index < cache_file_moved_structure_bsp_count; index++)
+	{
+		if (cache_file_moved_structure_bsps[index].reference == reference)
+		{
+			long leftovers = tag_validate_relocate_structure_bsp(reference->base_address, reference->file_size,
+				(unsigned long)cache_file_moved_structure_bsps[index].linked_address);
+
+			if (leftovers == NONE)
+			{
+				error(_error_silent, "a structure bsp is damaged: it cannot be moved from %08lx",
+					(unsigned long)cache_file_moved_structure_bsps[index].linked_address);
+				return FALSE;
+			}
+			if (leftovers)
+			{
+				error(_error_silent, "structure bsp moved from %08lx: %ld of its words still look like addresses there",
+					(unsigned long)cache_file_moved_structure_bsps[index].linked_address, leftovers);
+			}
+			break;
+		}
+	}
+
+	return TRUE;
+}
+
 /* port: whether the tag header of the tags just read (tag_data_size bytes
-at the tag cache's base) can be trusted, as everything after trusts it:
+where they are linked, cache_files_tags_place) can be trusted, as everything
+after trusts it:
 its tag table and vertex and index buffers lie in the tag data, its tags'
 count fits a tag index's absolute index, and it names a scenario tag */
 static boolean cache_file_tag_header_verify(
@@ -452,7 +609,7 @@ static boolean cache_file_tag_header_verify(
 			void const *base_address = tag_header->tag_instances[absolute_index].base_address;
 
 			if (base_address &&
-				!cache_file_region_contains(tag_header, TAG_CACHE_SIZE, base_address, 1, 1))
+				!cache_file_region_contains(tag_header, cache_file_tag_cache_room(tag_header), base_address, 1, 1))
 			{
 				problem = "tag data address";
 			}
@@ -489,7 +646,8 @@ names a structure bsp tag */
 static boolean cache_file_structure_bsp_reference_verify(
 	struct scenario_structure_bsp_reference *reference)
 {
-	byte *tag_cache_base_address = physical_memory_get_tag_cache_base_address();
+	/* port: the free room is after the tags, wherever they are (cache_files_tags_place) */
+	byte *tag_cache_base_address = cache_file_tag_data ? cache_file_tag_data : physical_memory_get_tag_cache_base_address();
 	long tag_data_size = cache_file_globals.header.tag_data_size;
 	long read_size;
 
@@ -511,7 +669,7 @@ static boolean cache_file_structure_bsp_reference_verify(
 	read_size = (reference->file_size + CACHE_FILE_SECTOR_SIZE - 1) & ~(CACHE_FILE_SECTOR_SIZE - 1);
 	if (!cache_file_region_contains(
 		tag_cache_base_address + tag_data_size,
-		TAG_CACHE_SIZE - tag_data_size,
+		cache_file_tag_cache_room(tag_cache_base_address + tag_data_size),
 		reference->base_address,
 		read_size,
 		1))
@@ -625,6 +783,11 @@ void scenario_tags_unload(
 	else
 		tags_header_deregister_vertex_and_index_buffers(cache_file_globals.tag_header);
 	cache_file_globals.tags_loaded = FALSE;
+	/* port: and the next map's tags are placed and its bsps moved anew
+	(cache_files_tags_place, cache_files_structure_bsps_place) */
+	cache_file_tag_data = NULL;
+	cache_file_other_build = FALSE;
+	cache_file_moved_structure_bsp_count = 0;
 	global_tag_instances = NULL;
 	global_tag_count = 0;
 
@@ -1266,6 +1429,20 @@ long scenario_tags_load(
 
 				return NONE;
 			}
+			/* port: where the tags are linked: the tag cache's base for this
+			build's maps, higher for another build's (cache_files_tags_place) */
+			cache_file_tag_data = cache_files_tags_place(
+				tag_cache_base_address,
+				cache_file_globals.header.tag_data_size,
+				scenario_name);
+			if (!cache_file_tag_data)
+			{
+				cache_file_close();
+
+				return NONE;
+			}
+			cache_file_other_build = cache_file_tag_data != (byte *)tag_cache_base_address;
+			tag_cache_base_address = cache_file_tag_data;
 			if (!cache_file_tag_header_verify(
 				tag_cache_base_address,
 				cache_file_globals.header.tag_data_size,
@@ -1279,15 +1456,34 @@ long scenario_tags_load(
 			anything reads it (port/linux/game/tag_validate.c): a map whose
 			tags' pointers cannot be trusted is refused; what can be
 			corrected is */
-			if (!tag_validate_tags(
+			if (!tag_validate_linked_tags(
 				tag_cache_base_address,
 				cache_file_globals.header.tag_data_size,
+				cache_file_tag_cache_room(tag_cache_base_address),
 				cache_file_globals.header.file_length,
 				scenario_name))
 			{
 				cache_file_close();
 
 				return NONE;
+			}
+			/* port: a map of another build of the engine: its bsps load in
+			the tag cache's free room, and its scripts call this build's
+			functions by name (port/linux/game/custom_edition_scripts.c) */
+			cache_files_structure_bsps_place(tag_cache_base_address, cache_file_globals.header.tag_data_size);
+			if (cache_file_other_build)
+			{
+				struct cache_file_tag_header *tags = tag_cache_base_address;
+				long scenario_absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(tags->scenario_tag_index);
+
+				if (!scenario_scripts_convert_by_name(
+					tags->tag_instances[scenario_absolute_index].base_address,
+					tags->tag_instances[scenario_absolute_index].name))
+				{
+					cache_file_close();
+
+					return NONE;
+				}
 			}
 
 			cache_file_globals.tag_header = tag_cache_base_address;
@@ -1389,10 +1585,15 @@ boolean scenario_structure_bsp_load(
 	tag_cache_base_address = physical_memory_get_tag_cache_base_address();
 	if (!custom_edition_cache_tags_loaded())
 	{
+		/* port: the free room after the tags, wherever they are
+		(cache_files_tags_place) */
+		byte *free_room = (cache_file_tag_data ? cache_file_tag_data : tag_cache_base_address) +
+			cache_file_globals.header.tag_data_size;
+
 		csmemset(
-			tag_cache_base_address + cache_file_globals.header.tag_data_size,
+			free_room,
 			0xCD,
-			0x01600000 - cache_file_globals.header.tag_data_size);
+			(long)cache_file_tag_cache_room(free_room));
 	}
 	{
 		boolean read_complete;
@@ -1413,6 +1614,13 @@ boolean scenario_structure_bsp_load(
 			}
 		}
 
+		/* port: one moved lower than it is linked has its pointers moved
+		with it (cache_files_structure_bsps_place), before they are checked */
+		if (read_complete == TRUE && !custom_edition_cache_tags_loaded() &&
+			!cache_files_structure_bsp_relocate(reference))
+		{
+			return FALSE;
+		}
 		/* port: a bsp that did not all read, or whose header's pointers
 		leave what was read, is not loaded */
 		structure_bsp_header = reference->base_address;

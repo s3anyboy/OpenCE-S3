@@ -101,6 +101,10 @@ Both the server browser and the LAN browser support automatic map downloads - wh
 Internet, when the host has map sharing enabled (on by default).
 Refer to [docs/custom_edition_caches.md](docs/custom_edition_caches.md).
 
+## Shadowrun prototype maps
+
+The maps of the Shadowrun prototype (built on Halo's Xbox engine, build 01.12.07.0132) run too: put `missionlet.map` in `maps`, and load it from the console or `init.txt` with `map_name levels\test\hangemhigh\missionlet`. Its tags and geometry are moved to where this build loads them, and its scripts call this build's functions by name. Shadowrun's own systems (magic, tech, the buy menu) are not there: the level plays on Halo's game code. Refer to [docs/shadowrun_caches.md](docs/shadowrun_caches.md).
+
 ## Mods
 
 Mods go in a `mods` folder next to `maps`. Each mod is a folder of Halo PC tag files, as the Halo Editing Kit and Invader make them, with a `mod.toml` describing it. Every mod in the folder is on by default. Mods in the main menu turns them on and off and sets their order. Think of it like a resource pack list, the mod at the top plays over the ones below it. The game also refuses mods that say they cannot be played together. 

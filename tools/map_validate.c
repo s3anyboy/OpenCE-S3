@@ -127,7 +127,10 @@ typedef char verify_scenario_structure_bsp_reference_size[
 /* ---------- the validator's (port/linux/game/tag_validate.c) */
 
 unsigned char tag_validate_tags(void *tag_header, long tag_data_size, long file_length, char const *map_name);
+unsigned char tag_validate_linked_tags(void *tag_header, long tag_data_size, unsigned long tag_cache_size,
+	long file_length, char const *map_name);
 unsigned char tag_validate_structure_bsp(long tag_index, void *base, long size);
+long tag_validate_relocate_structure_bsp(void *base, long size, unsigned long linked_address);
 long tag_validate_corrections(void);
 unsigned char tag_validate_claimed(void const *address);
 struct tag_validate_file_range
@@ -250,6 +253,10 @@ static unsigned char *map_read(char const *path, struct cache_file_header *heade
 	return bytes;
 }
 
+/* where map_check last put a map's tags: the tag cache's base, or where they
+are linked past it (the fuzzing's second check looks there) */
+static unsigned char *checked_tag_data;
+
 /* the map's tags (bytes, as map_read gives them) checked where the game
 reads them, then each of its structure bsps where it loads: 0 if the map
 plays (its corrections counted), 1 if it is refused */
@@ -262,10 +269,46 @@ static int map_check(struct cache_file_header const *header, unsigned char const
 	long index;
 	int refused = 0;
 
+	unsigned char *tag_data = tag_cache;
+	uint32_t linked_address;
+
 	*corrections = 0;
 	memset(tag_cache, 0xCD, TAG_CACHE_SIZE);
-	memcpy(tag_cache, bytes + header->tag_data_offset, header->tag_data_size);
-	if (!tag_validate_tags(tag_cache, header->tag_data_size, header->file_length, name))
+	/* (where the tags are linked: the tag cache's base, or past it for a map
+	of another build of the engine, read there as the game reads it,
+	cache_files.c) */
+	if (xbox_cache_tag_data_address(bytes + header->tag_data_offset, (uint32_t)header->tag_data_size,
+		TAG_CACHE_BASE_ADDRESS, TAG_CACHE_SIZE, &linked_address) != _cache_file_status_ok)
+	{
+		if (!quiet)
+			printf("%s: its tag data is linked outside the tag cache\n", name);
+		return 1;
+	}
+	tag_data = tag_cache + (linked_address - TAG_CACHE_BASE_ADDRESS);
+	tags = (struct tag_header *)tag_data;
+	checked_tag_data = tag_data;
+	if (tag_data != tag_cache && !quiet)
+		printf("%s: its tag data is linked to %08lx\n", name, (unsigned long)linked_address);
+	memcpy(tag_data, bytes + header->tag_data_offset, header->tag_data_size);
+	/* (the Shadowrun prototype's, converted as the game converts them,
+	cache_files.c) */
+	if (shadowrun_cache_tag_data(linked_address))
+	{
+		struct shadowrun_conversion_report conversion;
+
+		if (shadowrun_cache_convert(tag_data, (uint32_t)header->tag_data_size, linked_address, &conversion) !=
+			_cache_file_status_ok)
+		{
+			if (!quiet)
+				printf("%s: its Shadowrun tags cannot be converted\n", name);
+			return 1;
+		}
+		if (!quiet)
+			printf("%s: a Shadowrun prototype map: %ld actor definitions given this build's actor types\n", name,
+				(long)conversion.actors_retyped);
+	}
+	if (!tag_validate_linked_tags(tag_data, header->tag_data_size, TAG_CACHE_SIZE - (unsigned long)(tag_data - tag_cache),
+		header->file_length, name))
 		return 1;
 	*corrections = tag_validate_corrections();
 
@@ -293,25 +336,47 @@ static int map_check(struct cache_file_header const *header, unsigned char const
 	{
 		struct scenario_structure_bsp_reference *reference =
 			(struct scenario_structure_bsp_reference *)bsps->address + index;
-		unsigned long load = (unsigned long)reference->base_address - TAG_CACHE_BASE_ADDRESS;
+		unsigned long tags_end = (unsigned long)(tag_data - tag_cache) + (unsigned long)header->tag_data_size;
 		/* (the game reads whole sectors) */
 		unsigned long read_size = ((unsigned long)reference->file_size + CACHE_FILE_SECTOR_SIZE - 1) &
 			~(unsigned long)(CACHE_FILE_SECTOR_SIZE - 1);
+		unsigned long linked = (unsigned long)reference->base_address;
+		uint32_t address;
+		unsigned long load;
+		long leftovers;
 
-		/* (what cache_file_structure_bsp_reference_verify checks) */
+		/* (what cache_file_structure_bsp_reference_verify checks, after
+		cache_files_structure_bsps_place has found the bsp room: where it is
+		linked, or below that when it is linked past the free tag cache) */
 		if (reference->file_offset < 0 || reference->file_size <= 0 ||
 			reference->file_offset > header->file_length - reference->file_size ||
-			load < (unsigned long)header->tag_data_size || load > TAG_CACHE_SIZE ||
-			read_size > TAG_CACHE_SIZE - load)
+			xbox_cache_structure_bsp_address((uint32_t)linked, (uint32_t)read_size,
+				(uint32_t)(TAG_CACHE_BASE_ADDRESS + tags_end), (uint32_t)(TAG_CACHE_SIZE - tags_end),
+				&address) != _cache_file_status_ok)
 		{
 			if (!quiet)
 				printf("%s: its structure bsp %ld is outside it\n", name, index);
 			refused = 1;
 			break;
 		}
-		memset(tag_cache + header->tag_data_size, 0xCD, TAG_CACHE_SIZE - header->tag_data_size);
-		memcpy(reference->base_address, bytes + reference->file_offset, reference->file_size);
-		if (!tag_validate_structure_bsp(reference->tag_index, reference->base_address, reference->file_size))
+		load = (unsigned long)address - TAG_CACHE_BASE_ADDRESS;
+		if (address != linked && !quiet)
+			printf("%s: its structure bsp %ld, linked to %08lx, loads to %08lx\n", name, index, linked,
+				(unsigned long)address);
+		memset(tag_cache + tags_end, 0xCD, TAG_CACHE_SIZE - tags_end);
+		memcpy(tag_cache + load, bytes + reference->file_offset, reference->file_size);
+		leftovers = tag_validate_relocate_structure_bsp(tag_cache + load, reference->file_size, linked);
+		if (leftovers < 0)
+		{
+			if (!quiet)
+				printf("%s: its structure bsp %ld cannot be moved\n", name, index);
+			refused = 1;
+			break;
+		}
+		if (leftovers && !quiet)
+			printf("%s: its structure bsp %ld, moved, still has %ld words that look like addresses where it was linked\n",
+				name, index, leftovers);
+		if (!tag_validate_structure_bsp(reference->tag_index, tag_cache + load, reference->file_size))
 		{
 			refused = 1;
 		}
@@ -320,7 +385,7 @@ static int map_check(struct cache_file_header const *header, unsigned char const
 		{
 			long before = tag_validate_corrections();
 
-			if (!tag_validate_structure_bsp(reference->tag_index, reference->base_address, reference->file_size) ||
+			if (!tag_validate_structure_bsp(reference->tag_index, tag_cache + load, reference->file_size) ||
 				tag_validate_corrections() != before)
 			{
 				printf("%s: fuzz seed %lu: structure bsp %ld as corrected is not clean when checked again\n", name,
@@ -509,7 +574,8 @@ static int map_fuzz(char const *path, unsigned char *tag_cache, unsigned long se
 				}
 			}
 			/* (the tags as corrected, checked again: nothing more to correct) */
-			if (!tag_validate_tags(tag_cache, header.tag_data_size, header.file_length, name) ||
+			if (!tag_validate_linked_tags(checked_tag_data, header.tag_data_size,
+					TAG_CACHE_SIZE - (unsigned long)(checked_tag_data - tag_cache), header.file_length, name) ||
 				(again = tag_validate_corrections()) != 0)
 			{
 				printf("%s: fuzz seed %lu: the corrected tags are not clean when checked again:\n", name, fuzz_seed);
@@ -518,7 +584,8 @@ static int map_fuzz(char const *path, unsigned char *tag_cache, unsigned long se
 				quiet = 0;
 				map_check(&header, bytes, tag_cache, name, &corrections);
 				printf("checked again:\n");
-				tag_validate_tags(tag_cache, header.tag_data_size, header.file_length, name);
+				tag_validate_linked_tags(checked_tag_data, header.tag_data_size,
+					TAG_CACHE_SIZE - (unsigned long)(checked_tag_data - tag_cache), header.file_length, name);
 				quiet = 1;
 			}
 		}

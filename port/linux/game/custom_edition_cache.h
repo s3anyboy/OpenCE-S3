@@ -298,6 +298,16 @@ void custom_edition_bitmap_pixels_arrived(
 a tag cache custom_edition_cache_load filled this build's index for the
 name the script keeps; FALSE after logging why when a script uses one this
 build does not have or does not keep its name. */
+/* (custom_edition_scripts.c) a scenario's scripts, of an Xbox map of another
+build of the engine (the Shadowrun prototype's: cache_files.c), given this
+build's function and engine global indices by name as a Custom Edition
+map's are, once the tag validator has checked the scenario: FALSE after
+logging why when they cannot run */
+struct scenario;
+boolean scenario_scripts_convert_by_name(
+	struct scenario *scenario,
+	char const *tag_name);
+
 boolean custom_edition_scripts_convert(
 	byte *tag_cache,
 	unsigned long loaded_bytes);
