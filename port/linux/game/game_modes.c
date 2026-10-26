@@ -66,6 +66,7 @@ enum
 	_gametype_hardcore_ctf,
 	_gametype_hardcore_oddball,
 	_gametype_hardcore_king,
+	_gametype_firefight,
 	NUMBER_OF_GAMETYPES
 };
 
