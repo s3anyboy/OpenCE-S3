@@ -47,6 +47,7 @@ Each map can have, beside it in its folder:
 #include "bmp_files.h"
 #include "custom_edition_cache.h"
 #include "custom_edition_maps.h"
+#include "cache_file_formats.h"
 #include "map_share.h"
 
 #include <stdio.h>
@@ -128,6 +129,8 @@ struct custom_edition_map
 	/* (and room for a version's number, " (2)") */
 	wchar_t display_name[MAXIMUM_MAP_NAME_LENGTH + 8];
 	wchar_t description[MAXIMUM_DESCRIPTION_LENGTH + 1];
+	/* a Shadowrun prototype map, in the maps folder (shadowrun_maps_look_for) */
+	boolean shadowrun;
 	boolean picture_read;
 	struct bitmap_data *picture;
 };
@@ -163,6 +166,7 @@ static struct
 
 /* for a map without a description file */
 static wchar_t const default_description[] = L"Halo Custom\r\nEdition map";
+static wchar_t const shadowrun_default_description[] = L"Shadowrun\r\nprototype map";
 
 /* ---------- private code */
 
@@ -310,7 +314,10 @@ static void custom_edition_map_description_read(
 
 	if (!length)
 	{
-		csmemcpy(map->description, default_description, sizeof(default_description));
+		if (map->shadowrun)
+			csmemcpy(map->description, shadowrun_default_description, sizeof(shadowrun_default_description));
+		else
+			csmemcpy(map->description, default_description, sizeof(default_description));
 	}
 
 	return;
@@ -341,7 +348,7 @@ static void custom_edition_map_add(
 	}
 	for (map_index = 0; map_index < globals->campaign_count; map_index++)
 	{
-		if (!csstrcasecmp(globals->campaigns[map_index].name, name))
+		if (!globals->campaigns[map_index].shadowrun && !csstrcasecmp(globals->campaigns[map_index].name, name))
 		{
 			return;
 		}
@@ -453,6 +460,92 @@ static void custom_edition_maps_tell_versions_apart(
 	}
 }
 
+/* The Shadowrun prototype's campaign maps in the game's maps folder
+(cache_files_map_directory), which its loader reads them from
+(docs/shadowrun_caches.md): CUSTOM SINGLEPLAYER, as a CE campaign map is.
+A map's level name is shadowrun\<name> (SHADOWRUN_LEVEL_NAME_PREFIX); one
+with the name of one of the game's own levels is not listed. Each map's
+header alone is read. */
+static void shadowrun_maps_look_for(
+	void)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	char const *folder = cache_files_map_directory();
+	char pattern[MAXIMUM_FILENAME_LENGTH + 1];
+	WIN32_FIND_DATAA data;
+	HANDLE find;
+	short count = 0;
+
+	/* (through a handle of its own, as custom_edition_maps_look_for lists its
+	folders) */
+	csprintf(pattern, "%s*.map", folder);
+	find = FindFirstFileA(pattern, &data);
+	if (find == INVALID_HANDLE_VALUE)
+		return;
+	do
+	{
+		char name[sizeof(data.cFileName) + 1];
+		char path[MAXIMUM_FILENAME_LENGTH + 1];
+		byte header[CACHE_FILE_HEADER_BYTES];
+		struct custom_edition_map *map;
+		char *extension;
+		FILE *stream;
+		boolean campaign;
+		short map_index;
+
+		if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			continue;
+		csmemcpy(name, data.cFileName, sizeof(data.cFileName));
+		name[sizeof(data.cFileName)] = 0;
+		extension = strrchr(name, '.');
+		if (!extension || csstrcasecmp(extension, ".map"))
+			continue;
+		*extension = 0;
+		/* (the game's own levels, and a name the campaign's levels are told
+		by, main_get_solo_level_from_name) */
+		if (!csstrcasecmp(name, "ui") || main_get_solo_level_from_name(name) != NONE ||
+			csstrlen(name) > MAXIMUM_MAP_NAME_LENGTH ||
+			csstrlen(folder) + csstrlen(name) + 4 > MAXIMUM_FILENAME_LENGTH)
+		{
+			continue;
+		}
+		csprintf(path, "%s%s.map", folder, name);
+		stream = fopen(path, "rb");
+		if (!stream)
+			continue;
+		campaign = fread(header, sizeof(header), 1, stream) == 1 &&
+			shadowrun_cache_header_campaign(header, sizeof(header));
+		fclose(stream);
+		if (!campaign)
+			continue;
+		for (map_index = 0; map_index < globals->campaign_count; map_index++)
+		{
+			if (globals->campaigns[map_index].shadowrun && !csstrcasecmp(globals->campaigns[map_index].name, name))
+				break;
+		}
+		if (map_index < globals->campaign_count)
+			continue;
+		if (globals->campaign_count == MAXIMUM_CUSTOM_EDITION_CAMPAIGNS)
+		{
+			error(_error_silent, "shadowrun: the map '%s' is not listed (too many campaign maps)", name);
+			continue;
+		}
+		map = &globals->campaigns[globals->campaign_count++];
+		csmemset(map, 0, sizeof(*map));
+		map->shadowrun = TRUE;
+		csstrcpy(map->name, name);
+		csstrncpy(map->folder, folder, sizeof(map->folder) - 1);
+		csprintf(map->level_name, "%s%s", SHADOWRUN_LEVEL_NAME_PREFIX, name);
+		display_name_make(name, map->display_name);
+		custom_edition_map_description_read(map);
+		count++;
+	} while (FindNextFileA(find, &data));
+	CloseHandle(find);
+	error(_error_silent, "shadowrun: %d prototype maps for CUSTOM SINGLEPLAYER", (int)count);
+
+	return;
+}
+
 static void custom_edition_maps_look_for(
 	void)
 {
@@ -462,8 +555,12 @@ static void custom_edition_maps_look_for(
 
 	custom_edition_maps_forget();
 	globals->looked_for = TRUE;
+	/* (the Shadowrun prototype's maps whether or not Custom Edition maps
+	are on: they are Xbox caches) */
+	shadowrun_maps_look_for();
 	if (!halo_custom_edition_tag_cache())
 	{
+		qsort(globals->campaigns, globals->campaign_count, sizeof(globals->campaigns[0]), custom_edition_map_compare);
 		return;
 	}
 
@@ -634,6 +731,12 @@ static short campaign_level_from_name(
 
 /* ---------- public code */
 
+boolean shadowrun_level_name(
+	char const *level_name)
+{
+	return level_name && !_strnicmp(level_name, SHADOWRUN_LEVEL_NAME_PREFIX, sizeof(SHADOWRUN_LEVEL_NAME_PREFIX) - 1);
+}
+
 char **custom_edition_maps_level_list(
 	char **xbox_levels,
 	short xbox_level_count,
@@ -690,6 +793,23 @@ short custom_edition_maps_display_index(
 	char path[MAP_SHARE_PATH_SIZE];
 	short map_index;
 
+	/* (a shadowrun\ name is a Shadowrun prototype map's, of the maps
+	folder) */
+	if (shadowrun_level_name(level_name))
+	{
+		if (!globals->looked_for)
+		{
+			custom_edition_maps_look_for();
+		}
+		for (map_index = 0; map_index < globals->campaign_count; map_index++)
+		{
+			if (globals->campaigns[map_index].shadowrun && !csstrcasecmp(globals->campaigns[map_index].name, name))
+			{
+				return FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX + map_index;
+			}
+		}
+		return NONE;
+	}
 	/* (only a custom_maps\ name is a CE map's; any other is the game's own,
 	a stock campaign level or none of these) */
 	if (!custom_edition_level_name(level_name))
@@ -719,7 +839,8 @@ short custom_edition_maps_display_index(
 		}
 		for (map_index = 0; length > 0 && map_index < globals->campaign_count; map_index++)
 		{
-			if ((short)csstrlen(globals->campaigns[map_index].name) == length &&
+			if (!globals->campaigns[map_index].shadowrun &&
+				(short)csstrlen(globals->campaigns[map_index].name) == length &&
 				!_strnicmp(globals->campaigns[map_index].name, file_name, length))
 			{
 				return FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX + map_index;
@@ -735,7 +856,7 @@ short custom_edition_maps_display_index(
 	}
 	for (map_index = 0; map_index < globals->campaign_count; map_index++)
 	{
-		if (!csstrcasecmp(globals->campaigns[map_index].name, name))
+		if (!globals->campaigns[map_index].shadowrun && !csstrcasecmp(globals->campaigns[map_index].name, name))
 		{
 			return FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX + map_index;
 		}

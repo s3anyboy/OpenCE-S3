@@ -13,18 +13,34 @@ The maps examined are the prototype's `missionlet.map` (the level
 
 ## Running a map
 
-Put the map in the data root's `maps` folder, beside the game's own, and
-load it by its level name, from the console or `init.txt`:
+Put the map in the data root's `maps` folder, beside the game's own: the
+Xbox caches' loader reads it from there. It is listed in the map lists'
+CUSTOM SINGLEPLAYER (New Game's, and the Map screen's), with the Custom
+Edition campaign maps, and played as they are: alone at the difficulty
+chosen next, or hosted as network co-op (not tried). As a Custom Edition
+map can, it may have beside it `<name>.bmp`, its picture, and `<name>.txt`,
+its description (without one: "Shadowrun prototype map"). Its level name is
+`shadowrun\<name>` (`custom_edition_maps.h`, `SHADOWRUN_LEVEL_NAME_PREFIX`),
+which also loads it from the console or `init.txt`, as its own scenario path
+does:
 
 ```
+map_name shadowrun\missionlet
 map_name levels\test\hangemhigh\missionlet
 ```
 
-The map may be compressed, as the prototype's are, or decompressed. A copy
-whose header was edited to pass for another map (renamed `a10`, with the
-retail build's string) loads the same way: it is told apart by where its
-tags are linked, not by its header. Shadowrun's `ui.map` also runs as the
-game's `ui.map`, and the main menu loads from it.
+A map is listed when its header is a Shadowrun prototype map's of a solo
+scenario: an Xbox cache (version 5) of the build `01.12.07.0132`
+(`shadowrun_cache_header_campaign`); only the header is read. A map named
+as one of the game's own levels (`ui`, or a name holding a campaign level's,
+such as `a10`) is not listed, nor is a copy whose header was edited to pass
+for another map (renamed `a10`, with the retail build's string): such a copy
+still loads by its level name, since the loader tells the prototype's maps
+apart by where their tags are linked, not by their headers.
+
+The map may be compressed, as the prototype's are, or decompressed.
+Shadowrun's `ui.map` also runs as the game's `ui.map`, and the main menu
+loads from it.
 
 The level's encounters are all placed by its scripts, as the player walks
 into their trigger volumes. Its scripts call Shadowrun's magic functions,
@@ -202,6 +218,11 @@ the prototype's `ui.map`:
     flag `HP1`, inside it): the startup script waiting on that volume places
     `hall1tohall2`, `hall2tohall3`, `hall2` and `hall3` (1, 1, 1 and 2 actors).
 - The main menu loads from the prototype's `ui.map`.
+- With `missionlet.map` in `maps` (and a copy of it with its header edited to
+  pass for `a10`), the map lists' scan finds missionlet alone, as CUSTOM
+  SINGLEPLAYER's entry `shadowrun\missionlet`, which the menus take for a
+  campaign map (and New Game starts as one); `map_name shadowrun\missionlet`
+  loads and plays it.
 - `tools/test_shadowrun_caches.py` tests the format functions on tag data it
   builds, and the real maps with `HALO_SHADOWRUN_MAPS` set to a folder of
   them.

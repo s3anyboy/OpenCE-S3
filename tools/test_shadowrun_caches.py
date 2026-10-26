@@ -44,7 +44,8 @@ DRIVER = r"""
 
 /* usage: driver address TAG_DATA_FILE CACHE_ADDRESS CACHE_BYTES
           driver bsp LINKED READ FREE_ADDRESS FREE_BYTES
-          driver convert TAG_DATA_FILE ADDRESS (writes the converted data back) */
+          driver convert TAG_DATA_FILE ADDRESS (writes the converted data back)
+          driver header HEADER_FILE */
 static unsigned char *slurp(char const *path, unsigned long *size)
 {
 	FILE *file = fopen(path, "rb");
@@ -93,6 +94,15 @@ int main(int argc, char **argv)
 		file = fopen(argv[2], "wb");
 		if (!file || (size && fwrite(bytes, size, 1, file) != 1) || fclose(file))
 			return 2;
+		free(bytes);
+	}
+	else if (argc == 3 && !strcmp(argv[1], "header"))
+	{
+		unsigned long size;
+		unsigned char *bytes = slurp(argv[2], &size);
+
+		result = (uint32_t)shadowrun_cache_header_campaign(bytes, (uint32_t)size);
+		status = _cache_file_status_ok;
 		free(bytes);
 	}
 	else
@@ -285,6 +295,43 @@ def test_a_damaged_tag_table_is_refused(driver, change):
     path = write(driver, "damaged.bin", bytes(data))
     status, _ = driver("convert", path, SHADOWRUN_TAG_DATA)
     assert status != "ok"
+
+
+# ---------- the map lists' check of a header
+
+
+def cache_header(build=b"01.12.07.0132", version=5, scenario_type=0, head=b"daeh", foot=b"toof", size=0x800):
+    header = bytearray(size)
+    header[0:4] = head
+    struct.pack_into("<i", header, 4, version)
+    header[0x20:0x20 + 10] = b"missionlet"
+    header[0x40:0x40 + len(build)] = build
+    struct.pack_into("<h", header, 0x60, scenario_type)
+    if size >= 0x800:
+        header[0x7FC:0x800] = foot
+    return bytes(header)
+
+
+def test_a_shadowrun_campaign_maps_header_is_listed(driver):
+    path = write(driver, "header.bin", cache_header())
+    assert driver("header", path) == ("ok", 1)
+
+
+@pytest.mark.parametrize("header", [
+    cache_header(build=b"01.10.12.2276"),    # this build's maps' (and an edited copy's)
+    cache_header(build=b"01.12.07.01320"),   # longer
+    cache_header(build=b"01.12.07.013"),     # shorter
+    cache_header(scenario_type=1),           # multiplayer
+    cache_header(scenario_type=2),           # the menus (ui.map)
+    cache_header(version=609),               # Custom Edition
+    cache_header(head=b"head"),
+    cache_header(foot=b"foot"),
+    cache_header(size=0x7FF),
+], ids=["retail build", "longer build", "shorter build", "multiplayer", "ui", "custom edition",
+        "head", "foot", "short"])
+def test_other_headers_are_not_listed(driver, header):
+    path = write(driver, "other_header.bin", header)
+    assert driver("header", path) == ("ok", 0)
 
 
 # ---------- the real maps

@@ -571,6 +571,8 @@ near equivalent (docs/shadowrun_caches.md); the rest the tag validator
 corrects as it would any value past an enum's end. */
 
 #define SHADOWRUN_TAG_DATA_ADDRESS 0x8069E000UL
+/* the build its cache headers name */
+#define SHADOWRUN_BUILD "01.12.07.0132"
 /* the actor types Shadowrun adds after Halo's 16 (hologram, dog, ninja,
 mook, guard, necro, dwarf, and one past the names it lists) */
 #define SHADOWRUN_FIRST_ACTOR_TYPE 16
@@ -586,6 +588,16 @@ struct shadowrun_conversion_report
 (xbox_cache_tag_data_address), is the Shadowrun prototype's. */
 int shadowrun_cache_tag_data(
 	uint32_t tag_data_address);
+
+/* Whether the cache header at `header` (`header_bytes` of it, a file's
+first CACHE_FILE_HEADER_BYTES) is a Shadowrun prototype map's of a solo
+scenario: an Xbox cache (version 5) of SHADOWRUN_BUILD, by its header alone,
+for the menus' map lists (custom_edition_maps.c). The loader goes by where
+the tags are linked, so a copy whose header was edited to pass for another
+map's loads, but is not listed. */
+int shadowrun_cache_header_campaign(
+	uint8_t const *header,
+	uint32_t header_bytes);
 
 /* Converts the Shadowrun prototype's tag data at `tag_data` (`tag_data_bytes`
 of it, linked to `tag_data_address`, where it now is) for this build, before

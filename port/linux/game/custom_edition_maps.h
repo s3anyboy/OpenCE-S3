@@ -16,7 +16,8 @@ ui_widget.c ask this file for their names, descriptions and pictures.
 	below 0x1000   Xbox multiplayer level (the tags' own index)
 	0x3000 + n     stock campaign level n (co-op)
 	0x4000 + n     CE multiplayer map
-	0x6000 + n     CE campaign map (played alone or as co-op)
+	0x6000 + n     CE campaign map (played alone or as co-op), or a
+	               Shadowrun prototype map (SHADOWRUN_LEVEL_NAME_PREFIX)
 */
 
 #ifndef __CUSTOM_EDITION_MAPS_H
@@ -29,11 +30,20 @@ ui_widget.c ask this file for their names, descriptions and pictures.
 indices fit before the campaigns' (custom_edition_maps.c) */
 #define CUSTOM_EDITION_MAPS_MAXIMUM 8192
 
+/* the Shadowrun prototype's maps, of the maps folder, listed with the CE
+campaign maps: a level name of one is shadowrun\<name>, which the Xbox
+caches' loader reads from maps\<name>.map (docs/shadowrun_caches.md) */
+#define SHADOWRUN_LEVEL_NAME_PREFIX "shadowrun\\"
+
 /* ---------- structures */
 
 struct bitmap_data;
 
 /* ---------- prototypes/CUSTOM_EDITION_MAPS.C */
+
+/* whether a level name is a Shadowrun prototype map's (shadowrun\<name>) */
+boolean shadowrun_level_name(
+	char const *level_name);
 
 /* Returns the level list: the Xbox levels, then the CE multiplayer maps
 sorted by name. *level_count gets the total. Scans for CE maps the first
