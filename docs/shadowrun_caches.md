@@ -207,9 +207,10 @@ that burn those of other sides. Magic shows at the bottom of the HUD: the
 spell, the mana, a cell a point (what spells hold back in dark red).
 
 Its controls are simpler than the prototype's, whose radial menu assigned
-spells to slots on the triggers and buttons: the grenade control casts the
-current spell, and the switch-grenade control goes through the known spells
-and then the grenades. The scripts' `player_set_magic` and
+spells to slots on the triggers and buttons: on these maps the right bumper
+(the switch-grenade control) casts the current spell, and the left bumper
+(the flashlight control, which lights nothing here) goes through the known
+spells and then the grenades. The left trigger throws grenades as ever. The scripts' `player_set_magic` and
 `player_change_magic` give the players spells; `game_set_assignment_scheme`
 is kept but only the one scheme plays.
 
@@ -230,12 +231,31 @@ strikes as on a jackal's shield. A player troll pays mana for its rage (an
 actor's spells and rage cost nothing). A race may also keep off with its
 rage only the damage from before it; the troll's keeps off all of it.
 
+A human's body heals itself: three seconds after it was last hurt it heals
+a little each second, as its race's regeneration has it. (The elves' race
+has regeneration too, but its threshold keeps it from ever healing.)
+
+## Buy menu
+
+The prototype's buy menu is the multiplayer one, ported from its
+executable: the Back control opens it on these maps (the prototype opened it
+only at its own multiplayer rounds, and in a campaign had a list of
+loadouts instead, which nothing opened). Each player starts with the
+executable's $5,000,000. Its pages sell weapons (the one in hand is dropped
+for a new one, with both hands full), grenades (up to two), spells and a
+gift of $250 to a teammate, at the prices of the player's `srud`. The stick
+or the d-pad moves through it, the jump control buys, the melee control goes
+back a page or closes it, and the action control buys a magazine for the
+weapon in hand; while it is open the player does nothing else. Tech and the
+anti-magic grenade are listed but cannot be bought. A co-op client's
+purchases are its own: they are not sent to the host.
+
 ## What does not work
 
 This build runs the prototype's maps on Halo's game code; of Shadowrun's own
 systems these are not there:
 
-- tech (the `t?ed` tags), anti-magic, essence and the buy menu;
+- tech (the `t?ed` tags), anti-magic and essence;
 - Shadowrun's weapons as Shadowrun defined them (`srwd`): but for each
   race's speed with them, they play as Halo's do from their Halo tags;
 - Shadowrun's AI behaviours for its new actor types (they play as the types

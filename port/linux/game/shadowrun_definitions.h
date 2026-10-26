@@ -52,9 +52,24 @@ enum
 	/* the magic and tech a unit may have, each with its own wait */
 	MAXIMUM_SHADOWRUN_POWERS = 18,
 
+	/* the weapons a unit's buy menu sells (its srud's, in this order), and
+	its prices */
+	_shadowrun_shop_weapon_assault_rifle = 0,
+	_shadowrun_shop_weapon_sniper_rifle,
+	_shadowrun_shop_weapon_minigun,
+	_shadowrun_shop_weapon_rocket_launcher,
+	_shadowrun_shop_weapon_flechette_pistol,
+	_shadowrun_shop_weapon_shotgun,
+	_shadowrun_shop_weapon_razorclaws,
+	_shadowrun_shop_weapon_katana,
+	_shadowrun_shop_weapon_rifle,
+	NUMBER_OF_SHADOWRUN_SHOP_WEAPONS,
+	NUMBER_OF_SHADOWRUN_PRICES = 48,
+
 	/* a race's flags (those the game reads): it rages (the troll), and its
 	rage keeps off only the damage of those before it (within two radians
 	of where it looks; the executable truncates the angle) */
+	_shadowrun_race_regenerates_bit = 0,
 	_shadowrun_race_rages_bit = 2,
 	_shadowrun_race_rage_guards_front_bit = 5,
 };
@@ -329,9 +344,16 @@ struct shadowrun_unit_definition
 	struct tag_block races;
 	byte unused1[0xB4];
 	struct tag_reference default_weapon_data;
-	byte unused2[0x2C0];
+	byte unused2[0x1F0];
+	/* the buy menu's: its bitmap (which nothing draws), the weapons it
+	sells, the menu, and its prices (SHADOWRUN_PRICE_*: of the menu's
+	items, and a magazine of each weapon) */
+	struct tag_reference buy_menu_bitmap;
+	struct tag_reference shop_weapons[NUMBER_OF_SHADOWRUN_SHOP_WEAPONS];
+	byte unused4[0x30];
 	struct tag_reference buy_menu;
-	byte unused3[0x100];
+	long prices[NUMBER_OF_SHADOWRUN_PRICES];
+	byte unused3[0x40];
 };
 
 /* a race of a Shadowrun unit (0xA00 bytes) */
@@ -342,20 +364,31 @@ struct shadowrun_race
 	/* the unit's scale, and the scenery it wears on its head */
 	real scale;
 	struct tag_reference head;
-	byte unused3[0x8];
+	byte unused3[0x6];
+	/* the sound the AI hears as it heals itself (an AI unit effect) */
+	short regeneration_ai_unit_effect;
 	/* the damage it takes (of all but melee) */
 	real damage_scale;
-	byte unused5[0x8];
+	/* regeneration (its flags' regeneration): its body heals the points
+	each second, waiting the ticks after it was last hurt, while it is hurt
+	and less than the threshold; each costs it the mana, and its own damage
+	(its feedback) and the effect on it */
+	real regeneration_points;
+	real regeneration_delay_ticks;
 	/* its body's vitality (a player's: an actor's is its actor's) */
 	real maximum_body_vitality;
-	byte unused4[0x30];
+	struct tag_reference regeneration_damage;
+	struct tag_reference regeneration_effect;
+	real regeneration_mana_cost;
+	byte unused4[0xC];
 	/* how hard a gust pushes it, in the air and on the ground */
 	real gust_airborne_scale;
 	real gust_scale;
 	/* the melee damage it takes, and deals */
 	real melee_damage_scale;
 	real melee_scale;
-	byte unused6[0x94];
+	real regeneration_threshold;
+	byte unused6[0x90];
 	/* rage (its flags' rage): the damage it takes (each damage's
 	definition's active camouflage damage, as the executable reads it) over
 	the last half second (15 ticks), more than the threshold, makes it rage,
@@ -411,10 +444,24 @@ struct shadowrun_weapon_data
 	byte unused1[0xE4];
 };
 
-/* buym: the buy menu (only its sound for a spell that fails: 0x7D0 bytes) */
+/* buym: the buy menu's sounds, and the sound of a spell that fails (0x7D0
+bytes) */
 struct shadowrun_buy_menu_definition
 {
-	byte unused0[0x6F0];
+	struct tag_reference open_sound;
+	struct tag_reference close_sound;
+	struct tag_reference page_sound;
+	struct tag_reference bought_sound;
+	struct tag_reference learned_sound;
+	struct tag_reference tech_sound;
+	struct tag_reference cannot_afford_sound;
+	struct tag_reference cursor_sound;
+	struct tag_reference cannot_buy_sound;
+	struct tag_reference tech_owned_sound;
+	struct tag_reference known_sound;
+	struct tag_reference ammunition_sound;
+	struct tag_reference ammunition_failed_sound;
+	byte unused0[0x620];
 	struct tag_reference cast_failed_sound;
 	byte unused1[0xD0];
 };
@@ -552,6 +599,19 @@ typedef char shadowrun_weapon_data_size_assert[sizeof(struct shadowrun_weapon_da
 typedef char shadowrun_weapon_data_races_assert[offsetof(struct shadowrun_weapon_data, races) == 0x500 ? 1 : -1];
 typedef char shadowrun_weapon_data_smartlinked_assert[
 	offsetof(struct shadowrun_weapon_data, smartlinked.index) == 0x518 ? 1 : -1];
+typedef char shadowrun_unit_shop_weapons_assert[
+	offsetof(struct shadowrun_unit_definition, shop_weapons) == 0x430 ? 1 : -1];
+typedef char shadowrun_unit_buy_menu_assert[offsetof(struct shadowrun_unit_definition, buy_menu.index) == 0x4FC ? 1 : -1];
+typedef char shadowrun_unit_prices_assert[offsetof(struct shadowrun_unit_definition, prices) == 0x500 ? 1 : -1];
+typedef char shadowrun_buy_menu_ammunition_assert[
+	offsetof(struct shadowrun_buy_menu_definition, ammunition_failed_sound.index) == 0xCC ? 1 : -1];
+typedef char shadowrun_race_regeneration_assert[offsetof(struct shadowrun_race, regeneration_points) == 0x120 ? 1 : -1];
+typedef char shadowrun_race_regeneration_damage_assert[
+	offsetof(struct shadowrun_race, regeneration_damage.index) == 0x138 ? 1 : -1];
+typedef char shadowrun_race_regeneration_effect_assert[
+	offsetof(struct shadowrun_race, regeneration_effect.index) == 0x148 ? 1 : -1];
+typedef char shadowrun_race_regeneration_threshold_assert[
+	offsetof(struct shadowrun_race, regeneration_threshold) == 0x16C ? 1 : -1];
 typedef char shadowrun_race_rage_assert[offsetof(struct shadowrun_race, rage_threshold) == 0x200 ? 1 : -1];
 typedef char shadowrun_race_rage_material_assert[
 	offsetof(struct shadowrun_race, rage_material_threshold) == 0x230 ? 1 : -1];

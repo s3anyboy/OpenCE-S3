@@ -327,8 +327,6 @@ static void shadowrun_unit_damage_self(
 static void shadowrun_unit_effect(
 	long unit_index,
 	long effect_definition_index);
-static short shadowrun_ai_volume(
-	short volume);
 static long shadowrun_globals_strangle_broken_sound(
 	void);
 static real_rgb_color shadowrun_globals_undead_color(
@@ -2178,7 +2176,7 @@ static void shadowrun_smoke_update(
 		if (shadowrun_unit->current_spell != _shadowrun_spell_smoke + 1)
 		{
 			/* (the executable clears its cast and grenade controls here: this
-			build casts with the grenade control) */
+			build casts with the right bumper) */
 			shadowrun_smoke_end(unit_index);
 		}
 	}
@@ -3266,7 +3264,7 @@ static void shadowrun_unit_effect(
 }
 
 /* a definition's volume for ai_handle_unit_effect, in its range */
-static short shadowrun_ai_volume(
+short shadowrun_ai_volume(
 	short volume)
 {
 	return (short)PIN(volume, 0, SHADOWRUN_AI_SOUND_VOLUME_COUNT - 1);

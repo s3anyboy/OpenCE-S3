@@ -15,6 +15,10 @@ damage (and heals less), moves and turns more slowly, grows to its race's
 raging scale, and its colours go pale; past its race's material threshold,
 what hits it looks as it does on a jackal's shield.
 
+A unit of a race that regenerates heals itself while it is hurt (below its
+race's threshold), a little each second for its race's mana, once it has
+not been hurt for its race's wait.
+
 How fast a player moves is its race's with the weapon in its hand (the
 weapon's srwd, else its srud's), scaled by its rage.
 */
@@ -23,6 +27,8 @@ weapon's srwd, else its srud's), scaled by its rage.
 
 #include "cseries.h"
 #include "ai/actor_definitions.h"
+#include "ai/ai.h"
+#include "effects/effects.h"
 #include "game/game_engine.h"
 #include "game/game_globals.h"
 #include "game/players.h"
@@ -199,6 +205,84 @@ void shadowrun_biped_movement_scales(
 		if (race->acceleration_scale > 0.f)
 		{
 			*acceleration_scale = race->acceleration_scale;
+		}
+	}
+
+	return;
+}
+
+/* 0x276900's, 0x2771B0's: a unit of a race, hurt, waits its race's ticks
+before its body heals itself */
+void shadowrun_unit_damaged(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct shadowrun_race *race = shadowrun_unit ? shadowrun_unit_race_get(unit_index) : NULL;
+
+	if (race)
+	{
+		shadowrun_unit->regeneration_delay_ticks = (long)race->regeneration_delay_ticks;
+	}
+
+	return;
+}
+
+/* 0x2652B0: each tick, a living unit of a race that regenerates: once its
+wait after it was hurt is over, while its body is hurt and less than its
+race's threshold, each second it pays its race's mana and heals its race's
+points, with its race's damage (its own feedback) and effect on it, and the
+AI hears it */
+void shadowrun_unit_regeneration_update(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct unit_datum *unit = unit_get(unit_index);
+
+	if (shadowrun_unit && !TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
+	{
+		struct shadowrun_race *race = shadowrun_unit_race_get(unit_index);
+
+		if (shadowrun_unit->regeneration_delay_ticks < 1)
+		{
+			if (race && TEST_FLAG(race->flags, _shadowrun_race_regenerates_bit) &&
+				unit->object.body_vitality < 1.f &&
+				unit->object.body_vitality < race->regeneration_threshold)
+			{
+				if (shadowrun_unit->regeneration_ticks == 0 &&
+					shadowrun_unit_spend_mana(unit_index, race->regeneration_mana_cost, TRUE, TRUE))
+				{
+					/* (the executable also asks the body's most vitality here,
+					and does nothing with it) */
+					unit->object.body_vitality += race->regeneration_points / unit->object.maximum_body_vitality;
+					unit->object.body_vitality = PIN(unit->object.body_vitality, 0.f, 1.f);
+					ai_handle_unit_effect(unit_index, 1, shadowrun_ai_volume(race->regeneration_ai_unit_effect));
+					if (race->regeneration_damage.index != NONE)
+					{
+						struct damage_data damage;
+
+						damage_data_new(&damage, race->regeneration_damage.index);
+						SET_FLAG(damage.flags, _damage_area_of_effect_bit, TRUE);
+						damage.owner_team_index = unit->object.owner_team_index;
+						damage.location = unit->object.location;
+						damage.origin = unit->object.bounding_sphere_center;
+						damage.epicenter = unit->object.bounding_sphere_center;
+						vector_from_points3d(&unit->object.bounding_sphere_center,
+							&unit->object.bounding_sphere_center, &damage.direction);
+						object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
+					}
+					if (race->regeneration_effect.index != NONE)
+					{
+						effect_new_from_object(race->regeneration_effect.index, unit_index, unit_index, NONE,
+							0.f, 0.f, NULL, NULL);
+					}
+				}
+				shadowrun_unit->regeneration_ticks = shadowrun_unit->regeneration_ticks == 0 ?
+					TICKS_PER_SECOND : shadowrun_unit->regeneration_ticks - 1;
+			}
+		}
+		else
+		{
+			shadowrun_unit->regeneration_delay_ticks--;
 		}
 	}
 

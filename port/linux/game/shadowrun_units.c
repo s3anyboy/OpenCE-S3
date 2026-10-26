@@ -96,6 +96,7 @@ void shadowrun_initialize_for_new_map(
 {
 	csmemset(shadowrun_globals.players, 0, HALO_PORT_MAXIMUM_NETWORK_PLAYERS * sizeof(struct shadowrun_player));
 	shadowrun_magic_initialize_for_new_map();
+	shadowrun_buy_menu_initialize_for_new_map();
 
 	return;
 }
@@ -770,19 +771,23 @@ void shadowrun_unit_update(
 			shadowrun_summoned_update(unit_index);
 		}
 		shadowrun_unit_mana_update(unit_index);
+		shadowrun_unit_regeneration_update(unit_index);
 		shadowrun_unit_rage_update(unit_index);
 
 		if (unit->object.type == _object_type_biped)
 		{
-			/* the grenade control casts the unit's spell, if it has one
-			(as the executable's mouse does: it throws a grenade only
-			without one) */
-			if (shadowrun_unit->current_spell != 0 &&
-				TEST_FLAG(unit->unit.control_flags, _unit_control_throw_grenade_bit))
+			/* a player's right bumper casts its spell, if it has one: it
+			comes as the flashlight's flag, which on these maps lights
+			nothing (player_control.c). (The executable cast from slots its
+			radial menu assigned to buttons) */
+			if (unit->unit.player_index != NONE &&
+				TEST_FLAG(unit->unit.control_flags, _unit_control_integrated_light_bit))
 			{
-				SET_FLAG(unit->unit.control_flags, _unit_control_throw_grenade_bit, FALSE);
-				SET_FLAG(unit->unit.control_flags, _unit_control_weapon_secondary_trigger_bit, FALSE);
-				shadowrun_spell_cast(unit_index, (short)(shadowrun_unit->current_spell - 1));
+				SET_FLAG(unit->unit.control_flags, _unit_control_integrated_light_bit, FALSE);
+				if (shadowrun_unit->current_spell != 0)
+				{
+					shadowrun_spell_cast(unit_index, (short)(shadowrun_unit->current_spell - 1));
+				}
 			}
 			shadowrun_unit->teleported = FALSE;
 			shadowrun_spells_update(unit_index);
@@ -867,6 +872,7 @@ void shadowrun_player_spawned(
 	{
 		short power;
 
+		shadowrun_buy_menu_player_spawned(player_index);
 		shadowrun_unit_set_race(player->unit_index, shadowrun_player->race_index);
 		for (power = 0; power < MAXIMUM_SHADOWRUN_POWERS; power++)
 		{
@@ -955,9 +961,10 @@ void shadowrun_unit_delete(
 	return;
 }
 
-/* port: the switch-grenade control chooses what the grenade control does:
-each spell the unit knows in turn, then its grenades (rotated as they are
-otherwise), then its first spell again. The executable's player chose them
+/* port: the flashlight control (the left bumper, on these maps) chooses the
+spell the right bumper casts: each spell the unit knows in turn, then its
+grenades (rotated as they are otherwise, with no spell to cast), then its
+first spell again. The executable's player chose them
 from a radial menu, its own HUD's (the globals' assignment scheme). Returns
 whether the control was taken; a unit that knows no spell rotates its
 grenades as ever */

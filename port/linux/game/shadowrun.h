@@ -44,7 +44,7 @@ void shadowrun_unit_new(
 	long unit_index);
 
 /* each tick of a unit, before its grenade is thrown (unit_update): its mana,
-waits and spells; and the grenade control casts its spell, if it has one */
+waits and spells; and the right bumper casts its spell, if it has one */
 void shadowrun_unit_update(
 	long unit_index);
 /* a unit dead for good (unit_died), and deleted (unit_delete) */
@@ -57,6 +57,20 @@ void shadowrun_unit_delete(
 magic it knows, a full pool */
 void shadowrun_player_spawned(
 	long player_index);
+
+/* ---------- prototypes/SHADOWRUN_BUY_MENU.C */
+
+/* a local player's controls pressed this tick (player_control.c): the
+Back control opens and closes the buy menu, and while it is open the others
+work it. TRUE while it is open: the player does nothing else */
+boolean shadowrun_buy_menu_input(
+	short local_player_index,
+	boolean toggle,
+	boolean buy,
+	boolean back,
+	boolean magazine,
+	real forward,
+	real strafe);
 
 /* ---------- prototypes/SHADOWRUN_HUD.C */
 
@@ -88,6 +102,9 @@ void shadowrun_biped_movement_scales(
 	long biped_index,
 	real *movement_scale,
 	real *acceleration_scale);
+/* a unit hurt (units.c, unit_damage_aftermath): its body waits to heal */
+void shadowrun_unit_damaged(
+	long unit_index);
 /* how fast a player's unit turns (player_control.c): its rage's */
 real shadowrun_unit_turning_scale(
 	long unit_index);
@@ -125,8 +142,9 @@ camouflage. FALSE for others, whose camouflage is this build's */
 boolean shadowrun_unit_camouflage_update(
 	long unit_index);
 
-/* the switch-grenade control (player_control.c): it also chooses the spell
-the grenade control casts. TRUE when it was taken for that */
+/* the control that chooses (player_control.c: the left bumper, on these
+maps): it chooses the spell the right bumper casts, then the grenade. TRUE
+when it was taken for a spell */
 boolean shadowrun_unit_rotate_selection(
 	long unit_index,
 	short desired_grenade_index);

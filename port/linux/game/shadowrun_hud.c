@@ -2,8 +2,8 @@
 SHADOWRUN_HUD.C
 
 The Shadowrun prototype's magic on the HUD (shadowrun.h), at the bottom of
-the screen: the spell the grenade control casts (or Grenade, when it throws
-one) and the unit's magic, a cell a point: lit what it has, dim what it has
+the screen: the spell the right bumper casts (or Grenade, when the left
+bumper has chosen the grenades) and the unit's magic, a cell a point: lit what it has, dim what it has
 not, and dark red what its spells hold back. The numbers are the
 executable's own ("%d/%d"). A spell that could not be cast makes the line
 flash red for a second; one waiting to be cast again is grey.
@@ -225,6 +225,9 @@ void shadowrun_hud_draw(
 	bounds.y1 = (short)(top + line_height);
 	draw_string_set_draw_mode(font_index, NONE, _shadowrun_hud_text_left, 0, &text_color);
 	rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
+
+	/* the buy menu, if it is open (shadowrun_buy_menu.c) */
+	shadowrun_buy_menu_draw(local_player_index);
 
 	return;
 }

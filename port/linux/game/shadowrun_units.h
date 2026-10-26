@@ -72,7 +72,7 @@ definition (0x10F0) */
 	long head_object_index;
 	long head_definition_index;
 
-	/* the spell the grenade control casts, and the one it would have
+	/* the spell the right bumper casts, and the one it would have
 	(spell + 1, 0 for none: 0x564, 0x568) */
 	long current_spell;
 	long desired_spell;
@@ -197,6 +197,10 @@ definition (0x10F0) */
 	char rage_damage_tick;
 	byte pad9[3];
 	long rage_wait_ticks;
+	/* regeneration: the ticks before its body heals again (0x79C), and
+	those it waits after it was hurt (0x7A0) */
+	long regeneration_ticks;
+	long regeneration_delay_ticks;
 	/* an actor's change colours, as its variant gave them (0x614) */
 	real_rgb_color actor_change_colors[NUMBER_OF_OBJECT_CHANGE_COLORS];
 };
@@ -215,6 +219,10 @@ struct shadowrun_player
 	byte pad1[3];
 	/* its race, which its units take (0x1F8) */
 	long race_index;
+	/* its money (0x1D0), given it as it first spawns */
+	long money;
+	boolean given_money;
+	byte pad2[3];
 };
 
 /* ---------- prototypes/SHADOWRUN_UNITS.C */
@@ -319,9 +327,23 @@ void shadowrun_unit_cast_feedback(
 	long damage_definition_index,
 	long effect_definition_index);
 
+/* ---------- prototypes/SHADOWRUN_BUY_MENU.C */
+
+/* the local players' menus closed, at each map */
+void shadowrun_buy_menu_initialize_for_new_map(
+	void);
+/* a player's money, as it first spawns */
+void shadowrun_buy_menu_player_spawned(
+	long player_index);
+/* the local player's open menu over its view */
+void shadowrun_buy_menu_draw(
+	short local_player_index);
+
 /* ---------- prototypes/SHADOWRUN_RACES.C */
 
-/* each tick of a unit, after its mana's: its rage */
+/* each tick of a unit, after its mana's: its body heals, and its rage */
+void shadowrun_unit_regeneration_update(
+	long unit_index);
 void shadowrun_unit_rage_update(
 	long unit_index);
 
@@ -351,6 +373,10 @@ boolean shadowrun_unit_intangible(
 /* whether the object is one of strangle's thorns */
 boolean shadowrun_object_is_thorn(
 	long object_index);
+
+/* a definition's volume for ai_handle_unit_effect, in its range */
+short shadowrun_ai_volume(
+	short volume);
 
 /* whether the unit can cast the spell now, and casts it (the grenade
 control, the scripts) */

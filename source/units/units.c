@@ -696,7 +696,7 @@ symbols in this file:
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "coop_enemies.h" /* port: port/linux/game/coop_enemies.c */
-#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c, shadowrun_races.c */
 
 /* port: the control and animation impulses the host's actors give their
 units go to the clients' copies (port/linux/game/network_actors.c) */
@@ -7005,6 +7005,9 @@ void unit_damage_aftermath(
 	unit_definition = unit_definition_get(unit->definition_index);
 	damage_definition = &damage_effect_definition_get(
 		damage_data->definition_index)->damage;
+	/* port: on the Shadowrun prototype's maps, a body that heals itself
+	waits (port/linux/game/shadowrun_races.c) */
+	shadowrun_unit_damaged(unit_index);
 	total_damage = shield_damage + body_damage;
 	lethal = TEST_FLAG(
 		damage_flags,

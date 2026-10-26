@@ -130,6 +130,8 @@ static struct tag_schema_definition const shadowrun_magic3_schema =
 static struct tag_schema_field const shadowrun_race_fields[] =
 {
 	TAG_SCHEMA_REFERENCE(struct shadowrun_race, head, TAG_SCHEMA_GROUPS('scen')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_race, regeneration_damage, TAG_SCHEMA_GROUPS('jpt!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_race, regeneration_effect, TAG_SCHEMA_GROUPS('effe')),
 	TAG_SCHEMA_END
 };
 
@@ -146,6 +148,16 @@ static struct tag_schema_field const shadowrun_unit_fields[] =
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, tech3, TAG_SCHEMA_GROUPS('t3ed')),
 	TAG_SCHEMA_BLOCK(struct shadowrun_unit_definition, races, shadowrun_race_schema, MAXIMUM_SHADOWRUN_RACES),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, default_weapon_data, TAG_SCHEMA_GROUPS(SHADOWRUN_WEAPON_DATA_TAG)),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, buy_menu_bitmap, TAG_SCHEMA_GROUPS('bitm')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[0], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[1], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[2], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[3], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[4], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[5], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[6], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[7], TAG_SCHEMA_GROUPS('weap')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[8], TAG_SCHEMA_GROUPS('weap')),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, buy_menu, TAG_SCHEMA_GROUPS(SHADOWRUN_BUY_MENU_DEFINITION_TAG)),
 	TAG_SCHEMA_END
 };
@@ -178,6 +190,19 @@ static struct tag_schema_definition const shadowrun_weapon_data_schema =
 
 static struct tag_schema_field const shadowrun_buy_menu_fields[] =
 {
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, open_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, close_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, page_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, bought_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, learned_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, tech_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, cannot_afford_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, cursor_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, cannot_buy_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, tech_owned_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, known_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, ammunition_sound, TAG_SCHEMA_GROUPS('snd!')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, ammunition_failed_sound, TAG_SCHEMA_GROUPS('snd!')),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_buy_menu_definition, cast_failed_sound, TAG_SCHEMA_GROUPS('snd!')),
 	TAG_SCHEMA_END
 };
