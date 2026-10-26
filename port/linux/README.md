@@ -1,7 +1,7 @@
 # Linux
 
 `ninja linux` compiles the game with clang for 32-bit x86 Linux. The result
-is a native executable, `build/linux/halo`. The game shows its graphics with
+is a native executable, `build/linux/shadowrun`. The game shows its graphics with
 OpenGL 4.5. It plays sound through SDL3. It accepts keyboard, mouse and
 gamepad input.
 
@@ -84,7 +84,7 @@ include folders from `pkg-config`, which splits a path at its spaces, so the
 portable build stops with a message there.
 
 To see the glibc version that a build needs, enter
-`readelf -V build/linux/halo | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1`.
+`readelf -V build/linux/shadowrun | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1`.
 
 ## Build the game
 
@@ -94,7 +94,7 @@ To see the glibc version that a build needs, enter
 
 ## Start the game
 
-Enter `build/linux/halo`.
+Enter `build/linux/shadowrun`.
 
 To play on a Steam Deck, unpack `halo-linux-release.zip` into a folder (in
 Desktop Mode), and add `halo` to Steam as a non-Steam game ("Add a Game" in
@@ -210,7 +210,7 @@ The settings are in `config.toml` next to the executable. Refer to
 
 If the game stops because of a fatal signal, it writes the address and a
 backtrace to the standard error. To find the function at the address, enter
-`addr2line -e build/linux/halo <address>`.
+`addr2line -e build/linux/shadowrun <address>`.
 
 ## Controls
 
@@ -724,9 +724,9 @@ broadcasts. Thus each copy must send its broadcasts to the other copies.
 For a host and two clients, enter these commands in three terminals:
 
 ```sh
-HALO_NET_ADDRESS=127.0.0.200 HALO_NET_BROADCAST=127.0.0.201,127.0.0.202 build/linux/halo
-HALO_NET_ADDRESS=127.0.0.201 HALO_NET_BROADCAST=127.0.0.200 build/linux/halo
-HALO_NET_ADDRESS=127.0.0.202 HALO_NET_BROADCAST=127.0.0.200 build/linux/halo
+HALO_NET_ADDRESS=127.0.0.200 HALO_NET_BROADCAST=127.0.0.201,127.0.0.202 build/linux/shadowrun
+HALO_NET_ADDRESS=127.0.0.201 HALO_NET_BROADCAST=127.0.0.200 build/linux/shadowrun
+HALO_NET_ADDRESS=127.0.0.202 HALO_NET_BROADCAST=127.0.0.200 build/linux/shadowrun
 ```
 
 Do not give 127.0.0.1 to a copy. Each copy gets to its own address through

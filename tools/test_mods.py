@@ -3,7 +3,7 @@ Halo Editing Kit writes them) played over Blood Gulch's tags, the same files dam
 a model made from the map's own (its nodes, regions and markers, with geometry of its own), and the same with a
 marker moved or a node renamed, which it must leave out, and the load order: alphabetical, moved as mods ask, as
 load_order.toml keeps it, and mods that say they cannot be played together. Needs the Linux build
-(build/linux/halo), assets/maps/bloodgulch.map and xvfb-run."""
+(build/linux/shadowrun), assets/maps/bloodgulch.map and xvfb-run."""
 
 import os
 import shutil
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-GAME = ROOT / "build" / "linux" / "halo"
+GAME = ROOT / "build" / "linux" / "shadowrun"
 MAPS = ROOT / "assets" / "maps"
 LEVEL = "levels\\test\\bloodgulch\\bloodgulch"
 
@@ -191,12 +191,12 @@ def game(tmp_path_factory) -> Path:
     """the Linux build, copied with its SDL to a folder of its own: its config.toml, which it writes beside
     itself, is the test's (not build/linux's)"""
     if not GAME.is_file() or not (MAPS / "bloodgulch.map").is_file() or not shutil.which("xvfb-run"):
-        pytest.skip("needs build/linux/halo, assets/maps/bloodgulch.map and xvfb-run")
+        pytest.skip("needs build/linux/shadowrun, assets/maps/bloodgulch.map and xvfb-run")
     folder = tmp_path_factory.mktemp("game")
-    for name in ("halo", "libSDL3.so.0"):
+    for name in ("shadowrun", "libSDL3.so.0"):
         if (GAME.parent / name).is_file():
             shutil.copy2(GAME.parent / name, folder / name)
-    return folder / "halo"
+    return folder / "shadowrun"
 
 
 def run_game(game: Path, data: Path, saves: Path) -> str:

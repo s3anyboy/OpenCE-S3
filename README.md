@@ -166,8 +166,8 @@ To build the game:
 
 | Target | Result |
 | --- | --- |
-| `ninja linux` | `build/linux/halo` |
-| `ninja windows` (on Windows, or on Linux after `configure.py --windows-cross`) | `build/windows/halo.exe` and `SDL3.dll` |
+| `ninja linux` | `build/linux/shadowrun` |
+| `ninja windows` (on Windows, or on Linux after `configure.py --windows-cross`) | `build/windows/shadowrun.exe` and `SDL3.dll` |
 | `ninja android_apk` | `port/android/app/build/outputs/apk/debug/app-debug.apk` |
 | `ninja web` | `build/web/site/`, the web site (`python tools/web_serve.py` serves it) |
 
@@ -212,7 +212,7 @@ before it is merged. For example, to check a build with such a change
 against a build without it:
 
 ```sh
-python tools/net_compare.py --a build/linux/halo --b <other checkout>/build/linux/halo \
+python tools/net_compare.py --a build/linux/shadowrun --b <other checkout>/build/linux/shadowrun \
     --data <folder with maps/> --maps bloodgulch,beavercreek,hangemhigh --swap
 ```
 

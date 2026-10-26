@@ -18,8 +18,8 @@ The comparison and its tolerances are described in port/linux/NETCODE.md
 ("Comparing two builds"). It needs the retail maps, so it is a local (or
 self-hosted) check, not a public CI one.
 
-    python tools/net_compare.py --a build/linux/halo --data /path/to/halo \\
-        --b ../other/build/linux/halo --maps bloodgulch,beavercreek --swap
+    python tools/net_compare.py --a build/linux/shadowrun --data /path/to/halo \\
+        --b ../other/build/linux/shadowrun --maps bloodgulch,beavercreek --swap
 
 Exit status: 0 when every run passes; 1 when a run diverges (FAIL), even if
 another could not be played, as a divergence is the finding and an error

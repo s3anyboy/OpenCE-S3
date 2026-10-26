@@ -963,14 +963,14 @@ started with, `DISPLAY` or `WAYLAND_DISPLAY`, or `--display`'s: a virtual
 one, Xvfb, rather than a desktop), and compares the two machines' logs:
 
 ```sh
-python tools/net_compare.py --a build/linux/halo --b <other checkout>/build/linux/halo \
+python tools/net_compare.py --a build/linux/shadowrun --b <other checkout>/build/linux/shadowrun \
     --data <folder holding maps/> --maps bloodgulch,beavercreek,hangemhigh --swap
 ```
 
 It needs the retail maps, so it runs on a developer's machine or a
 self-hosted runner, not in the public CI; run it before merging a change to
 a build's compiler, maths or the simulation itself. A build
-is its executable: a build's (`build/linux/halo`) or a release's. Each copy
+is its executable: a build's (`build/linux/shadowrun`) or a release's. Each copy
 gets its own folder (an executable, `config.toml` written in the copy's
 folder, a data root linking the maps, and saves) in `build/net_compare/`,
 removed when every game passes. It prints PASS, FAIL (with the first

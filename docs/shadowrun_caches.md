@@ -38,7 +38,10 @@ for another map (renamed `a10`, with the retail build's string): such a copy
 still loads by its level name, since the loader tells the prototype's maps
 apart by where their tags are linked, not by their headers.
 
-The map may be compressed, as the prototype's are, or decompressed.
+The map may be compressed, as the prototype's are, or decompressed (by a
+tool, as copies of it are passed around): precaching copies an
+uncompressed map's bytes as they are, where it inflates a compressed one's
+(`cache_files_decompress_windows.c`, `cache_copy_stored`).
 Shadowrun's `ui.map` also runs as the game's `ui.map`, and the main menu
 loads from it.
 

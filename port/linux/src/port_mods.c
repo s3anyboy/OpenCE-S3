@@ -1405,7 +1405,7 @@ void port_mods_startup(void)
 	labels[0] = "Play anyway";
 	labels[1] = disable;
 	labels[2] = "Quit";
-	answer = platform_ask("Halo: mods that cannot be played together", message, labels, 3, 0);
+	answer = platform_ask("Shadowrun: mods that cannot be played together", message, labels, 3, 0);
 	if (answer == 1)
 	{
 		/* (played so even when load_order.toml cannot be written:

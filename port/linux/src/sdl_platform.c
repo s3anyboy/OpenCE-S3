@@ -152,7 +152,7 @@ static void data_check_maps(void)
 		platform_log("maps folder: %ld Halo PC maps in %s/maps (%s)", maps.stray_pc_maps, maps.root,
 			maps.stray_names);
 		if (!quiet)
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Halo", message, NULL);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Shadowrun", message, NULL);
 		return;
 	case _maps_folder_halo_pc:
 		snprintf(message, sizeof(message),
@@ -172,7 +172,7 @@ static void data_check_maps(void)
 		maps.ui_version);
 	platform_log("%s", message);
 	if (!quiet)
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", message, NULL);
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shadowrun", message, NULL);
 	exit(EXIT_FAILURE);
 }
 #endif
@@ -221,7 +221,7 @@ BOOL platform_sdl_initialize(void)
 	one already running, and goes */
 	if (p2p_hand_off_invite())
 		exit(EXIT_SUCCESS);
-	SDL_SetHint(SDL_HINT_APP_NAME, "Halo");
+	SDL_SetHint(SDL_HINT_APP_NAME, "Shadowrun");
 #if defined(__linux__) && !defined(HALO_ARM64_GUEST) && !defined(HALO_ANDROID)
 	platform_choose_video_driver();
 #endif
@@ -334,7 +334,7 @@ static BOOL data_extract(const char *image, const char *destination, char *error
 	/* (waited for through extraction.finished; the Windows port's threads
 	cannot be joined) */
 	pthread_detach(thread);
-	window = SDL_CreateWindow("Halo", 640, 150, 0);
+	window = SDL_CreateWindow("Shadowrun", 640, 150, 0);
 	if (window)
 	{
 		renderer = SDL_CreateRenderer(window, NULL);
@@ -511,7 +511,7 @@ BOOL platform_offer_game_data(const char *destination)
 	}
 	for (;;)
 	{
-		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, NULL, "Halo", message, 2, buttons, NULL };
+		SDL_MessageBoxData question = { SDL_MESSAGEBOX_INFORMATION, NULL, "Shadowrun", message, 2, buttons, NULL };
 		char image[1024];
 		char error[512];
 		int answer = 0;
@@ -537,10 +537,10 @@ BOOL platform_offer_game_data(const char *destination)
 			platform_log("no file dialog: %s", error);
 			snprintf(explanation, sizeof(explanation),
 				"No file dialog could be shown (%s).\n\n"
-				"Put the disc image (.iso) in %s and start Halo again, "
+				"Put the disc image (.iso) in %s and start Shadowrun again, "
 				"or install zenity.",
 				error, destination);
-			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", explanation, NULL);
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shadowrun", explanation, NULL);
 			exit(EXIT_SUCCESS);
 		}
 		platform_log("extracting the maps folder from %s to %s", image, destination);
@@ -551,7 +551,7 @@ BOOL platform_offer_game_data(const char *destination)
 		}
 		platform_log("extraction failed: %s", error);
 		image_found = FALSE;
-		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Halo", error, NULL);
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shadowrun", error, NULL);
 	}
 }
 #endif
@@ -1172,7 +1172,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 
 		if (scale < 1)
 			scale = 1;
-		platform_window = SDL_CreateWindow("Halo", (int)(width * scale), (int)(height * scale),
+		platform_window = SDL_CreateWindow("Shadowrun", (int)(width * scale), (int)(height * scale),
 			SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN);
 	}
 #else
@@ -1183,7 +1183,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	(void)width;
 	(void)height;
 	platform_window_size_setting(&platform_window_width, &platform_window_height);
-	platform_window = SDL_CreateWindow("Halo", (int)platform_window_width, (int)platform_window_height,
+	platform_window = SDL_CreateWindow("Shadowrun", (int)platform_window_width, (int)platform_window_height,
 		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
 		(config_boolean("debug.hidden_window") ? SDL_WINDOW_HIDDEN : 0) |
 		(platform_fullscreen_setting() ? SDL_WINDOW_FULLSCREEN : 0));

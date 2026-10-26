@@ -2,8 +2,10 @@
 
 ## Art
 
-- **The game's icon** (the Android app's launcher icon, `halo.exe`'s icon
-  and the desktop windows' icon): by ORION (`port/assets/icon`).
+- **The game's icon** (the Android app's launcher icon, `shadowrun.exe`'s
+  icon and the desktop windows' icon): on the Shadowrun branch, an S set in
+  Overpass Black (`port/assets/icon`, drawn from the font, whose licence is in
+  `port/assets/fonts`). OpenCE's helmet icon, which it replaces, is by ORION.
 - **The controller's A, B, X and Y buttons** (the menus' button icons and
   the HUD messages'): redraws by saulob (`port/assets/buttons`).
 - **The high-res HUD** (its meters, icons, scopes and messages, and the

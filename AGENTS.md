@@ -35,7 +35,7 @@ end.
 
 ```sh
 python configure.py            # debug build; add --release, --portable, --profile, --pgo=off, --lto=off
-ninja linux                    # build/linux/halo
+ninja linux                    # build/linux/shadowrun
 ninja android                  # the Android guest image and native libraries
 ninja android_apk              # the APK (Gradle)
 ninja web                      # build/web/site (Emscripten: port/web/README.md)
@@ -95,7 +95,7 @@ python -m pytest -q tools/test_web_build.py                 # the web build's gr
 node --test "port/web/tests/*.test.js"                      # the web page's importer and service worker
 node port/web/tests/webrtc_native.mjs chromium firefox      # the native builds' WebRTC with browsers (Playwright)
 python -m pytest -q tools/test_net_compare.py               # net_compare.py's judging of logs, its copies and their processes
-python tools/net_compare.py --a build/linux/halo --b <other build> --data <game data> --swap
+python tools/net_compare.py --a build/linux/shadowrun --b <other build> --data <game data> --swap
                                                             # two builds in one network game, in step (retail maps: local only)
 ```
 

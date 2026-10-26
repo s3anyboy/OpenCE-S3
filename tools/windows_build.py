@@ -3,7 +3,7 @@
 Like the Linux build (tools/linux_build.py), it compiles the game sources
 with clang for 32-bit x86 Windows (i686-pc-windows-msvc), adds the platform layer shared with
 Linux (``port/linux/src``) and the Windows parts in ``port/windows``, and
-links ``build/windows/halo.exe`` with lld. It is generated when
+links ``build/windows/shadowrun.exe`` with lld. It is generated when
 configure.py runs on Windows, or with configure.py --windows-cross, which
 cross-compiles it from Linux (tools/windows_cross_build.py) against the
 MSVC toolchain of --windows-vctools-dir and --windows-sdk-dir. See
@@ -289,7 +289,8 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
 
     tags_header = BUILD / "halo_msvc_tags.h"
     obj_dir = BUILD / "obj"
-    output = BUILD / "halo.exe"
+    # (the Shadowrun branch's executable is named for it)
+    output = BUILD / "shadowrun.exe"
     sdl_dll = BUILD / "SDL3.dll"
     cc = getattr(sln, "windows_cc", None) or "clang"
     prefix_header = PORT_DIR / "include" / "halo_windows_prefix.h"
@@ -542,7 +543,7 @@ def generate_windows_build(n: Writer, sln: Any) -> None:
         n.build(outputs=obj, rule="windows_cc", inputs=PORT_DIR / "pgo" / "halo_profile_runtime.c",
                 variables={"cflags": runtime_cflags})
         runtime_objects.append(obj)
-        instrumented = generate_dir / "halo.exe"
+        instrumented = generate_dir / "shadowrun.exe"
         instrumented_dll = generate_dir / "SDL3.dll"
         # instrumented objects ask for LLVM's own runtime library, which
         # these objects replace

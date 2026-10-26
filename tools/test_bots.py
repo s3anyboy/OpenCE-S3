@@ -1,7 +1,7 @@
 """The bots (port/linux/game/bots.c, bots.count) in the game: a local Slayer game on a stock map, played without a
 person (debug.network_test "local:", the scripted controller 1 of debug.test_input) for a minute and more, in which
 every bot walks the map, the bots kill and die, and the game ends cleanly; and a system link game, which no bot joins
-whatever bots.count asks. Needs the retail maps in assets/maps and ninja linux's build/linux/halo; the game draws
+whatever bots.count asks. Needs the retail maps in assets/maps and ninja linux's build/linux/shadowrun; the game draws
 offscreen (SDL's offscreen video driver), with no audio, internet play or update check."""
 
 import math
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 RETAIL_MAPS = Path("assets/maps")
-GAME = Path("build/linux/halo")
+GAME = Path("build/linux/shadowrun")
 # a player's line of the network test's each second (network_test.c): alive or dead, its kills, deaths, team and
 # machine (a bot's is BOTS_FIRST_MACHINE, 113, and up)
 PLAYER = re.compile(r"player (\d+): (?:\((-?[\d.]+) (-?[\d.]+) -?[\d.]+\)|dead).*? s-?\d+ k(-?\d+) d(-?\d+) f-?\d+ "
@@ -24,7 +24,7 @@ BOTS_FIRST_MACHINE = 113
 
 def _game(map_name):
     if not GAME.is_file() or not (RETAIL_MAPS / f"{map_name}.map").is_file():
-        pytest.skip(f"needs {map_name}.map in assets/maps and ninja linux's build/linux/halo")
+        pytest.skip(f"needs {map_name}.map in assets/maps and ninja linux's build/linux/shadowrun")
 
 
 def _play(tmp_path, test, seconds, **settings):
@@ -32,7 +32,7 @@ def _play(tmp_path, test, seconds, **settings):
     (tmp_path / "data").mkdir()
     (tmp_path / "save").mkdir()
     (tmp_path / "data" / "maps").symlink_to(RETAIL_MAPS.resolve())
-    game = tmp_path / "halo"
+    game = tmp_path / "shadowrun"
     shutil.copy(GAME, game)
     env = {**os.environ, "SDL_VIDEODRIVER": "offscreen", "SDL_AUDIODRIVER": "dummy",
            "HALO_DATA_ROOT": str(tmp_path / "data"), "HALO_SAVE_ROOT": str(tmp_path / "save"),

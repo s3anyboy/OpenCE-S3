@@ -36,8 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OUTPUTS = {
     # (and the SDL3 the portable build brings, tools/linux_build.py, with its
     # zlib license, as the release carries the other libraries')
-    "linux": ["build/linux/halo", "build/linux/libSDL3.so.0", "build/linux/SDL3-LICENSE.txt"],
-    "windows": ["build/windows/halo.exe", "build/windows/SDL3.dll"],
+    "linux": ["build/linux/shadowrun", "build/linux/libSDL3.so.0", "build/linux/SDL3-LICENSE.txt"],
+    "windows": ["build/windows/shadowrun.exe", "build/windows/SDL3.dll"],
     "android": [],  # the APK, below
     "web": [],  # the site, below
 }
@@ -105,7 +105,7 @@ def main() -> int:
         shutil.copy2(ROOT / output, dist)
         print(f"{output} -> {dist.relative_to(ROOT)}", flush=True)
     if args.platform == "windows":
-        # the symbols of halo.exe and SDL3.dll, apart (players do not need
+        # the symbols of shadowrun.exe and SDL3.dll, apart (players do not need
         # them): the workflow uploads them to Sentry, which turns the crash
         # reports' minidumps into function names and lines
         # (port/windows/src/win32_crash.c), and tools/symbolize_crash.py
@@ -114,7 +114,7 @@ def main() -> int:
         if symbols.exists():
             shutil.rmtree(symbols)
         symbols.mkdir(parents=True)
-        for pdb in [ROOT / "build/windows/halo.pdb", *sorted((ROOT / "build/windows/third_party").glob("SDL3-*/lib/x86/SDL3.pdb"))]:
+        for pdb in [ROOT / "build/windows/shadowrun.pdb", *sorted((ROOT / "build/windows/third_party").glob("SDL3-*/lib/x86/SDL3.pdb"))]:
             shutil.copy2(pdb, symbols)
             print(f"{pdb.relative_to(ROOT)} -> {symbols.relative_to(ROOT)}", flush=True)
     # OpenCE's own licence, the AGPL, which asks each copy to carry its text

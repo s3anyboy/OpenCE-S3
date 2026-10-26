@@ -535,7 +535,7 @@ static int crash_ask(void)
 {
 	typedef int (WINAPI *message_box_timeout_proc)(HWND, LPCWSTR, LPCWSTR, UINT, WORD, DWORD);
 	static const wchar_t text[] =
-		L"Halo crashed.\n\n"
+		L"Shadowrun crashed.\n\n"
 		L"Do you want to send crash reports to the developers? They help us find and fix crashes.\n\n"
 		L"A report holds the state of the game when it crashed (the call stacks and registers of its threads, "
 		L"and the list of its program files) and its log, halo.log. Reports go to Sentry (sentry.io).\n\n"
@@ -546,8 +546,8 @@ static int crash_ask(void)
 	message_box_timeout_proc message_box_timeout =
 		(message_box_timeout_proc)(void *)GetProcAddress(GetModuleHandleW(L"user32.dll"), "MessageBoxTimeoutW");
 	UINT style = MB_YESNO | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND;
-	int answer = message_box_timeout ? message_box_timeout(NULL, text, L"Halo crashed", style, 0,
-		CONSENT_WAIT_MILLISECONDS) : MessageBoxW(NULL, text, L"Halo crashed", style);
+	int answer = message_box_timeout ? message_box_timeout(NULL, text, L"Shadowrun crashed", style, 0,
+		CONSENT_WAIT_MILLISECONDS) : MessageBoxW(NULL, text, L"Shadowrun crashed", style);
 
 	return answer == IDYES ? 1 : answer == IDNO ? 0 : -1;
 }

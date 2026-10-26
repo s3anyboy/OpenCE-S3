@@ -1,7 +1,7 @@
 # Windows
 
 `ninja windows` compiles the game with clang for 32-bit x86 Windows. The
-result is a native executable, `build/windows/halo.exe`, with `SDL3.dll`
+result is a native executable, `build/windows/shadowrun.exe`, with `SDL3.dll`
 next to it. You must build on Windows.
 
 The Windows build uses the platform layer of the Linux build

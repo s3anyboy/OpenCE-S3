@@ -515,6 +515,12 @@ void CALLBACK cache_copy_FileIOCompletionRoutine(
 /* ---------- globals */
 
 static struct decompressor_runtime_globals decompressor_globals;
+/* port: whether the map being copied is stored uncompressed (its file the
+size its header gives it: a map decompressed by a tool, as the Shadowrun
+prototype's are passed around, docs/shadowrun_caches.md): its bytes are
+copied as they are, where a compressed map's are inflated
+(cache_copy_run_decompression) */
+static boolean cache_copy_stored;
 static struct simple_decompressor_definition *global_self = &decompressor_globals.self;
 static long performance_frequency = 1;
 /* January PDB: public, module 33 .bss+0xcc0; explicit zero avoids COMMON. */
@@ -1616,7 +1622,27 @@ static void cache_copy_run_decompression(
 		if (self->write_requests_pending > 1)
 			decompressor_timer_start(_decompressor_timer_zlib_during_write_file);
 
-		zlib_result = inflate(zlib_stream, 0);
+		/* port: an uncompressed map's bytes copied, as many as both buffers
+		have, up to the size its header gives it (cache_copy_stored) */
+		if (cache_copy_stored)
+		{
+			unsigned long remaining = (unsigned long)(self->header.size - sizeof(self->header)) - zlib_stream->total_out;
+			unsigned long count = MIN(MIN((unsigned long)zlib_stream->avail_in, (unsigned long)zlib_stream->avail_out),
+				remaining);
+
+			csmemcpy(zlib_stream->next_out, zlib_stream->next_in, (long)count);
+			zlib_stream->next_in += count;
+			zlib_stream->avail_in -= count;
+			zlib_stream->next_out += count;
+			zlib_stream->avail_out -= count;
+			zlib_stream->total_out += count;
+			zlib_result = zlib_stream->total_out == (uLong)(self->header.size - sizeof(self->header)) ?
+				Z_STREAM_END : Z_OK;
+		}
+		else
+		{
+			zlib_result = inflate(zlib_stream, 0);
+		}
 
 		decompressor_timer_stop(_decompressor_timer_zlib);
 		if (self->write_requests_pending > 1)
@@ -1710,6 +1736,8 @@ static unsigned long __stdcall simple_cache_copy_thread(
 			else
 			{
 				boolean keep_going = TRUE;
+
+				cache_copy_stored = self->read_file_size == self->header.size;
 
 				self->write_bytes_left = self->header.size - sizeof(self->header);
 				self->async_write_bytes_left = self->write_bytes_left;

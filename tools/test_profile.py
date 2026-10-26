@@ -550,11 +550,11 @@ def test_normal_build_has_no_profiling_symbols():
         folder = ROOT / (os.environ.get("HALO_PROFILE_OBJECTS") or "build/windows/obj")
         objects = sorted(str(path) for path in folder.rglob("*.o"))
     else:
-        objects = [str(ROOT / "build/linux/halo")] if (ROOT / "build/linux/halo").is_file() else []
+        objects = [str(ROOT / "build/linux/shadowrun")] if (ROOT / "build/linux/shadowrun").is_file() else []
     if not nm:
         unavailable("needs nm")
     if not objects:
-        unavailable("needs a built normal build (build/windows/obj/**/*.o, build/linux/halo, or the objects in HALO_PROFILE_OBJECTS)")
+        unavailable("needs a built normal build (build/windows/obj/**/*.o, build/linux/shadowrun, or the objects in HALO_PROFILE_OBJECTS)")
     found, words, defined = set(), set(), 0
     for start in range(0, len(objects), 200):
         listing = subprocess.run([nm, "--defined-only", *objects[start:start + 200]], capture_output=True, text=True)

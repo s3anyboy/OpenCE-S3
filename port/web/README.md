@@ -216,7 +216,7 @@ data channel opens as signalling would have it; the browser sends it
 messages of every size, which come back, then again with a tenth of the
 datagrams lost each way. The internet play test needs the maps (`ui.map`
 and the multiplayer maps, which each browser imports) and the Linux build
-(`build/linux/halo`), and plays three games through a local broker: two
+(`build/linux/shadowrun`), and plays three games through a local broker: two
 browsers by invite, the native build hosting with a browser joining from the
 server browser, and the reverse (`debug.network_test` `browse`,
 `debug.network_test_public`).

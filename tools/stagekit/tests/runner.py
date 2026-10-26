@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 STAGEKIT = ROOT / "tools/stagekit"
 BUILD = ROOT / "build/linux"
-GAME = Path(os.environ.get("HALO_GAME", ROOT / "dist/halo-linux-release/halo"))
+GAME = Path(os.environ.get("HALO_GAME", ROOT / "dist/halo-linux-release/shadowrun"))
 # the scenarios (scenarios/<name>.c), each played as its test module (test_<name>.py) says
 SCENARIOS = sorted(path.stem for path in (STAGEKIT / "scenarios").glob("*.c"))
 # the game's ticks a second
@@ -145,7 +145,7 @@ def launch(machine, input, address, broadcast, test, init="", **environment):
     # (the game, and the libraries it finds beside it, in machine's own folder: a desktop build keeps its
     # config.toml beside the executable, so each machine has its own settings)
     for source in [GAME, *GAME.parent.glob("lib*.so*")]:
-        target = machine / ("halo" if source == GAME else source.name)
+        target = machine / ("shadowrun" if source == GAME else source.name)
         target.unlink(missing_ok=True)
         try:
             os.link(source, target)
@@ -159,7 +159,7 @@ def launch(machine, input, address, broadcast, test, init="", **environment):
                        HOME=str(machine), HALO_NETWORK_TEST=test, HALO_NET_ADDRESS=address,
                        HALO_NET_BROADCAST=broadcast, **environment)
     with open(machine / "game.log", "w") as log:
-        return subprocess.Popen([str(machine / "halo")], cwd=machine, env=environment, stdout=log,
+        return subprocess.Popen([str(machine / "shadowrun")], cwd=machine, env=environment, stdout=log,
                                 stderr=subprocess.STDOUT)
 
 

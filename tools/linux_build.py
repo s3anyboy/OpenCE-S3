@@ -2,7 +2,7 @@
 
 It compiles the game sources with clang for 32-bit x86 Linux, adds the
 platform layer in ``port/linux/src``, and links an ELF executable at
-``build/linux/halo``. See port/linux/README.md for the design.
+``build/linux/shadowrun``. See port/linux/README.md for the design.
 """
 
 import json
@@ -428,7 +428,8 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     config = _load_port_config()
     build_dir: Path = sln.build_dir / "linux"
     obj_dir = build_dir / "obj"
-    output = build_dir / "halo"
+    # (the Shadowrun branch's executable is named for it)
+    output = build_dir / "shadowrun"
     cc = sln.linux_cc or "clang"
     prefix_header = PORT_DIR / "include" / "halo_linux_prefix.h"
     semantics_header = build_dir / "halo_msvc_semantics.h"
@@ -693,7 +694,7 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
     # simply goes without, and deleting it trains a new one.
     profile = pgo_profile(sln, LINUX_PROFILE, [], cc)
     if pgo_mode(sln) == "train" and profile == LINUX_PROFILE:
-        instrumented = build_dir / "pgo-generate" / "halo"
+        instrumented = build_dir / "pgo-generate" / "shadowrun"
         emit(build_dir / "pgo-generate" / "obj", instrumented, ["-fprofile-generate"], ["-fprofile-generate"], [])
         n.build(
             outputs=profile,
