@@ -751,17 +751,16 @@ static struct custom_edition_map *custom_edition_map_get(
 	short map_index = display_index - FIRST_DISPLAY_INDEX;
 	short campaign_index = display_index - FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX;
 
-	/* (the Shadowrun maps' entries are past the custom campaigns' ones, which
-	are past the stock campaign levels': the two campaign kinds are told apart
-	here) */
-	if (campaign_index >= 0 && campaign_index < shadowrun_map_count())
-		return &globals->campaigns[campaign_index];
-	if (display_index >= FIRST_SHADOWRUN_DISPLAY_INDEX)
+	/* (the Shadowrun maps' display indices are their own range, below the custom
+	campaigns', which are below the spinner references': shadowrun_map_count) */
+	if (display_index >= FIRST_SHADOWRUN_DISPLAY_INDEX && display_index < FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX)
 	{
-		short shadowrun_index = shadowrun_map_count() + display_index - FIRST_SHADOWRUN_DISPLAY_INDEX;
+		short shadowrun_index = display_index - FIRST_SHADOWRUN_DISPLAY_INDEX;
 
-		return shadowrun_index < globals->campaign_count ? &globals->campaigns[shadowrun_index] : NULL;
+		return shadowrun_index < shadowrun_map_count() ? &globals->campaigns[shadowrun_index] : NULL;
 	}
+	if (campaign_index >= 0 && campaign_index < globals->campaign_count)
+		return &globals->campaigns[campaign_index];
 	return map_index >= 0 && map_index < globals->map_count ? &globals->maps[map_index] : NULL;
 }
 

@@ -41,10 +41,6 @@ struct bitmap_data;
 
 /* ---------- prototypes/CUSTOM_EDITION_MAPS.C */
 
-/* how many campaign maps an entry's display index takes (the menus' room for
-one kind at indices 0x6000 + n: custom_edition_maps.c) */
-#define MAXIMUM_CUSTOM_EDITION_CAMPAIGNS 1024
-
 /* the Shadowrun prototype's maps have display indices in the gap above the CE
 multiplayer maps' (0x4000 + at most 8192, which ends where the campaigns'
 start) and below the campaigns', so that a list can have them only (the map
