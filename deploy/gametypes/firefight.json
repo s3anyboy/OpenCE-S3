@@ -1,0 +1,47 @@
+{
+  "name": "Firefight",
+  "description": "Cooperative wave-based survival using CTF spawns. Players defend against increasingly difficult waves of enemies.",
+  "game_engine": "ctf",
+  "mode": "firefight",
+  "settings": {
+    "teams": true,
+    "time_limit": 15,
+    "score_limit": 0,
+    "respawn_time": 5,
+    "suicide_penalty": 0,
+    "friendly_fire": "off",
+    "auto_team_balance": false,
+    "motion_sensor": true,
+    "shields": true,
+    "vehicles": "default"
+  },
+  "loadout": {
+    "type": "custom",
+    "primary_weapon": "assault_rifle",
+    "secondary_weapon": "pistol",
+    "grenades_frag": 4,
+    "grenades_plasma": 4
+  },
+  "map_settings": {
+    "weapons_on_map": true,
+    "vehicles_on_map": true,
+    "powerups_on_map": true
+  },
+  "ctf_overrides": {
+    "assault": false,
+    "reset_on_capture": false,
+    "flag_must_reset": false,
+    "flag_at_home_to_score": false,
+    "single_flag_time": 0
+  },
+  "spawn_points": {
+    "use": "ctf_red_team",
+    "fallback": "team_default"
+  },
+  "notes": [
+    "This gametype uses CTF spawns but disables all CTF objectives",
+    "Works on any map with CTF spawn points",
+    "Players spawn as red team at CTF red spawns",
+    "Blue team spawns reserved for future AI wave spawning"
+  ]
+}

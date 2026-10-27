@@ -1,11 +1,11 @@
 /*
 GAME_MODES.C
 
-OpenCE's gametypes: SWAT, Infection and Gun Game, modes of Slayer, and
-Hardcore, rules over any game engine's. Which a gametype plays is in its PC
-options (game_engine.h's struct game_variant_options, from mode on), which a
-saved gametype keeps (playlist_profile.c), the network game carries to every
-machine (network_game_manager.h) and the game plays by
+OpenCE's gametypes: SWAT, Infection, Gun Game and Firefight, modes of Slayer
+and CTF, and Hardcore, rules over any game engine's. Which a gametype plays is
+in its PC options (game_engine.h's struct game_variant_options, from mode on),
+which a saved gametype keeps (playlist_profile.c), the network game carries to
+every machine (network_game_manager.h) and the game plays by
 (game_variant_options_get).
 
 - SWAT: no shields, and a shot to the head of any weapon kills (damage.c).
@@ -16,6 +16,8 @@ machine (network_game_manager.h) and the game plays by
   the zombies win when no human is left, the humans when the time runs out.
 - Gun Game (gun_game.c): free for all. Each kill gives the killer the next
   weapon of a list; a kill with the last wins.
+- Firefight (firefight.c): cooperative survival using CTF spawns. Players spawn
+  at red team CTF points and defend against waves of enemies.
 - Hardcore: no motion sensor, no aim assist, and a kill restores the
   killer's health and shields.
 
@@ -35,6 +37,7 @@ of their own (menu_functions.c's OPENCE).
 #include "game_modes.h"
 #include "gun_game.h"
 #include "infection.h"
+#include "firefight.h"
 
 #include <string.h>
 
@@ -88,6 +91,7 @@ static struct
 	{ "hardcore_ctf", L"Hardcore CTF", L"HC CTF" },
 	{ "hardcore_oddball", L"Hardcore Oddball", L"HC Oddball" },
 	{ "hardcore_king", L"Hardcore King", L"HC King" },
+	{ "firefight", L"Firefight", L"Firefight" },
 };
 
 /* the kill being recorded is a melee's (game_modes_kill_by_melee) */
@@ -139,6 +143,9 @@ void game_modes_gametype(
 	case _gametype_gun_game:
 		*variant = *build_game_variant_slayer(&temporary);
 		break;
+	case _gametype_firefight:
+		*variant = *build_game_variant_ctf(&temporary);
+		break;
 	default:
 		*variant = *build_game_variant_team_slayer(&temporary);
 		break;
@@ -174,6 +181,19 @@ void game_modes_gametype(
 		variant->universal_variant.respawn_time = 90;
 		variant->universal_variant.suicide_penalty = 0;
 		options->no_map_weapons = TRUE;
+		break;
+	case _gametype_firefight:
+		options->mode = _game_mode_firefight;
+		variant->universal_variant.respawn_time = 5 * TICKS_PER_SECOND;
+		variant->universal_variant.suicide_penalty = 0;
+		variant->universal_variant.score_to_win = 0;
+		options->time_limit = 15;
+		options->friendly_fire = _friendly_fire_off;
+		options->auto_team_balance = FALSE;
+		options->loadout = _loadout_custom;
+		options->primary_weapon = _loadout_weapon_assault_rifle;
+		options->secondary_weapon = _loadout_weapon_pistol;
+		options->no_map_weapons = FALSE;
 		break;
 	default:
 		options->hardcore = TRUE;
@@ -266,7 +286,12 @@ short game_modes_variant_mode(
 	struct game_variant const *variant,
 	struct game_variant_options const *options)
 {
-	if (!variant || !options || variant->game_engine_index != game_engine_slayer)
+	if (!variant || !options)
+		return _game_mode_none;
+	/* port: Firefight uses CTF engine */
+	if (variant->game_engine_index == game_engine_ctf && options->mode == _game_mode_firefight)
+		return variant->universal_variant.teams ? _game_mode_firefight : _game_mode_none;
+	if (variant->game_engine_index != game_engine_slayer)
 		return _game_mode_none;
 	switch (options->mode)
 	{
@@ -300,6 +325,7 @@ wchar_t const *game_modes_kind_name(
 		{ { L"SWAT", L"SWAT" }, { L"HARDCORE SWAT", L"HC SWAT" } },
 		{ { L"INFECTION", L"INFECTION" }, { L"HARDCORE INFECTION", L"HC INFECTION" } },
 		{ { L"GUN GAME", L"GUN GAME" }, { L"HARDCORE GUN GAME", L"HC GUN GAME" } },
+		{ { L"FIREFIGHT", L"FIREFIGHT" }, { L"HARDCORE FIREFIGHT", L"HC FIREFIGHT" } },
 	};
 	static wchar_t const *const hardcore_names[][2] =
 	{
@@ -313,8 +339,9 @@ wchar_t const *game_modes_kind_name(
 	boolean hardcore = (kind & GAME_MODES_KIND_HARDCORE) != 0;
 	short mode = (short)(kind & ~GAME_MODES_KIND_HARDCORE);
 
-	/* (another machine's: a mode of Slayer only, and one this build knows) */
-	if (game_engine_index == game_engine_slayer && mode > _game_mode_none && mode < NUMBER_OF_GAME_MODES)
+	/* (another machine's: a mode of Slayer or CTF, and one this build knows) */
+	if ((game_engine_index == game_engine_slayer || game_engine_index == game_engine_ctf) &&
+		mode > _game_mode_none && mode < NUMBER_OF_GAME_MODES)
 		return mode_names[mode][hardcore][abbreviated != FALSE];
 	if (!hardcore || game_engine_index <= game_engine_none || game_engine_index >= (long)NUMBEROF(hardcore_names))
 		return NULL;
@@ -365,6 +392,10 @@ struct game_engine *game_modes_engine(
 		return infection_engine_get(engine);
 	case _game_mode_gun_game:
 		return gun_game_engine_get(engine);
+	case _game_mode_firefight:
+		/* port: Firefight update for wave spawning */
+		firefight_update();
+		return firefight_engine(engine);
 	}
 	return engine;
 }
@@ -379,6 +410,9 @@ void game_modes_postspawn(
 		break;
 	case _game_mode_gun_game:
 		gun_game_postspawn(player_index);
+		break;
+	case _game_mode_firefight:
+		firefight_postspawn(player_index);
 		break;
 	}
 }

@@ -220,6 +220,7 @@ enum
 	_game_mode_swat,
 	_game_mode_infection,
 	_game_mode_gun_game,
+	_game_mode_firefight,
 	NUMBER_OF_GAME_MODES
 };
 

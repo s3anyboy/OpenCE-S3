@@ -1,0 +1,216 @@
+```
+FIREFIGHT SPAWN SYSTEM DESIGN
+========================
+
+CTF Map Layout (Example: Blood Gulch)
+--------------------------------------
+
+    Blue Base                 Red Base
+    [Blue Flag]                    [Red Flag]
+         |                                   |
+         |                                   |
+    Blue CTF Spawns                    Red CTF Spawns
+    ■ ■ ■ ■ ■                          ● ● ● ● ●
+         |                         |
+         |                                   |
+    Reserved for                 Player Spawns
+    Future AI Waves                    (Defensive Position)
+         
+         
+FIREFIGHT TEAM ASSIGNMENT
+=========================
+
+Standard CTF:
+  Red Team: [Player] [Player] [Player]
+  Blue Team: [Player] [Player] [Player] [Player]
+  Objective: Capture enemy flag
+
+Firefight Mode:
+  Red Team: [Player] [Player] [Player] [Player] ← All players here
+  Blue Team: [Empty - Reserved for AI spawning]
+  Objective: Survive waves of enemies
+
+
+SPAWN POINT SELECTION LOGIC
+============================
+
+┌─────────────────────────────────┐
+│ Player Spawns/Respawns                      │
+└──────────────┬──────────────────────────────┘
+               │
+               ▼
+     ┌─────────────────────┐
+     │ Is Firefight Mode?  │
+     └──────┬──────────────┘
+            │
+      ┌─────┴─────┐
+      │           │
+     YES         NO
+      │           │
+      ▼           ▼
+  ┌──────────┐  Use standard
+  │ CTF Map? │  spawn logic
+  └─────┬────┘
+        │
+   ┌────┴────┐
+   │         │
+  YES       NO
+   │         │
+   ▼         ▼
+Use Red    Fallback
+CTF Spawns  to team
+           spawns
+
+
+CTF ENGINE MODIFICATION
+=======================
+
+Original CTF Engine:
+  ✓ Flag spawning
+  ✓ Flag capture logic
+  ✓ Score tracking
+  ✓ Team spawns at bases
+  ✓ Flag carrier mechanics
+
+Firefight Override:
+  ✗ Flag spawning (disabled)
+  ✗ Flag capture logic (disabled)
+  ✗ Score tracking (disabled: score_to_win = 0)
+  ✓ Team spawns at bases (KEPT - This is what we want!)
+  ✗ Flag carrier mechanics (disabled)
+
+
+SPAWN POINT DISTRIBUTION EXAMPLE
+=================================
+
+Blood Gulch (CTF):
+
+Red Base Spawns (8 points):
+  ● Inside base (3 points)
+  ● Outside base entrance (2 points)
+  ● On base roof (1 point)
+  ● Near base perimeter (2 points)
+
+Blue Base Spawns (8 points):
+  ■ Inside base (3 points)
+  ■ Outside base entrance (2 points)
+  ■ On base roof (1 point)
+  ■ Near base perimeter (2 points)
+
+Firefight Assignment:
+  Players: ● (All 8 red spawn points)
+  AI (future): ■ (All 8 blue spawn points)
+
+
+GAMEPLAY FLOW
+==============
+
+Round Start:
+  ├─> Host initializes Firefight state
+  ├─> All players assigned to red team
+  ├─> Players spawn at red CTF points
+  └─> Timer starts (15 minutes default)
+
+During Round:
+  ├─> Players defend red base position
+  ├─> (Future) AI spawns at blue CTF points
+  ├─> (Future) Waves increase in difficulty
+  ├─> Players respawn at red CTF points (5 sec)
+  └─> Map weapons/vehicles available
+
+Round End:
+  ├─> Time expires (survivors win)
+  └─> (Future) All players eliminated (defeat)
+
+
+TECHNICAL STACK
+===============
+
+Game Engine Layer:
+  game_engine_ctf (base)
+    │
+    ├─> CTF spawn point system (USED)
+    ├─> CTF objective system (DISABLED)
+    └─> CTF scoring system (DISABLED)
+
+Game Mode Layer:
+  _game_mode_firefight
+    │
+    ├─> firefight_engine() override
+    ├─> firefight_postspawn() equipment
+    └─> firefight_enabled() state check
+
+Integration Layer:
+  game_modes.c
+    │
+    ├─> Mode registration
+    ├─> Engine routing
+    └─> Spawn hooks
+
+
+ADVANTAGES OF CTF ENGINE
+=========================
+
+✓ Spawn Points:
+  - Well-positioned at bases
+  - Team-specific (red vs blue)
+  - Multiple points per base
+  - Good distribution
+
+✓ Map Design:
+  - CTF maps have natural bases
+  - Clear attack/defend layout
+  - Good sightlines from bases
+  - Defensible positions
+
+✓ No Custom Logic:
+  - Reuses existing spawn system
+  - No new spawn point types
+  - Works with all CTF maps
+  - Proven, tested code
+
+✓ Future AI:
+  - Blue spawns ready for enemies
+  - Natural attack direction
+  - Creates wave assault pattern
+  - AI pathfinding to red base
+
+
+COMPARISON: SLAYER VS CTF
+==========================
+
+Slayer Spawns:
+  [Scattered across map]
+  [No team assignment]
+  [Designed for deathmatch]
+  [Equal access for all]
+  
+  ✗ Not ideal for defense
+  ✗ Would need custom logic
+  ✗ No natural base positions
+
+CTF Spawns:
+  [Concentrated at bases]
+  [Team-specific]
+  [Designed for objectives]
+  [Positional advantage]
+  
+  ✓ Perfect for defense
+  ✓ Uses existing logic
+  ✓ Natural defensive positions
+
+
+SUMMARY
+=======
+
+Firefight leverages the CTF engine's spawn system to create a
+cooperative defense scenario. By assigning all players to the red
+team, they spawn at red CTF points (the base), while blue CTF
+points are reserved for future AI wave spawning. This creates a
+natural "defend the base" gameplay loop without requiring custom
+spawn point logic.
+
+The genius of this design: CTF isn't just for flags, it's a
+team-based positional framework that works perfectly for
+cooperative survival gameplay.
+```
