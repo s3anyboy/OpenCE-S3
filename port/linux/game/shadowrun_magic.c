@@ -19,6 +19,7 @@ the mana for them, until they are.
 #include "ai/ai.h"
 #include "ai/actors.h"
 #include "ai/ai_script.h"
+#include "ai/actor_placement.h"
 #include "ai/encounters.h"
 #include "cache/cache_files.h"
 #include "tag_files/tag_files.h"
@@ -362,6 +363,8 @@ void shadowrun_magic_initialize_for_new_map(
 	void)
 {
 	csmemset(shadowrun_magic_globals, 0, sizeof(*shadowrun_magic_globals));
+	/* port: looked for in this map's tags */
+	shadowrun_summoned_variant = NONE;
 
 	return;
 }
@@ -1986,15 +1989,25 @@ static void shadowrun_trees_update(
 /* port: the map's actor variant Summon Elemental summons, the elite commander
 with the energy sword: its tag, else the map's first of a name starting as
 that one does (the map's tags are walked for that: a tag_loaded takes an
-exact name). NONE if the map has neither, and the spell summons the
-definition's encounter's actor as it did */
+exact name, and a protected map's tags have no names to find it by). NONE if
+the map has neither, and the spell summons the definition's encounter's
+actor as it did. Found once a map: the first time it is asked for */
+#define SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND (-2)
+
+static long shadowrun_summoned_variant;
+
 static long shadowrun_summon_elemental_variant(
 	void)
 {
 	struct tag_iterator iterator;
-	long variant = tag_loaded(SHADOWRUN_ACTOR_VARIANT_TAG, SHADOWRUN_SUMMONED_ACTOR_VARIANT);
+	long variant;
 	long tag_index;
 
+	if (shadowrun_summoned_variant > SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND)
+	{
+		return shadowrun_summoned_variant;
+	}
+	variant = tag_loaded(SHADOWRUN_ACTOR_VARIANT_TAG, SHADOWRUN_SUMMONED_ACTOR_VARIANT);
 	tag_iterator_new(&iterator, SHADOWRUN_ACTOR_VARIANT_TAG);
 	while (variant == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
@@ -2004,8 +2017,35 @@ static long shadowrun_summon_elemental_variant(
 			variant = tag_index;
 		}
 	}
+	if (variant == NONE)
+	{
+		error(_error_silent, "shadowrun: the map has no %s", SHADOWRUN_SUMMONED_ACTOR_VARIANT);
+		shadowrun_summoned_variant = SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND;
+		return NONE;
+	}
+	shadowrun_summoned_variant = variant;
 
 	return variant;
+}
+
+/* port: one actor of that variant, at `position`, facing the caster's way. It
+is placed as ai.c places an actor of its own (no encounter's: the variant
+need not be one of the map's encounters'): the placement csmemset gives, the
+states it zeros being none */
+static long shadowrun_summon_elemental_place(
+	long variant,
+	long unit_index,
+	real_point3d const *position)
+{
+	struct object_datum *caster = object_get(unit_index);
+	struct actor_starting_location starting_location;
+
+	csmemset(&starting_location, 0, sizeof(starting_location));
+	starting_location.command_list_index = NONE;
+	starting_location.position = *position;
+	starting_location.facing = arctangent(caster->object.forward.j, caster->object.forward.i);
+
+	return actor_place(variant, NONE, 0, &starting_location, FALSE, 0);
 }
 
 /* 0x2657E0: each tree heals the players' units, and the actors' but those
@@ -2535,7 +2575,12 @@ static void shadowrun_summon_cast(
 			shadowrun_unit_cast_feedback(unit_index, magic->summon_cast_damage.index, magic->summon_cast_effect.index);
 			if (ai_reference != NONE || actor_variant_index != NONE)
 			{
-				long actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX, actor_variant_index);
+				/* (the map's elite commander comes where the caster aimed; one of
+				the encounter's comes in the encounter's place, and is moved there
+				below) */
+				long actor_index = actor_variant_index != NONE ?
+					shadowrun_summon_elemental_place(actor_variant_index, unit_index, &target) :
+					encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
 				struct actor_datum *actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
 
 				shadowrun_unit_fire_projectile(unit_index, magic->summon_projectile.index, NULL);
@@ -2554,12 +2599,6 @@ static void shadowrun_summon_cast(
 							shadowrun_unit->summoned_actor_indices[index] = actor_index;
 							break;
 						}
-					}
-					if (actor_variant_index != NONE)
-					{
-						/* port: placed at the encounter's own place, the elite commander
-						comes where the caster aimed, as the encounter's actor does */
-						object_set_position(summon_index, &target, NULL, NULL);
 					}
 					/* (the executable marks the summon's encounter here, for its
 					own AI) */
@@ -2588,6 +2627,8 @@ static void shadowrun_summon_cast(
 						{
 							summon->object.outgoing_change_colors[index] = color;
 						}
+						/* port: one of the encounter's is moved where the caster aimed; the
+						elite commander was placed there */
 						if (actor_variant_index == NONE)
 						{
 							object_set_position(summon_index, &target, NULL, NULL);
@@ -2979,7 +3020,7 @@ static void shadowrun_resurrection_raise(
 	ai_index_from_string(global_scenario_get(), encounter_name, &ai_reference);
 	if (ai_reference != NONE)
 	{
-		long actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX, NONE);
+		long actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
 		struct actor_datum *actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
 
 		if (actor)
