@@ -109,17 +109,18 @@ enum
 	_bitmap_format_a8r8g8b8 = 11,
 };
 
-/* (the multiplayer maps', Shadowrun maps', custom campaigns' and spinner
-references' display indices do not meet) */
-/* the most Shadowrun maps the gap between the multiplayer maps and the campaigns
-holds */
-#define MAXIMUM_SHADOWRUN_MAPS (FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX - FIRST_SHADOWRUN_DISPLAY_INDEX)
+/* (the multiplayer maps', custom campaigns', Shadowrun maps' and spinner
+references' display indices do not meet: the multiplayer maps' 0x4000 + at
+most 8192 end where the campaigns' start, the campaigns' 0x6000 + at most 1024
+end before the Shadowrun maps', which end below ui_widget.c's spinner
+descriptions' 0x7000) */
+#define MAXIMUM_SHADOWRUN_MAPS (0x7000 - FIRST_SHADOWRUN_DISPLAY_INDEX)
 typedef char verify_multiplayer_display_indices[
-	FIRST_DISPLAY_INDEX + CUSTOM_EDITION_MAPS_MAXIMUM <= FIRST_SHADOWRUN_DISPLAY_INDEX ? 1 : -1];
-typedef char verify_shadowrun_display_indices[
-	FIRST_SHADOWRUN_DISPLAY_INDEX + MAXIMUM_SHADOWRUN_MAPS <= FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX ? 1 : -1];
+	FIRST_DISPLAY_INDEX + CUSTOM_EDITION_MAPS_MAXIMUM <= FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX ? 1 : -1];
 typedef char verify_campaign_display_indices[
-	FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX + MAXIMUM_CUSTOM_EDITION_CAMPAIGNS <= 0x7000 ? 1 : -1];
+	FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX + MAXIMUM_CUSTOM_EDITION_CAMPAIGNS <= FIRST_SHADOWRUN_DISPLAY_INDEX ? 1 : -1];
+typedef char verify_shadowrun_display_indices[
+	FIRST_SHADOWRUN_DISPLAY_INDEX + MAXIMUM_SHADOWRUN_MAPS <= 0x7000 ? 1 : -1];
 
 /* ---------- structures */
 
@@ -177,6 +178,11 @@ static wchar_t const shadowrun_default_description[] = L"Shadowrun\r\nprototype 
 
 static short shadowrun_map_count(
 	void);
+static boolean custom_edition_shadowrun_map_named(
+	char const *folder,
+	char const *name);
+static boolean custom_edition_shadowrun_map_listed(
+	char const *name);
 
 static void custom_edition_maps_forget(
 	void)
@@ -751,15 +757,16 @@ static struct custom_edition_map *custom_edition_map_get(
 	short map_index = display_index - FIRST_DISPLAY_INDEX;
 	short campaign_index = display_index - FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX;
 
-	/* (the Shadowrun maps' display indices are their own range, below the custom
-	campaigns', which are below the spinner references': shadowrun_map_count) */
-	if (display_index >= FIRST_SHADOWRUN_DISPLAY_INDEX && display_index < FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX)
+	/* (the Shadowrun maps' display indices are their own range, just above the
+	custom campaigns' and below the spinner references': shadowrun_map_count) */
+	if (display_index >= FIRST_SHADOWRUN_DISPLAY_INDEX && display_index < 0x7000)
 	{
 		short shadowrun_index = display_index - FIRST_SHADOWRUN_DISPLAY_INDEX;
 
 		return shadowrun_index < shadowrun_map_count() ? &globals->campaigns[shadowrun_index] : NULL;
 	}
-	if (campaign_index >= 0 && campaign_index < globals->campaign_count)
+	if (campaign_index >= 0 && campaign_index < MAXIMUM_CUSTOM_EDITION_CAMPAIGNS &&
+		campaign_index < globals->campaign_count)
 		return &globals->campaigns[campaign_index];
 	return map_index >= 0 && map_index < globals->map_count ? &globals->maps[map_index] : NULL;
 }

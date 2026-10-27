@@ -15,9 +15,9 @@ ui_widget.c ask this file for their names, descriptions and pictures.
 
 	below 0x1000   Xbox multiplayer level (the tags' own index)
 	0x3000 + n     stock campaign level n (co-op)
-	0x4000 + n     CE multiplayer map (up to 8192 of them, below 0x6000)
-	0x5000 + n     Shadowrun prototype map (the map lists' SHADOWRUN)
+	0x4000 + n     CE multiplayer map
 	0x6000 + n     CE campaign map (played alone or as co-op)
+	0x6400 + n     Shadowrun prototype map (the map lists' SHADOWRUN)
 */
 
 #ifndef __CUSTOM_EDITION_MAPS_H
@@ -41,11 +41,11 @@ struct bitmap_data;
 
 /* ---------- prototypes/CUSTOM_EDITION_MAPS.C */
 
-/* the Shadowrun prototype's maps have display indices in the gap above the CE
-multiplayer maps' (0x4000 + at most 8192, which ends where the campaigns'
-start) and below the campaigns', so that a list can have them only (the map
-lists' SHADOWRUN kind): 0x5000 + n */
-#define FIRST_SHADOWRUN_DISPLAY_INDEX 0x5000
+/* the Shadowrun prototype's maps have display indices just past the Custom
+Edition campaign maps', below ui_widget.c's spinner descriptions' (0x7000),
+so that a list can have them only (the map lists' SHADOWRUN kind): 0x6400 + n
+*/
+#define FIRST_SHADOWRUN_DISPLAY_INDEX 0x6400
 
 /* whether a level name is a Shadowrun prototype map's (shadowrun\<name>) */
 boolean shadowrun_level_name(
