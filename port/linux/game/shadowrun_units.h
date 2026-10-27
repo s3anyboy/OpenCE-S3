@@ -21,6 +21,9 @@ the biped's after those, from 0x101C), a player's in the player's datum.
 
 /* ---------- constants */
 
+/* port: the units a vision marks at once (shadowrun_tech.c) */
+#define MAXIMUM_SHADOWRUN_VISION_TARGETS 32
+
 enum
 {
 	/* a grenade type the executable has beyond this build's two (the
@@ -87,6 +90,16 @@ definition (0x10F0) */
 	/* a spell that could not be cast (0xB34) */
 	boolean spell_failed[NUMBER_OF_SHADOWRUN_SPELLS];
 	byte pad0[3];
+
+	/* port: the tech the left bumper uses (0 for none), the ticks its look
+	lasts, and its output: the number of the navpoint it marks it against
+	(-1 for none), the units it marked and how many (shadowrun_tech.c) */
+	long tech;
+	long tech_ticks;
+	long vision_nav_index;
+	long vision_targets[MAXIMUM_SHADOWRUN_VISION_TARGETS];
+	short vision_target_count;
+	byte pad_tech[2];
 
 	/* mana (0xAD8), and how long since it was spent (0xADC); what tech and
 	magic hold back of the capacity (0xAD0, 0xAE0) */
@@ -223,6 +236,8 @@ struct shadowrun_player
 	long money;
 	boolean given_money;
 	byte pad2[3];
+	/* port: the tech it knows, which its units take (shadowrun_tech.c) */
+	long known_tech;
 };
 
 /* ---------- prototypes/SHADOWRUN_UNITS.C */

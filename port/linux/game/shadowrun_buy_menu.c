@@ -38,6 +38,7 @@ grenade, which this build has no grenade type for).
 #include "text/font_group.h"
 #include "units/units.h"
 #include "shadowrun_units.h"
+#include "shadowrun_tech.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -47,8 +48,9 @@ grenade, which this build has no grenade type for).
 
 enum
 {
-	/* the menu's items, its pages, and the most it lists of a page */
-	NUMBER_OF_SHADOWRUN_SHOP_ITEMS = 28,
+	/* the menu's items, its pages, and the most it lists of a page (29 with
+	port: gecko, the executable's menu does not list) */
+	NUMBER_OF_SHADOWRUN_SHOP_ITEMS = 29,
 	_shadowrun_shop_page_main = 0,
 	_shadowrun_shop_page_tech,
 	_shadowrun_shop_page_magic,
@@ -186,6 +188,8 @@ static struct shadowrun_shop_item const shadowrun_shop_items[NUMBER_OF_SHADOWRUN
 	{ 24, _shadowrun_shop_page_tech, "Hologram", 30, 35 },
 	{ 27, _shadowrun_shop_page_tech, "Smartlink", 33, 38 },
 	{ 19, _shadowrun_shop_page_tech, "Enhanced Vision", 6, 25 },
+	/* port: the executable's menu does not list it, though its shop gives it */
+	{ 21, _shadowrun_shop_page_tech, "Gecko", 33, 38 },
 };
 
 /* the spell each magic item teaches (by action, from the first magic's) */
@@ -198,6 +202,23 @@ static short const shadowrun_shop_spells[_shadowrun_shop_last_magic - _shadowrun
 	_shadowrun_spell_smoke,
 	_shadowrun_spell_gust,
 	_shadowrun_spell_resurrection,
+};
+
+/* the tech each item sells, by its action (19 to 27): the executable's ids
+(units.c, FUN_0027d4e0), and its items' places. The port's items: Enhanced
+Vision 19, Glider 20, Grapple 22, Hologram 24, Smartlink 27. A tech the port
+does not play is NONE, and is not sold */
+static short const shadowrun_shop_techs[_shadowrun_shop_last_tech - _shadowrun_shop_first_tech + 1] =
+{
+	_shadowrun_tech_vision_id, /* 19: Enhanced Vision */
+	_shadowrun_tech_glider_id, /* 20: Glider */
+	_shadowrun_tech_gecko_id, /* 21: Gecko */
+	_shadowrun_tech_grapple_id, /* 22: Grapple */
+	NONE, /* 23 */
+	_shadowrun_tech_hologram_id, /* 24: Hologram */
+	NONE, /* 25 */
+	NONE, /* 26 */
+	_shadowrun_tech_smartlink_id, /* 27: Smartlink */
 };
 
 /* the weapon each weapon item sells (by action, from the first weapon's) */
@@ -260,6 +281,8 @@ static boolean shadowrun_shop_owned(
 static boolean shadowrun_shop_available(
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
+	short item);
+static short shadowrun_shop_tech_id(
 	short item);
 static boolean shadowrun_unit_has_weapon(
 	long unit_index,
@@ -912,9 +935,50 @@ static void shadowrun_shop_buy(
 				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
 			}
 		}
+		else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
+		{
+			/* port: a tech the port plays is learned (the executable's shop gives
+			the unit the tech's pointers, its code's place) */
+			short tech = shadowrun_shop_tech_id(state->selection);
+
+			if (tech != NONE)
+			{
+				if (shadowrun_unit_tech(unit_index) == tech)
+				{
+					/* (worn: the removal's price takes it off, as the menu says) */
+					long removal_price = shadowrun_shop_price(definition,
+						shadowrun_shop_items[state->selection].removal_price_index);
+
+					if (shadowrun_player->money < removal_price)
+					{
+						shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_afford);
+					}
+					else
+					{
+						shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech_owned);
+						shadowrun_unit_set_tech(unit_index, 0);
+						shadowrun_player->known_tech = 0;
+						shadowrun_player->money -= removal_price;
+						state->purchase_time = game_time_get();
+					}
+				}
+				else
+				{
+					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech);
+					shadowrun_unit_set_tech(unit_index, tech);
+					shadowrun_player->known_tech = tech;
+					shadowrun_player->money -= price;
+					state->purchase_time = game_time_get();
+				}
+			}
+			else
+			{
+				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
+			}
+		}
 		else
 		{
-			/* port: tech, and the anti-magic grenade, are not played */
+			/* port: the anti-magic grenade is not played */
 			shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
 		}
 	}
@@ -1049,7 +1113,7 @@ static short shadowrun_shop_list(
 }
 
 /* 0x0FF3A0: whether the player has the item: grenades of its kind, the
-spell, the weapon (tech is not played) */
+spell, the weapon (port: and the tech, which it wears and may take off) */
 static boolean shadowrun_shop_owned(
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
@@ -1062,6 +1126,13 @@ static boolean shadowrun_shop_owned(
 	if (action == _shadowrun_shop_grenade)
 	{
 		result = unit_get_grenade_count(unit_index, 0) > 0;
+	}
+	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
+	{
+		/* port: the tech the item sells is the one the unit has on */
+		short tech = shadowrun_shop_tech_id(item);
+
+		result = tech != NONE && shadowrun_unit_tech(unit_index) == tech;
 	}
 	else if (action >= _shadowrun_shop_first_magic && action <= _shadowrun_shop_last_magic)
 	{
@@ -1082,6 +1153,16 @@ static boolean shadowrun_shop_owned(
 	return result;
 }
 
+/* port: the tech an item of the tech page sells, or NONE (not played) */
+static short shadowrun_shop_tech_id(
+	short item)
+{
+	short action = shadowrun_shop_items[item].action;
+
+	return action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech ?
+		shadowrun_shop_techs[action - _shadowrun_shop_first_tech] : NONE;
+}
+
 /* 0x101F70: whether the player may buy the item: fewer than two grenades
 of its kind, a spell it does not know, a weapon it does not have (port: and
 not tech, nor an anti-magic grenade) */
@@ -1097,10 +1178,15 @@ static boolean shadowrun_shop_available(
 	{
 		result = unit_get_grenade_count(unit_index, 0) < SHADOWRUN_SHOP_MAXIMUM_GRENADES;
 	}
-	else if (action == _shadowrun_shop_anti_magic_grenade ||
-		(action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech))
+	else if (action == _shadowrun_shop_anti_magic_grenade)
 	{
 		result = FALSE;
+	}
+	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
+	{
+		/* port: a tech the port plays is sold once, until it is taken off */
+		result = shadowrun_shop_tech_id((short)item) != NONE &&
+			shadowrun_unit_tech(unit_index) != shadowrun_shop_tech_id((short)item);
 	}
 	else if (action < _shadowrun_shop_grenade)
 	{

@@ -263,12 +263,30 @@ weapon in hand; while it is open the player does nothing else. Tech and the
 anti-magic grenade are listed but cannot be bought. A co-op client's
 purchases are its own: they are not sent to the host.
 
+## Tech
+
+On these maps a player's left bumper uses its tech (`port/linux/game/
+shadowrun_tech.c`; the crouch control, which they do not crouch with). The
+prototype's logic for it is in its executable (`FUN_0027d9c0` dispatches the
+techs and spells by id; `player_change_tech` gives a player one), but
+missionlet leaves the `t1ed` values a tech reads empty, so each is ported as
+a rule of its own:
+
+| Tech | What it does |
+| --- | --- |
+| Vision (1) | marks every enemy unit within 60 m on the HUD for 30 seconds, with the HUD's red nav point (`target_red`, else `default_red`) (the nearest first, 32 at most); the marks follow units in and out of range |
+
+The rest (reflexes, grapple, glider, anti-magic, hologram, zoom) are not
+played. `player_change_tech <id>` gives the players a tech, from the console
+or a map's script (`shadowrun_tech.h`'s ids).
+
 ## What does not work
 
 This build runs the prototype's maps on Halo's game code; of Shadowrun's own
 systems these are not there:
 
-- tech (the `t?ed` tags), anti-magic and essence;
+- tech, but for vision (see [Tech](#tech)): its tags' effects, anti-magic and
+  essence are not there, and the `t?ed` tags are read by nothing yet;
 - Shadowrun's weapons as Shadowrun defined them (`srwd`): but for each
   race's speed with them, they play as Halo's do from their Halo tags;
 - Shadowrun's AI behaviours for its new actor types (they play as the types

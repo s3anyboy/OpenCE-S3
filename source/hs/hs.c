@@ -3385,7 +3385,7 @@ typedef void (*hs_token_enumerator)(
 
 struct hs_function_table_storage
 {
-	struct hs_function_definition const *functions[418 + 10];
+	struct hs_function_definition const *functions[418 + 11];
 	struct profile_section profile;
 	hs_token_enumerator token_enumerators[18];
 };
@@ -11811,6 +11811,14 @@ static void hs_player_change_magic(
 	return;
 }
 
+static void hs_player_change_tech(
+	long tech)
+{
+	shadowrun_players_change_tech((short)tech);
+
+	return;
+}
+
 static void hs_game_set_assignment_scheme(
 	long scheme)
 {
@@ -11821,6 +11829,7 @@ static void hs_game_set_assignment_scheme(
 
 HS_EVALUATE_VOID_LONG(hs_player_set_magic_evaluate, hs_player_set_magic)
 HS_EVALUATE_VOID_LONG(hs_player_change_magic_evaluate, hs_player_change_magic)
+HS_EVALUATE_VOID_LONG(hs_player_change_tech_evaluate, hs_player_change_tech)
 HS_EVALUATE_VOID_LONG(hs_game_set_assignment_scheme_evaluate, hs_game_set_assignment_scheme)
 
 static struct hs_function_definition_with_1_parameter const player_set_magic_definition=
@@ -11853,6 +11862,21 @@ static struct hs_function_definition_with_1_parameter const player_change_magic_
 	},
 };
 
+static struct hs_function_definition_with_1_parameter const player_change_tech_definition=
+{
+	{
+		_hs_type_void,
+		0,
+		"player_change_tech",
+		hs_macro_function_parse,
+		hs_player_change_tech_evaluate,
+		"the Shadowrun prototype's: gives the players the tech (its id) the left bumper uses",
+		NULL,
+		1,
+		{ _hs_type_long_integer },
+	},
+};
+
 static struct hs_function_definition_with_1_parameter const game_set_assignment_scheme_definition=
 {
 	{
@@ -11868,7 +11892,7 @@ static struct hs_function_definition_with_1_parameter const game_set_assignment_
 	},
 };
 
-long const hs_function_table_count= 418 + 10;
+long const hs_function_table_count= 418 + 11;
 
 struct hs_enum_definition const hs_enum_table[]=
 {
@@ -12309,6 +12333,7 @@ struct hs_function_table_storage hs_function_table=
 		&debug_structure_culling_definition.definition, /* port: local culling debug view */
 		&player_set_magic_definition.definition, /* port: the Shadowrun prototype's */
 		&player_change_magic_definition.definition,
+		&player_change_tech_definition.definition,
 		&game_set_assignment_scheme_definition.definition,
 	},
 	{
@@ -12824,6 +12849,7 @@ static boolean const hs_function_allowed_in_maps[]=
 	/* port: the Shadowrun prototype's, for its maps */
 	TRUE, /* player_set_magic */
 	TRUE, /* player_change_magic */
+	TRUE, /* player_change_tech */
 	TRUE, /* game_set_assignment_scheme */
 };
 typedef char verify_hs_function_allowed_in_maps_size[

@@ -171,4 +171,16 @@ void shadowrun_players_change_magic(
 void shadowrun_game_set_assignment_scheme(
 	short scheme);
 
+/* port: the techs the players have, for the console's shadowrun_tech (a
+map's tech tags have nothing that grants one: docs/shadowrun_caches.md,
+"Tech"): FALSE if the map has no tag of the group the tech is of, or the
+players' units are not on a Shadowrun map. The index is the map's tag */
+boolean shadowrun_players_grant_tech(
+	short tech,
+	long tag_index);
+/* ... and the techs they have, in the console's form */
+void shadowrun_players_techs(
+	char *text,
+	unsigned long size);
+
 #endif

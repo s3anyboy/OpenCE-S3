@@ -28,6 +28,7 @@ each function names the one it is (its address in the executable).
 #include "units/biped_definitions.h"
 #include "units/units.h"
 #include "shadowrun_units.h"
+#include "shadowrun_tech.h"
 
 #include <string.h>
 
@@ -789,6 +790,14 @@ void shadowrun_unit_update(
 					shadowrun_spell_cast(unit_index, (short)(shadowrun_unit->current_spell - 1));
 				}
 			}
+			/* port: a player's left bumper uses its tech (the crouch control,
+			which on these maps does not crouch: port/linux/game/shadowrun_tech.c) */
+			if (unit->unit.player_index != NONE &&
+				TEST_FLAG(unit->unit.control_flags, _unit_control_crouch_modifier_bit))
+			{
+				SET_FLAG(unit->unit.control_flags, _unit_control_crouch_modifier_bit, FALSE);
+				shadowrun_tech_cast(unit_index);
+			}
 			shadowrun_unit->teleported = FALSE;
 			shadowrun_spells_update(unit_index);
 			shadowrun_unit_head_update(unit_index);
@@ -874,6 +883,8 @@ void shadowrun_player_spawned(
 
 		shadowrun_buy_menu_player_spawned(player_index);
 		shadowrun_unit_set_race(player->unit_index, shadowrun_player->race_index);
+		/* port: the tech the player knows (shadowrun_tech.c) */
+		shadowrun_unit_set_tech(player->unit_index, (short)shadowrun_player->known_tech);
 		for (power = 0; power < MAXIMUM_SHADOWRUN_POWERS; power++)
 		{
 			if (shadowrun_player->known_powers[power] != 0)
@@ -934,6 +945,7 @@ void shadowrun_unit_died(
 		shadowrun_spells_unit_died(unit_index);
 		shadowrun_unit_delete_head(unit_index);
 		shadowrun_spirit_animal_died(unit_index);
+		shadowrun_unit_tech_died(unit_index);
 	}
 
 	return;
@@ -947,6 +959,7 @@ void shadowrun_unit_delete(
 
 	if (shadowrun_unit)
 	{
+		shadowrun_unit_tech_delete(unit_index);
 		shadowrun_unit_delete_head(unit_index);
 		if (shadowrun_unit->resurrection_ball_index != NONE)
 		{

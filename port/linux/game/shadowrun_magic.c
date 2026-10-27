@@ -49,6 +49,7 @@ the mana for them, until they are.
 #include "items/projectile_definitions.h"
 #include "units/units.h"
 #include "shadowrun_units.h"
+#include "shadowrun_tech.h"
 
 /* ---------- constants */
 
@@ -546,6 +547,7 @@ void shadowrun_game_tick(
 	if (shadowrun_map_loaded())
 	{
 		shadowrun_magic_update();
+		shadowrun_tech_update();
 	}
 
 	return;
