@@ -232,6 +232,7 @@ symbols in this file:
 #include "sound/sound_definitions.h"
 #include "units/unit_definitions.h"
 #include "units/units.h"
+#include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
 
 #ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 #include "bitmaps/bitmap_group.h"
@@ -1759,6 +1760,18 @@ static void weapon_magazine_start_reload(
 
 				magazine->state = _magazine_reloading;
 				magazine->original_time = magazine->state_timer = weapon_get_first_person_animation_time(weapon_index, 0, _first_person_weapon_animation_reload_while_empty, reload_type);
+				/* port: the Shadowrun prototype's reflexes reload faster
+				(port/linux/game/shadowrun_tech.c) */
+				{
+					long holder_index = object_get_ultimate_parent(weapon->object.owner_object_index);
+					real scale = shadowrun_reflexes_reload_scale(holder_index);
+
+					if (scale < 1.f && magazine->state_timer > 1)
+					{
+						magazine->original_time = magazine->state_timer =
+							(short)MAX(1, (long)(magazine->state_timer * scale));
+					}
+				}
 			}
 
 			weapon->weapon.flags &= ~FLAG(3);

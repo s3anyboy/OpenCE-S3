@@ -230,6 +230,7 @@ symbols in this file:
 #include "main/console.h"
 #include "memory/data.h"
 #include "objects/damage.h"
+#include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
 #include "physics/collision_usage.h"
 #include "physics/collisions.h"
 #include "saved games/game_state.h"
@@ -643,6 +644,13 @@ boolean ai_adjust_damage(
 		if (actor->external_orders.playfighting)
 		{
 			*damage = *damage * 0.3f;
+			adjusted = TRUE;
+		}
+		/* port: the Shadowrun prototype's hologram, which hurts no one
+		(port/linux/game/shadowrun_tech.c) */
+		if (shadowrun_hologram_active(actor_index))
+		{
+			*damage = 0.0f;
 			adjusted = TRUE;
 		}
 	}

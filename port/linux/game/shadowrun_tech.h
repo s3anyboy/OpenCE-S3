@@ -28,6 +28,7 @@ enum
 {
 	/* the techs, as FUN_0027d4e0 numbers them (globals.hsc's tech_vision and
 the rest) */
+	_shadowrun_tech_reflexes_id = 0,
 	_shadowrun_tech_vision_id = 1,
 	_shadowrun_tech_smartlink_id = 2,
 	_shadowrun_tech_gecko_id = 4,
@@ -54,10 +55,42 @@ definitions it keeps the flag on at once */
 	SHADOWRUN_HOLOGRAM_ORIGIN_OFFSET = 1,
 	SHADOWRUN_HOLOGRAM_RANGE = 200,
 	SHADOWRUN_HOLOGRAM_TICKS = 30 * 30,
+	/* and the wait before the next may be made (ticks) */
+	SHADOWRUN_HOLOGRAM_COOLDOWN_TICKS = 30 * 10,
 
 	/* the holograms standing at once (all the units') */
 	MAXIMUM_SHADOWRUN_HOLOGRAMS = 8,
+
+	/* grapple: how far before the caster its aim starts, how far it reaches
+	(world units: a metre is ten: 30 m), and how long the pull lasts (ticks) */
+	SHADOWRUN_GRAPPLE_ORIGIN_OFFSET = 1,
+	SHADOWRUN_GRAPPLE_RANGE = 300,
+	SHADOWRUN_GRAPPLE_PULL_TICKS = 15,
+	/* and the wait before the next (ticks: 5 s) */
+	SHADOWRUN_GRAPPLE_COOLDOWN_TICKS = 5 * 30,
 };
+
+/* port: the map's grapple projectile (its name without the group's extension) */
+#define SHADOWRUN_GRAPPLE_PROJECTILE "shadowrunstuff\\grapple\\grapple"
+
+/* port: reflexes: how long it lasts (10 s), and what it does meanwhile: the
+unit moves and reloads faster, and jumps a little higher */
+#define SHADOWRUN_REFLEXES_TICKS (30 * 10)
+#define SHADOWRUN_REFLEXES_MOVEMENT_SCALE 1.6f
+#define SHADOWRUN_REFLEXES_RELOAD_SCALE 0.6f
+#define SHADOWRUN_REFLEXES_JUMP_SCALE 1.3f
+
+/* port: the glider: the scenery it wears on its back, how high its jump goes
+(1 for neither), how long it glides (ticks) and how its fall slows while it
+does (a step of its velocity a tick toward this) */
+#define SHADOWRUN_GLIDER_SCENERY "shadowrunstuff\\glider\\glider"
+/* (the scenery group's: this file's headers declare no SCENERY_DEFINITION_TAG) */
+#define SHADOWRUN_SCENERY_TAG 'scen'
+#define SHADOWRUN_GLIDER_JUMP_SCALE 1.6f
+#define SHADOWRUN_GLIDER_TICKS (30 * 3)
+#define SHADOWRUN_GLIDER_FALL_SPEED 1.f
+/* how long it is worn (ticks: 15 min, until another tech takes its place) */
+#define SHADOWRUN_GLIDER_WEAR_TICKS (30 * 60 * 15)
 
 /* ---------- prototypes/SHADOWRUN_TECH.C */
 
@@ -75,6 +108,49 @@ long shadowrun_hologram_variant(
 long shadowrun_hologram_place(
 	long unit_index,
 	real_point3d const *position);
+/* whether the actor is a hologram's: its attacks do no damage (ai.c) */
+boolean shadowrun_hologram_active(
+	long actor_index);
+
+/* port: the map's grapple projectile (shadowrunstuff\grapple\grapple), or
+NONE; grapple fires it (shadowrun_tech.c), and where it lands the caster is
+pulled to it (shadowrun_magic.c) */
+long shadowrun_grapple_projectile(
+	void);
+long shadowrun_grapple_fire(
+	long unit_index,
+	long projectile_definition_index);
+/* whether the projectile is a grapple's */
+boolean shadowrun_grapple_projectile_is(
+	long projectile_index);
+/* port: whether the unit wears the glider (shadowrun_tech.c), how much its
+jump is scaled (bipeds.c), and its glide, each tick of a unit */
+boolean shadowrun_glider_worn(
+	long unit_index);
+real shadowrun_glider_jump_scale(
+	long unit_index);
+void shadowrun_glider_update(
+	long unit_index);
+
+/* port: whether the unit's reflexes run (shadowrun_tech.c): its jump is
+scaled (bipeds.c), its movement (shadowrun_races.c) and its reload
+(weapons.c) */
+boolean shadowrun_reflexes_active(
+	long unit_index);
+real shadowrun_reflexes_jump_scale(
+	long unit_index);
+real shadowrun_reflexes_movement_scale(
+	long unit_index);
+real shadowrun_reflexes_reload_scale(
+	long unit_index);
+
+/* its caster, pulled to `position` over the pull's ticks, which this moves
+it through */
+void shadowrun_grapple_pull(
+	long projectile_index,
+	real_point3d const *position);
+void shadowrun_grapple_update(
+	long unit_index);
 
 /* the techs' place on the HUD (shadowrun_tech.c): what vision marks */
 void shadowrun_tech_initialize(

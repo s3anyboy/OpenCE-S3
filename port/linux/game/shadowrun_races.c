@@ -37,6 +37,7 @@ weapon's srwd, else its srud's), scaled by its rage.
 #include "objects/objects.h"
 #include "units/units.h"
 #include "shadowrun_units.h"
+#include "shadowrun_tech.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -206,6 +207,14 @@ void shadowrun_biped_movement_scales(
 		{
 			*acceleration_scale = race->acceleration_scale;
 		}
+	}
+	/* port: the Shadowrun prototype's reflexes, which move the unit faster
+	(port/linux/game/shadowrun_tech.c) */
+	{
+		real reflexes = shadowrun_reflexes_movement_scale(biped_index);
+
+		*movement_scale *= reflexes;
+		*acceleration_scale *= reflexes;
 	}
 
 	return;

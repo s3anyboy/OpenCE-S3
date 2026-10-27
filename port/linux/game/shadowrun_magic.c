@@ -49,7 +49,7 @@ the mana for them, until they are.
 #include "items/projectile_definitions.h"
 #include "units/units.h"
 #include "shadowrun_units.h"
-#include "shadowrun_tech.h"
+#include "shadowrun_tech.h" /* port: the techs, and grapple's pull */
 
 /* ---------- constants */
 
@@ -446,6 +446,12 @@ void shadowrun_projectile_detonated(
 		{
 			flags = shadowrun_spell_projectiles.flags[index];
 		}
+	}
+	/* port: a grapple's projectile pulls its caster to where it landed
+	(tech, port/linux/game/shadowrun_tech.c) */
+	if (shadowrun_grapple_projectile_is(projectile_index))
+	{
+		shadowrun_grapple_pull(projectile_index, position);
 	}
 	/* (the executable gives one without an owner a local player's unit, and
 	waits for one: here it has none) */
@@ -2127,6 +2133,10 @@ long shadowrun_hologram_place(
 	{
 		struct unit_datum *hologram = unit_get(actor->meta.unit_index);
 		struct player_datum *player = player_try_and_get(caster->unit.player_index);
+
+		/* port: a hologram plays at fighting, and its attacks do no damage
+		(ai_adjust_damage, shadowrun_hologram_active) */
+		actor->external_orders.playfighting = TRUE;
 
 		/* (a hologram is the caster's: its side, as a summon's is its caster's) */
 		if (player)

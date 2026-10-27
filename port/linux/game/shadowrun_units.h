@@ -96,6 +96,12 @@ definition (0x10F0) */
 	(-1 for none), the units it marked and how many (shadowrun_tech.c) */
 	long tech;
 	long tech_ticks;
+	/* grapple's pull: from where it started and to where it goes, the ticks
+	left and all it takes (shadowrun_tech.c) */
+	real_point3d grapple_origin;
+	real_point3d grapple_target;
+	long grapple_ticks;
+	long grapple_pull_ticks;
 	long vision_nav_index;
 	long vision_targets[MAXIMUM_SHADOWRUN_VISION_TARGETS];
 	short vision_target_count;

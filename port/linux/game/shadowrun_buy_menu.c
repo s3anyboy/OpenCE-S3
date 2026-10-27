@@ -50,7 +50,7 @@ enum
 {
 	/* the menu's items, its pages, and the most it lists of a page (29 with
 	port: gecko, the executable's menu does not list) */
-	NUMBER_OF_SHADOWRUN_SHOP_ITEMS = 29,
+	NUMBER_OF_SHADOWRUN_SHOP_ITEMS = 30,
 	_shadowrun_shop_page_main = 0,
 	_shadowrun_shop_page_tech,
 	_shadowrun_shop_page_magic,
@@ -188,8 +188,10 @@ static struct shadowrun_shop_item const shadowrun_shop_items[NUMBER_OF_SHADOWRUN
 	{ 24, _shadowrun_shop_page_tech, "Hologram", 30, 35 },
 	{ 27, _shadowrun_shop_page_tech, "Smartlink", 33, 38 },
 	{ 19, _shadowrun_shop_page_tech, "Enhanced Vision", 6, 25 },
-	/* port: the executable's menu does not list it, though its shop gives it */
+	/* port: two the executable's menu does not list, though its shop gives
+	them (gecko, and reflexes, which its scripts number 8) */
 	{ 21, _shadowrun_shop_page_tech, "Gecko", 33, 38 },
+	{ 23, _shadowrun_shop_page_tech, "Reflexes", 33, 38 },
 };
 
 /* the spell each magic item teaches (by action, from the first magic's) */
@@ -214,7 +216,7 @@ static short const shadowrun_shop_techs[_shadowrun_shop_last_tech - _shadowrun_s
 	_shadowrun_tech_glider_id, /* 20: Glider */
 	_shadowrun_tech_gecko_id, /* 21: Gecko */
 	_shadowrun_tech_grapple_id, /* 22: Grapple */
-	NONE, /* 23 */
+	_shadowrun_tech_reflexes_id, /* 23: Reflexes */
 	_shadowrun_tech_hologram_id, /* 24: Hologram */
 	NONE, /* 25 */
 	NONE, /* 26 */

@@ -276,6 +276,7 @@ symbols in this file:
 #include "structures/structure_bsp_definitions.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "shadowrun.h" /* port: port/linux/game/shadowrun_races.c */
+#include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
 
 /* port: port/linux/game/network_objects.c's (a client deletes the host's
 objects on the host's word alone) */
@@ -1872,6 +1873,10 @@ static boolean biped_jump(
 		}
 		if (cheat.super_jump && biped->unit.player_index!=NONE)
 			jump_magnitude *= 4.f;
+		/* port: the Shadowrun prototype's techs, the glider worn on the back
+		and reflexes, jump higher (port/linux/game/shadowrun_tech.c) */
+		jump_magnitude *= shadowrun_glider_jump_scale(biped_index);
+		jump_magnitude *= shadowrun_reflexes_jump_scale(biped_index);
 
 		jump_velocity = biped->object.translational_velocity;
 		{
