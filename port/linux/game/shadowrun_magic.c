@@ -2456,7 +2456,9 @@ static void shadowrun_summon_cast(
 
 	if (living > 0)
 	{
-		/* dismissed */
+		/* port: one at a time, as the Hologram: cast again and the one there
+		is dismissed, then the new one summoned in its place (the executable
+		kept up to five, and cast again to dismiss them all) */
 		ai_handle_unit_effect(unit_index, 1, shadowrun_ai_volume(magic->summon_ai_unit_effect));
 		for (index = 0; index < MAXIMUM_SHADOWRUN_SUMMONS; index++)
 		{
@@ -2467,12 +2469,12 @@ static void shadowrun_summon_cast(
 				actor_kill(actor_index, TRUE, FALSE);
 				shadowrun_unit_release_capacity(unit_index, capacity_reserved);
 				shadowrun_unit->summoned_actor_indices[index] = NONE;
-				shadowrun_unit->cast_cooldown_ticks = magic->summon_cooldown_ticks;
 			}
 		}
-		shadowrun_unit_cast_failed_sound(unit_index);
+		/* (the cast goes on to summon the new one) */
+		living = 0;
 	}
-	else if (shadowrun_unit->power_cooldown_ticks[_shadowrun_spell_summon_elemental] == 0)
+	if (living == 0 && shadowrun_unit->power_cooldown_ticks[_shadowrun_spell_summon_elemental] == 0)
 	{
 		struct collision_result collision;
 		real_point3d target;

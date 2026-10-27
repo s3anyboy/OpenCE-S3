@@ -229,6 +229,8 @@ void shadowrun_unit_new(
 		}
 		shadowrun_unit->master_player_index = NONE;
 		shadowrun_unit->master_unit_index = NONE;
+		/* port: the Hologram's actor (zero is a datum index, so this must be set) */
+		shadowrun_unit->hologram_actor_index = NONE;
 		for (index = 0; index < MAXIMUM_SHADOWRUN_SUMMONS; index++)
 		{
 			shadowrun_unit->summoned_actor_indices[index] = NONE;

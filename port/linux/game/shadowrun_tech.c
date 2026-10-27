@@ -20,6 +20,7 @@ prototype's executable, not in its tags.
 
 #include "cseries.h"
 #include "ai/actor_placement.h"
+#include "ai/actors.h"
 #include "ai/ai_scenario_definitions.h"
 #include "game/players.h"
 #include "interface/hud.h"
@@ -57,6 +58,8 @@ enum
 /* how far the Hologram is placed: 5 m, in world units (see
 SHADOWRUN_VISION_RADIUS for the scale) */
 #define SHADOWRUN_HOLOGRAM_RANGE (5.f * 3.057f)
+/* how long before a Hologram can be placed again (ticks: two seconds) */
+#define SHADOWRUN_HOLOGRAM_COOLDOWN_TICKS (2 * TICKS_PER_SECOND)
 /* the actor variant a Hologram is, by the name its tag has in the map */
 #define SHADOWRUN_HOLOGRAM_VARIANT "characters\\hologram\\hologram assault rifle"
 
@@ -94,6 +97,7 @@ static void shadowrun_tech_place_hologram(
 	long unit_index)
 {
 	struct object_datum *caster = object_try_and_get(unit_index);
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 	struct collision_result collision;
 	struct actor_starting_location location;
 	real_point3d origin;
@@ -101,10 +105,10 @@ static void shadowrun_tech_place_hologram(
 	real_vector3d reach;
 	real distance;
 	long variant_index;
-	long placed_unit;
+	long actor_index;
 
 	variant_index = tag_loaded('actv', SHADOWRUN_HOLOGRAM_VARIANT);
-	if (!caster || variant_index == NONE)
+	if (!caster || !shadowrun_unit || variant_index == NONE)
 	{
 		return;
 	}
@@ -129,10 +133,23 @@ static void shadowrun_tech_place_hologram(
 	location.initial_state = NONE;
 	location.actor_variant_index = (short)variant_index;
 	location.command_list_index = NONE;
-	placed_unit = actor_place(variant_index, NONE, NONE, &location, FALSE, 0);
-	if (placed_unit != NONE)
+	/* (the previous one goes, so there is never more than one) */
+	if (shadowrun_unit->hologram_actor_index != NONE &&
+		actor_try_and_get(shadowrun_unit->hologram_actor_index))
 	{
-		struct object_datum *hologram = object_try_and_get(placed_unit);
+		actor_kill(shadowrun_unit->hologram_actor_index, TRUE, FALSE);
+	}
+	shadowrun_unit->hologram_actor_index = NONE;
+	actor_index = actor_place(variant_index, NONE, NONE, &location, FALSE, 0);
+	if (actor_index == NONE)
+	{
+		return;
+	}
+	shadowrun_unit->hologram_actor_index = actor_index;
+	{
+		struct actor_datum *actor = actor_try_and_get(actor_index);
+		struct object_datum *hologram = actor && actor->meta.unit_index != NONE ?
+			object_try_and_get(actor->meta.unit_index) : NULL;
 
 		if (hologram)
 		{
@@ -145,11 +162,20 @@ static void shadowrun_tech_place_hologram(
 void shadowrun_tech_use(
 	long unit_index)
 {
-	/* (the Hologram is used here; Enhanced Vision draws each tick, see
-	shadowrun_tech_render_nav_points) */
-	if (shadowrun_tech_has(unit_index, SHADOWRUN_TECH_HOLOGRAM))
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	short power = shadowrun_tech_power(SHADOWRUN_TECH_HOLOGRAM);
+
+	/* (the control is read every tick it is held, so the power's own cooldown
+	keeps one use from placing a hologram each tick: shadowrun_units.c counts
+	it down) */
+	if (!shadowrun_unit || power == NONE || shadowrun_unit->power_cooldown_ticks[power] > 0)
+	{
+		return;
+	}
+	if (shadowrun_unit->known_powers[power] > 0)
 	{
 		shadowrun_tech_place_hologram(unit_index);
+		shadowrun_unit->power_cooldown_ticks[power] = SHADOWRUN_HOLOGRAM_COOLDOWN_TICKS;
 	}
 }
 
