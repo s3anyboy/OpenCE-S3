@@ -21,6 +21,7 @@ the mana for them, until they are.
 #include "ai/ai_script.h"
 #include "ai/encounters.h"
 #include "cache/cache_files.h"
+#include "tag_files/tag_files.h"
 #include "effects/effects.h"
 #include "game/game.h"
 #include "game/game_engine.h"
@@ -119,6 +120,8 @@ docs/shadowrun_caches.md), on any map that has it; else the map's first
 variant of a name starting so */
 #define SHADOWRUN_SUMMONED_ACTOR_VARIANT "levels\\test\\hangemhigh\\elite commander energy sword.actor_variant"
 #define SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX "elite commander"
+/* (the actor variant group's: ACTOR_VARIANT_DEFINITION_TAG) */
+#define SHADOWRUN_ACTOR_VARIANT_TAG 'actv'
 
 /* the Shadowrun projectile flags, where this build's definitions have
 three of their own (cleared on the prototype's maps: its build had them not):
@@ -1980,43 +1983,25 @@ static void shadowrun_trees_update(
 	return;
 }
 
-/* cache_files.c's: the tag table a client joining a game in progress has not
-until the map arrives */
-extern struct cache_file_tag_instance *global_tag_instances;
-extern long global_tag_count;
-void tag_iterator_new(struct tag_iterator *iterator, long group_tag);
-long tag_iterator_next(struct tag_iterator *iterator);
-
 /* port: the map's actor variant Summon Elemental summons, the elite commander
-with the energy sword: the map's tags are walked for that name, else for the
-first whose name starts as its does, to no case. NONE if the map has neither
-(the spell then summons the definition's encounter's actor, as it did). A
-client joining a game in progress has no tag table until the map arrives */
+with the energy sword: its tag, else the map's first of a name starting as
+that one does (the map's tags are walked for that: a tag_loaded takes an
+exact name). NONE if the map has neither, and the spell summons the
+definition's encounter's actor as it did */
 static long shadowrun_summon_elemental_variant(
 	void)
 {
-	long variant = NONE;
 	struct tag_iterator iterator;
-	long index;
+	long variant = tag_loaded(SHADOWRUN_ACTOR_VARIANT_TAG, SHADOWRUN_SUMMONED_ACTOR_VARIANT);
+	long tag_index;
 
-	if (!global_tag_instances || !global_tag_count)
+	tag_iterator_new(&iterator, SHADOWRUN_ACTOR_VARIANT_TAG);
+	while (variant == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
-		return NONE;
-	}
-	tag_iterator_new(&iterator, ACTOR_VARIANT_DEFINITION_TAG);
-	while ((index = tag_iterator_next(&iterator)) != NONE)
-	{
-		char const *name = tag_get_name(index);
-
-		if (!_stricmp(name, SHADOWRUN_SUMMONED_ACTOR_VARIANT))
-		{
-			variant = index;
-			break;
-		}
-		if (variant == NONE && !strncmp(name, SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX,
+		if (!strncmp(tag_get_name(tag_index), SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX,
 			strlen(SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX)))
 		{
-			variant = index;
+			variant = tag_index;
 		}
 	}
 
