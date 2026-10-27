@@ -432,16 +432,22 @@ struct shadowrun_weapon_data_race
 };
 
 /* srwd: Shadowrun's weapon data, which a weapon names (and a unit's srud, for
-when it has none of its own): what each race's movement is with it (0x600
-bytes, its races' blocks after it) */
+when it has none of its own): whether it fires, and what each race's movement
+is with it (0x600 bytes, its races' blocks after it) */
 struct shadowrun_weapon_data
 {
-	byte unused0[0x500];
+	byte unused0[0xFC];
+	/* 1 for every weapon that fires (the assault rifle, the shotgun, the
+	rifle), 0 for the ones that do not (the katana, the ninja's katana, the
+	razorclaws, the default data): read from missionlet's 23 srwd tags, the
+	only head field that tells a melee weapon from a gun there */
+	boolean fires;
+	byte unused1[0x500 - 0xFC - 1];
 	struct tag_block races;
 	/* the data a smartlinked unit uses instead (Shadowrun's tech: not
 	played, so it is not chosen) */
 	struct tag_reference smartlinked;
-	byte unused1[0xE4];
+	byte unused2[0xE4];
 };
 
 /* buym: the buy menu's sounds, and the sound of a spell that fails (0x7D0
@@ -596,6 +602,7 @@ typedef char shadowrun_weapon_data_race_size_assert[sizeof(struct shadowrun_weap
 typedef char shadowrun_weapon_data_race_movement_assert[
 	offsetof(struct shadowrun_weapon_data_race, movement_scale) == 0x100 ? 1 : -1];
 typedef char shadowrun_weapon_data_size_assert[sizeof(struct shadowrun_weapon_data) == 0x600 ? 1 : -1];
+typedef char shadowrun_weapon_data_fires_assert[offsetof(struct shadowrun_weapon_data, fires) == 0xFC ? 1 : -1];
 typedef char shadowrun_weapon_data_races_assert[offsetof(struct shadowrun_weapon_data, races) == 0x500 ? 1 : -1];
 typedef char shadowrun_weapon_data_smartlinked_assert[
 	offsetof(struct shadowrun_weapon_data, smartlinked.index) == 0x518 ? 1 : -1];

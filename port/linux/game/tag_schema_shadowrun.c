@@ -178,6 +178,7 @@ static struct tag_schema_definition const shadowrun_weapon_data_race_schema =
 
 static struct tag_schema_field const shadowrun_weapon_data_fields[] =
 {
+	TAG_SCHEMA_ENUM(struct shadowrun_weapon_data, fires, 2, 0),
 	TAG_SCHEMA_BLOCK(struct shadowrun_weapon_data, races, shadowrun_weapon_data_race_schema, MAXIMUM_SHADOWRUN_RACES),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_weapon_data, smartlinked, TAG_SCHEMA_GROUPS(SHADOWRUN_WEAPON_DATA_TAG)),
 	TAG_SCHEMA_END

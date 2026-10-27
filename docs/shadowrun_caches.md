@@ -256,8 +256,9 @@ This build runs the prototype's maps on Halo's game code; of Shadowrun's own
 systems these are not there:
 
 - tech (the `t?ed` tags), anti-magic and essence;
-- Shadowrun's weapons as Shadowrun defined them (`srwd`): but for each
-  race's speed with them, they play as Halo's do from their Halo tags;
+- Shadowrun's weapons as Shadowrun defined them (`srwd`): but for whether one
+  fires and each race's speed with it, they play as Halo's do from their Halo
+  tags;
 - Shadowrun's AI behaviours for its new actor types (they play as the types
   above), its extra AI state, and the actors' spells (the elf mage's and the
   ninja's teleport);
