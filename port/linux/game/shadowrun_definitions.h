@@ -31,6 +31,7 @@ enum
 	SHADOWRUN_MAGIC1_DEFINITION_TAG = 'm1ed',
 	SHADOWRUN_MAGIC2_DEFINITION_TAG = 'm2ed',
 	SHADOWRUN_MAGIC3_DEFINITION_TAG = 'm3ed',
+	SHADOWRUN_TECH3_DEFINITION_TAG = 't3ed',
 	SHADOWRUN_BUY_MENU_DEFINITION_TAG = 'buym',
 	SHADOWRUN_WEAPON_DATA_TAG = 'srwd',
 
@@ -331,6 +332,52 @@ struct shadowrun_magic3_definition
 	byte unused6[0x428];
 };
 
+/* t3ed: anti-magic (0x1200 bytes). Its fields are the executable's offsets
+(units.c, FUN_0026EA00 reads 0x38C and 0x39C; FUN_0026FCA0's zone holds
+these), and their names follow the explorer's dumps of the map */
+struct shadowrun_tech3_definition
+{
+	byte unused0[0x380];
+	/* the scenery that stands for the zone, and the ball it fills with */
+	struct tag_reference antimagic_scenery;
+	struct tag_reference antimagic_ball_scenery;
+	/* what it does to those inside, and the effect */
+	struct tag_reference antimagic_damage;
+	struct tag_reference antimagic_effect;
+	/* how many it is (0x3C0), how long it stands in ticks (0x3C4, times each
+	race's level), its starting radius, how it drifts and grows, and how far
+	it reaches */
+	long antimagic_count;
+	long antimagic_duration_ticks;
+	real antimagic_radius;
+	real antimagic_drift;
+	real antimagic_drift_scale;
+	real antimagic_grow;
+	real antimagic_grow_scale;
+	real antimagic_grow_scale2;
+	real antimagic_reach;
+	struct tag_reference antimagic_spirit_damage;
+	/* the levels (a spell's: the magic's, in the same place) */
+	struct tag_block antimagic_levels;
+	real antimagic_level_scale;
+	/* (0x3F4's block is 0xC: the levels, and the scale after them)
+	/* what it drains (essence; 0x404), its scale (0x414) */
+	struct tag_reference antimagic_drain_damage;
+	real antimagic_drain_scale;
+	/* the explosion it makes (0x418) */
+	struct tag_reference antimagic_explosion_effect;
+	/* what those inside it lose (their anti-magic: a grenade's, 0x428 and
+	0x438, with its scale at 0x448 and its ticks at 0x44C) */
+	struct tag_reference antimagic_lost_damage;
+	struct tag_reference antimagic_lost_effect;
+	real antimagic_lost_scale;
+	long antimagic_lost_ticks;
+	/* the electricity it plays (0x450), and its scale (0x460) */
+	struct tag_reference antimagic_electricity;
+	real antimagic_electricity_scale;
+	byte unused4[0x1200 - 0x464];
+};
+
 /* srud: a Shadowrun unit (0x600 bytes) */
 struct shadowrun_unit_definition
 {
@@ -573,6 +620,26 @@ typedef char shadowrun_magic3_smoke_levels_assert[
 	offsetof(struct shadowrun_magic3_definition, smoke_levels) == 0x2C8 ? 1 : -1];
 typedef char shadowrun_magic3_smoke_ai_assert[
 	offsetof(struct shadowrun_magic3_definition, smoke_ai_unit_effect) == 0x2D4 ? 1 : -1];
+
+typedef char shadowrun_tech3_size_assert[sizeof(struct shadowrun_tech3_definition) == 0x1200 ? 1 : -1];
+typedef char shadowrun_tech3_scenery_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_scenery) == 0x380 ? 1 : -1];
+typedef char shadowrun_tech3_count_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_count) == 0x3C0 ? 1 : -1];
+typedef char shadowrun_tech3_radius_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_radius) == 0x3C8 ? 1 : -1];
+typedef char shadowrun_tech3_reach_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_reach) == 0x3E0 ? 1 : -1];
+typedef char shadowrun_tech3_levels_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_levels) == 0x3F4 ? 1 : -1];
+typedef char shadowrun_tech3_drain_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_drain_damage) == 0x404 ? 1 : -1];
+typedef char shadowrun_tech3_explosion_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_explosion_effect) == 0x418 ? 1 : -1];
+typedef char shadowrun_tech3_lost_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_lost_damage) == 0x428 ? 1 : -1];
+typedef char shadowrun_tech3_electricity_assert[
+	offsetof(struct shadowrun_tech3_definition, antimagic_electricity) == 0x450 ? 1 : -1];
 
 typedef char shadowrun_unit_size_assert[sizeof(struct shadowrun_unit_definition) == 0x600 ? 1 : -1];
 typedef char shadowrun_unit_magic1_assert[

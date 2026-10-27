@@ -165,13 +165,16 @@ static struct shadowrun_shop_item const shadowrun_shop_items[NUMBER_OF_SHADOWRUN
 	{ _shadowrun_shop_open_magic, _shadowrun_shop_page_main, "Magic", NONE, NONE },
 	{ _shadowrun_shop_open_gift, _shadowrun_shop_page_main, "Gift", NONE, NONE },
 	{ _shadowrun_shop_done, _shadowrun_shop_page_main, "Done", NONE, NONE },
-	{ 14, _shadowrun_shop_page_magic, "Smoke", 17, NONE },
-	{ 15, _shadowrun_shop_page_magic, "Gust", 16, NONE },
-	{ 16, _shadowrun_shop_page_magic, "Resurrection", 39, NONE },
-	{ 13, _shadowrun_shop_page_magic, "Strangle", 4, NONE },
-	{ 10, _shadowrun_shop_page_magic, "Teleport", 1, NONE },
-	{ 11, _shadowrun_shop_page_magic, "Tree of Life", 2, NONE },
-	{ 12, _shadowrun_shop_page_magic, "Summon Elemental", 3, NONE },
+	/* port: a spell the player has may be removed for what it cost (the
+	executable's menu only removed tech; missionlet's prices are empty,
+	which shadowrun_shop_price reads as 0) */
+	{ 14, _shadowrun_shop_page_magic, "Smoke", 17, 17 },
+	{ 15, _shadowrun_shop_page_magic, "Gust", 16, 16 },
+	{ 16, _shadowrun_shop_page_magic, "Resurrection", 39, 39 },
+	{ 13, _shadowrun_shop_page_magic, "Strangle", 4, 4 },
+	{ 10, _shadowrun_shop_page_magic, "Teleport", 1, 1 },
+	{ 11, _shadowrun_shop_page_magic, "Tree of Life", 2, 2 },
+	{ 12, _shadowrun_shop_page_magic, "Summon Elemental", 3, 3 },
 	{ 28, _shadowrun_shop_page_weapons, "Assault Rifle", 11, NONE },
 	{ 32, _shadowrun_shop_page_weapons, "Flechette Pistol", 10, NONE },
 	{ _shadowrun_shop_razorclaws, _shadowrun_shop_page_weapons, "Razorclaws", 5, NONE },
@@ -907,7 +910,22 @@ static void shadowrun_shop_buy(
 
 			if (shadowrun_shop_owned(unit_index, definition, state->selection))
 			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_known);
+				/* port: had: the removal's price forgets it (as a tech's takes it
+				off), so the player may buy another in its place */
+				long removal_price = shadowrun_shop_price(definition,
+					shadowrun_shop_items[state->selection].removal_price_index);
+
+				if (shadowrun_player->money < removal_price)
+				{
+					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_afford);
+				}
+				else
+				{
+					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_known);
+					shadowrun_unit_forget_power(unit_index, spell);
+					shadowrun_player->money -= removal_price;
+					state->purchase_time = game_time_get();
+				}
 			}
 			else
 			{

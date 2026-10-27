@@ -462,6 +462,12 @@ void shadowrun_projectile_detonated(
 
 		if (owner && biped_try_and_get(projectile->object.owner_object_index))
 		{
+			/* port: the anti-magic grenade makes its zone where it detonates, on
+			the thrower's side (port/linux/game/shadowrun_tech.c) */
+			if (flags & SHADOWRUN_PROJECTILE_ANTI_MAGIC_FLAG)
+			{
+				shadowrun_antimagic_zone(projectile->object.owner_object_index, position);
+			}
 			if (flags & SHADOWRUN_PROJECTILE_TREE_OF_LIFE_FLAG)
 			{
 				owner->cast_cooldown_ticks = 0;
@@ -631,6 +637,13 @@ boolean shadowrun_spell_castable(
 
 	if (!shadowrun_unit || spell < 0 || spell >= NUMBER_OF_SHADOWRUN_SPELLS)
 	{
+		return FALSE;
+	}
+	/* port: no spell is cast inside an enemy's anti-magic
+	(port/linux/game/shadowrun_tech.c) */
+	if (shadowrun_spells_blocked(unit_index))
+	{
+		shadowrun_unit->spell_failed[spell] = TRUE;
 		return FALSE;
 	}
 	shadowrun_spell_get(unit_index, spell, &mana_cost, NULL, &capacity_reserved, NULL, NULL);

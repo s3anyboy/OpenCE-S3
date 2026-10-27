@@ -1513,11 +1513,20 @@ static void get_local_player_input_blob(
 						_unit_control_integrated_light_bit,
 						effective_buttons[_button_switch_grenade] == TRUE);
 					/* (the d-pad's right chooses once a press, as the menus' keys
-					take a key: a repeat would run through the spells) */
-					SET_FLAG(
-						input->player_control_flags,
-						_player_control_rotate_grenades_bit,
-						halo_linux_gamepad_dpad_pressed(dpad) & HALO_LINUX_DPAD_RIGHT);
+					take a key: a repeat would run through the spells; its left is
+					the same press, so both are asked once) */
+					{
+						int dpad_pressed = halo_linux_gamepad_dpad_pressed(dpad);
+
+						SET_FLAG(
+							input->player_control_flags,
+							_player_control_rotate_grenades_bit,
+							dpad_pressed & HALO_LINUX_DPAD_RIGHT);
+						SET_FLAG(
+							input->unit_control_flags,
+							UNIT_CONTROL_PORT_SWITCH_TECH_BIT,
+							dpad_pressed & HALO_LINUX_DPAD_LEFT);
+					}
 					/* port: the left bumper (the flashlight control) uses the player's
 					tech, which its unit's update takes (shadowrun_units.c,
 					shadowrun_tech.c) */
@@ -1526,11 +1535,7 @@ static void get_local_player_input_blob(
 						UNIT_CONTROL_PORT_TECH_BIT,
 						effective_buttons[_button_flashlight] == TRUE);
 					/* port: the d-pad's left goes to the next tech the player has
-					bought (a press once, as its right's cycle of the spells) */
-					SET_FLAG(
-						input->unit_control_flags,
-						UNIT_CONTROL_PORT_SWITCH_TECH_BIT,
-						halo_linux_gamepad_dpad_pressed(dpad) & HALO_LINUX_DPAD_LEFT);
+					bought, above, with its right's cycle of the spells */
 					/* the Back control opens Shadowrun's buy menu; while it is
 					open the stick (or the d-pad) and the jump, melee and action
 					controls work it, and the player does nothing else */

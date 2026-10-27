@@ -172,7 +172,9 @@ void shadowrun_hud_draw(
 	}
 	else
 	{
-		snprintf(text, sizeof(text), "Grenade");
+		/* port: no spell chosen shows nothing (the grenades are not one of the
+		spells the control chooses) */
+		text[0] = 0;
 	}
 	if (shadowrun_hud_failure_times[local_player_index] != NONE &&
 		game_time_get() - shadowrun_hud_failure_times[local_player_index] < SHADOWRUN_HUD_FAILURE_TICKS &&

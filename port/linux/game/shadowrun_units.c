@@ -976,6 +976,52 @@ boolean shadowrun_unit_learn_power(
 	return result;
 }
 
+/* port: the unit forgets the power (a spell the buy menu takes back); its
+player forgets it too, and if it was the one chosen, the first it knows is */
+boolean shadowrun_unit_forget_power(
+	long unit_index,
+	short power)
+{
+	struct unit_datum *unit = unit_try_and_get(unit_index);
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	boolean result = FALSE;
+
+	if (unit && shadowrun_unit && power >= 0 && power < MAXIMUM_SHADOWRUN_POWERS &&
+		shadowrun_unit->known_powers[power] != 0)
+	{
+		struct shadowrun_player *shadowrun_player = shadowrun_player_get(unit->unit.player_index);
+
+		shadowrun_unit->known_powers[power] = 0;
+		if (shadowrun_unit->known_power_count > 0)
+		{
+			shadowrun_unit->known_power_count--;
+		}
+		if (shadowrun_player)
+		{
+			shadowrun_player->known_powers[power] = 0;
+		}
+		/* (the one it casts: the next it knows, or the grenades) */
+		if (shadowrun_unit->current_spell == power + 1)
+		{
+			short spell;
+
+			shadowrun_unit->current_spell = 0;
+			for (spell = 0; spell < NUMBER_OF_SHADOWRUN_SPELLS; spell++)
+			{
+				if (shadowrun_unit->known_powers[spell] != 0)
+				{
+					shadowrun_unit->current_spell = spell + 1;
+					break;
+				}
+			}
+			shadowrun_unit->desired_spell = shadowrun_unit->current_spell;
+		}
+		result = TRUE;
+	}
+
+	return result;
+}
+
 /* the unit died for good (unit_died): what its spells leave (0x27C350) */
 void shadowrun_unit_died(
 	long unit_index)
@@ -1053,37 +1099,20 @@ boolean shadowrun_unit_rotate_selection(
 		}
 		if (first_spell != NONE)
 		{
-			if (shadowrun_unit->current_spell != 0)
+			/* port: the spells alone go round, the grenades not being one of the
+			choices (they are thrown with their own control) */
+			if (shadowrun_unit->current_spell != 0 && next_spell != NONE)
 			{
-				/* the next spell, else the grenades (or the first spell, without
-				any) */
-				if (next_spell != NONE)
-				{
-					shadowrun_unit->current_spell = next_spell + 1;
-				}
-				else if (unit_inventory_next_grenade(unit_index, NONE, 1) != NONE)
-				{
-					shadowrun_unit->current_spell = 0;
-				}
-				else
-				{
-					shadowrun_unit->current_spell = first_spell + 1;
-				}
-				result = TRUE;
+				shadowrun_unit->current_spell = next_spell + 1;
 			}
 			else
 			{
-				short next_grenade = unit_inventory_next_grenade(unit_index, desired_grenade_index, 1);
-
-				/* the grenades rotate, until they come round */
-				if (desired_grenade_index == NONE || next_grenade == NONE || next_grenade <= desired_grenade_index)
-				{
-					shadowrun_unit->current_spell = first_spell + 1;
-					result = TRUE;
-				}
+				shadowrun_unit->current_spell = first_spell + 1;
 			}
 			shadowrun_unit->desired_spell = shadowrun_unit->current_spell;
+			result = TRUE;
 		}
+		(void)desired_grenade_index;
 	}
 
 	return result;

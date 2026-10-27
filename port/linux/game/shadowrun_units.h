@@ -344,6 +344,10 @@ void shadowrun_unit_set_race(
 player_change_tech's techs */
 short shadowrun_player_known_spell_count(
 	struct shadowrun_player *shadowrun_player);
+/* port: the unit forgets the power, its player too (the buy menu's removal) */
+boolean shadowrun_unit_forget_power(
+	long unit_index,
+	short power);
 
 /* the unit learns the power (a spell, or tech): FALSE if it knew it, or the
 player already has its two (shadowrun_units.c) */

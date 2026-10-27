@@ -17,8 +17,10 @@ marked with the port's navpoints.
 #include "cseries.h"
 #include "cseries/errors.h"
 #include "ai/actors.h"
+#include "cache/cache_files.h" /* port: the tag iterator (the techs' tags) */
 #include "tag_files/tag_files.h"
 #include "items/projectile_definitions.h"
+#include "objects/damage.h"
 #include "objects/object_definitions.h"
 #include "math/real_math.h"
 #include "game/game.h"
@@ -34,6 +36,7 @@ marked with the port's navpoints.
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "shadowrun.h"
+#include "shadowrun_definitions.h"
 #include "shadowrun_units.h"
 #include "shadowrun_tech.h"
 
@@ -126,6 +129,7 @@ void shadowrun_tech_update(
 	struct object_datum *object;
 
 	shadowrun_holograms_update();
+	shadowrun_antimagic_update();
 
 	object_iterator_new(&iterator, _object_mask_unit, 0);
 	while ((object = object_iterator_next(&iterator)) != NULL)
@@ -346,6 +350,355 @@ boolean shadowrun_tech_cast(
 	}
 
 	return FALSE;
+}
+
+/* ---------- anti-magic ---------- */
+
+/* a zone standing: where it is, its team's (the thrower's), the ticks left
+and all it had, its start radius (ticks x 0.75 is the radius each: the
+executable's, FUN_0026FCA0), its reach, and the tag it works from */
+struct shadowrun_antimagic_zone
+{
+	real_point3d position;
+	short team_index;
+	short pad;
+	long ticks_left;
+	long ticks;
+	real radius;
+	real reach;
+	long definition_index;
+	/* the ball standing in it (a scenery of the map's), or NONE */
+	long object_index;
+	/* the units inside it as last taken (of its enemies): those that leave it
+	lose their anti-magic */
+	long inside[MAXIMUM_SHADOWRUN_ANTIMAGIC_INSIDE];
+	short inside_count;
+};
+
+static struct shadowrun_antimagic_zone shadowrun_antimagic_zones[MAXIMUM_SHADOWRUN_ANTIMAGIC_ZONES];
+static short shadowrun_antimagic_zone_count;
+
+/* the map's t3ed (anti-magic's tech tag), looked for once a map */
+static long shadowrun_antimagic_definition_index = NONE;
+
+/* the map's t3ed: the Shadowrun unit's tech3, of the unit that threw it (the
+anti-magic grenade is a map's projectile, which has no unit's: the first t3ed
+the map has) */
+static struct shadowrun_tech3_definition *shadowrun_antimagic_definition(
+	void)
+{
+	struct tag_iterator iterator;
+	long definition_index = NONE;
+
+	if (shadowrun_antimagic_definition_index >= 0)
+	{
+		definition_index = shadowrun_antimagic_definition_index;
+	}
+	else if (shadowrun_antimagic_definition_index != NONE)
+	{
+		return NULL;
+	}
+	else
+	{
+		tag_iterator_new(&iterator, SHADOWRUN_TECH3_DEFINITION_TAG);
+		definition_index = tag_iterator_next(&iterator);
+		if (definition_index == NONE)
+		{
+			error(_error_silent, "shadowrun: the map has no %s", SHADOWRUN_ANTIMAGIC_TECH_NAME);
+			/* (a value no tag index is: looked for once a map) */
+			shadowrun_antimagic_definition_index = -2;
+			return NULL;
+		}
+		shadowrun_antimagic_definition_index = definition_index;
+	}
+
+	return (struct shadowrun_tech3_definition *)tag_get(SHADOWRUN_TECH3_DEFINITION_TAG, definition_index);
+}
+
+void shadowrun_antimagic_initialize_for_new_map(
+	void)
+{
+	shadowrun_antimagic_zone_count = 0;
+	shadowrun_antimagic_definition_index = NONE;
+
+	return;
+}
+
+/* whether the unit stands inside a zone of its enemies: inside when within the
+zone's radius, which shrinks as its ticks run out (0.75 a tick, the
+executable's), the way FUN_0026FCA0 asks it */
+boolean shadowrun_antimagic_at(
+	long unit_index)
+{
+	struct object_datum *object = object_try_and_get_and_verify_type(unit_index, NONE);
+	short index;
+
+	if (!object)
+	{
+		return FALSE;
+	}
+	for (index = 0; index < shadowrun_antimagic_zone_count; index++)
+	{
+		struct shadowrun_antimagic_zone *zone = &shadowrun_antimagic_zones[index];
+		real radius = zone->radius - (real)(zone->ticks - zone->ticks_left) * 0.75f;
+		real_vector3d offset;
+
+		if (radius <= 0.f)
+		{
+			continue;
+		}
+		vector_from_points3d(&zone->position, &object->object.position, &offset);
+		if (magnitude3d(&offset) <= radius &&
+			game_team_is_enemy((short)object->object.owner_team_index, zone->team_index))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* the unit's spells fail inside an enemy's zone */
+boolean shadowrun_spells_blocked(
+	long unit_index)
+{
+	return shadowrun_antimagic_at(unit_index);
+}
+
+/* the unit's spell is cast, unless it is inside an enemy's anti-magic */
+boolean shadowrun_unit_can_cast(
+	long unit_index)
+{
+	return !shadowrun_spells_blocked(unit_index);
+}
+
+/* a zone made where the anti-magic grenade detonated, on its thrower's side
+(the executable's askers test a unit's team against its own) */
+void shadowrun_antimagic_zone(
+	long owner_object_index,
+	real_point3d const *position)
+{
+	struct object_datum *owner = object_try_and_get_and_verify_type(owner_object_index, NONE);
+	struct shadowrun_antimagic_zone *zone;
+	struct shadowrun_tech3_definition *definition;
+
+	definition = shadowrun_antimagic_definition();
+	if (!definition || !owner)
+	{
+		return;
+	}
+	if (shadowrun_antimagic_zone_count >= MAXIMUM_SHADOWRUN_ANTIMAGIC_ZONES)
+	{
+		/* (the oldest goes for the new: the list is in the order they came) */
+		csmemcpy(&shadowrun_antimagic_zones[0], &shadowrun_antimagic_zones[1],
+			sizeof(shadowrun_antimagic_zones[0]) * (MAXIMUM_SHADOWRUN_ANTIMAGIC_ZONES - 1));
+		shadowrun_antimagic_zone_count--;
+	}
+	zone = &shadowrun_antimagic_zones[shadowrun_antimagic_zone_count++];
+	csmemset(zone, 0, sizeof(*zone));
+	zone->position = *position;
+	zone->ticks = definition->antimagic_duration_ticks;
+	zone->ticks_left = zone->ticks;
+	zone->radius = definition->antimagic_radius;
+	zone->reach = definition->antimagic_reach;
+	zone->definition_index = shadowrun_antimagic_definition_index;
+	zone->team_index = (short)owner->object.owner_team_index;
+	/* port: the ball it stands in (the map's antimagicball scenery), scaled to
+	the zone's radius: the zone's own object, made and moved with it */
+	if (definition->antimagic_ball_scenery.index != NONE)
+	{
+		struct object_placement_data placement;
+
+		object_placement_data_new(&placement, definition->antimagic_ball_scenery.index, owner_object_index);
+		placement.position = *position;
+		placement.forward = owner->object.forward;
+		placement.up = owner->object.up;
+		zone->object_index = object_new(&placement);
+		if (zone->object_index != NONE)
+		{
+			object_get(zone->object_index)->object.scale = definition->antimagic_radius;
+		}
+	}
+
+	return;
+}
+
+/* port: whether a zone holds the unit: within its live radius, and an enemy
+of its side (the test shadowrun_antimagic_at makes of all of them) */
+static boolean shadowrun_antimagic_zone_holds(
+	struct shadowrun_antimagic_zone *zone,
+	long unit_index)
+{
+	struct object_datum *object = object_try_and_get_and_verify_type(unit_index, NONE);
+	real radius = zone->radius - (real)(zone->ticks - zone->ticks_left) * 0.75f;
+	real_vector3d offset;
+
+	if (!object || radius <= 0.f)
+	{
+		return FALSE;
+	}
+	vector_from_points3d(&zone->position, &object->object.position, &offset);
+
+	return magnitude3d(&offset) <= radius &&
+		game_team_is_enemy((short)object->object.owner_team_index, zone->team_index);
+}
+
+/* port: a unit that left a zone (or was in it as the zone ended) loses its
+anti-magic: the dump's "lose antimagic" damage and effect (t3ed 0x428 and
+0x438), on it, aimed at the zone */
+static void shadowrun_antimagic_lost(
+	long unit_index,
+	real_point3d const *position,
+	real reach)
+{
+	struct shadowrun_tech3_definition *definition = shadowrun_antimagic_definition();
+	struct unit_datum *unit = unit_try_and_get(unit_index);
+
+	if (!definition || !unit)
+	{
+		return;
+	}
+	if (definition->antimagic_lost_damage.index != NONE)
+	{
+		struct damage_data damage;
+		real_vector3d direction;
+
+		damage_data_new(&damage, definition->antimagic_lost_damage.index);
+		SET_FLAG(damage.flags, _damage_from_weapon_bit, TRUE);
+		damage.origin = *position;
+		damage.epicenter = *position;
+		vector_from_points3d(position, &unit->object.position, &direction);
+		normalize3d(&direction);
+		damage.direction = direction;
+		/* (its reach: the damage's own scale covers what the tag's does) */
+		(void)reach;
+		object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
+	}
+	if (definition->antimagic_lost_effect.index != NONE)
+	{
+		effect_new_from_object(definition->antimagic_lost_effect.index, unit_index, unit_index, NONE, 0.f, 0.f, NULL, NULL);
+	}
+
+	return;
+}
+
+/* each tick: a zone's ticks run down, and one done goes; the units of its
+enemies inside it are hurt by it (the executable's askers do, with the dump's
+damage, each second) */
+void shadowrun_antimagic_update(
+	void)
+{
+	struct object_iterator iterator;
+	struct object_datum *object;
+	short index;
+
+	for (index = shadowrun_antimagic_zone_count - 1; index >= 0; index--)
+	{
+		struct shadowrun_antimagic_zone *zone = &shadowrun_antimagic_zones[index];
+
+		if (--zone->ticks_left <= 0)
+		{
+			/* (those still inside lose their anti-magic as it goes) */
+			short inside;
+
+			for (inside = 0; inside < zone->inside_count; inside++)
+			{
+				shadowrun_antimagic_lost(zone->inside[inside], &zone->position, zone->reach);
+			}
+			if (zone->object_index != NONE && object_try_and_get_and_verify_type(zone->object_index, NONE))
+			{
+				object_delete(zone->object_index);
+			}
+			shadowrun_antimagic_zones[index] = shadowrun_antimagic_zones[--shadowrun_antimagic_zone_count];
+		}
+	}
+	if (game_time_get() % TICKS_PER_SECOND != 0)
+	{
+		return;
+	}
+	object_iterator_new(&iterator, _object_mask_unit, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		long unit_index = iterator.index;
+
+		/* port: a unit that was in a zone and is not now loses its anti-magic
+		(as the "lose antimagic" the dump gives for those that leave) */
+		{
+			short zone_number;
+
+			for (zone_number = 0; zone_number < shadowrun_antimagic_zone_count; zone_number++)
+			{
+				struct shadowrun_antimagic_zone *zone = &shadowrun_antimagic_zones[zone_number];
+				boolean was_inside = FALSE;
+				short inside;
+
+				for (inside = 0; inside < zone->inside_count; inside++)
+				{
+					if (zone->inside[inside] == unit_index)
+					{
+						was_inside = TRUE;
+						break;
+					}
+				}
+				if (was_inside && !shadowrun_antimagic_zone_holds(zone, unit_index))
+				{
+					zone->inside[inside] = zone->inside[--zone->inside_count];
+					shadowrun_antimagic_lost(unit_index, &zone->position, zone->reach);
+				}
+			}
+		}
+		if (shadowrun_antimagic_at(unit_index))
+		{
+			struct shadowrun_tech3_definition *definition = shadowrun_antimagic_definition();
+			struct unit_datum *unit = unit_try_and_get(unit_index);
+			short zone_number;
+
+			/* port: the zone it is in remembers it, to know when it leaves */
+			for (zone_number = 0; zone_number < shadowrun_antimagic_zone_count; zone_number++)
+			{
+				struct shadowrun_antimagic_zone *zone = &shadowrun_antimagic_zones[zone_number];
+				short inside;
+				boolean held = FALSE;
+
+				for (inside = 0; inside < zone->inside_count; inside++)
+				{
+					if (zone->inside[inside] == unit_index)
+					{
+						held = TRUE;
+					}
+				}
+				if (!held && shadowrun_antimagic_zone_holds(zone, unit_index) &&
+					zone->inside_count < MAXIMUM_SHADOWRUN_ANTIMAGIC_INSIDE)
+				{
+					zone->inside[zone->inside_count++] = unit_index;
+				}
+			}
+
+			if (definition && unit)
+			{
+				struct damage_data damage;
+
+				if (definition->antimagic_damage.index != NONE)
+				{
+					damage_data_new(&damage, definition->antimagic_damage.index);
+					SET_FLAG(damage.flags, _damage_from_weapon_bit, TRUE);
+					damage.direction = *global_up3d;
+					object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
+				}
+				/* port: and its essence drains (the dump's essence_drain, t3ed
+				0x404), the same each second */
+				if (definition->antimagic_drain_damage.index != NONE)
+				{
+					damage_data_new(&damage, definition->antimagic_drain_damage.index);
+					SET_FLAG(damage.flags, _damage_from_weapon_bit, TRUE);
+					damage.direction = *global_up3d;
+					object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
+				}
+			}
+		}
+	}
+
+	return;
 }
 
 /* ---------- reflexes ---------- */

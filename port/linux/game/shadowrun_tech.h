@@ -30,6 +30,7 @@ enum
 the rest). Reflexes is 0: the unit's own is _shadowrun_tech_none until
 it has one */
 	_shadowrun_tech_reflexes_id = 0,
+	_shadowrun_tech_antimagic_id = 7,
 	_shadowrun_tech_vision_id = 1,
 	_shadowrun_tech_smartlink_id = 2,
 	_shadowrun_tech_gecko_id = 4,
@@ -84,6 +85,15 @@ unit moves and reloads faster, and jumps a little higher */
 #define SHADOWRUN_REFLEXES_RELOAD_SCALE 0.6f
 #define SHADOWRUN_REFLEXES_JUMP_SCALE 1.3f
 
+/* port: the map's anti-magic tech tag (t3ed), as its tags name it */
+#define SHADOWRUN_ANTIMAGIC_TECH_NAME "shadowrunstuff\\tech3"
+
+/* port: anti-magic: the zones standing at once, and the most zones one
+player's grenades keep (units.c, FUN_0026FCA0: a global list) */
+#define MAXIMUM_SHADOWRUN_ANTIMAGIC_ZONES 8
+/* port: the units a zone keeps, to know which left it (and so lost it) */
+#define MAXIMUM_SHADOWRUN_ANTIMAGIC_INSIDE 32
+
 /* port: the glider: the scenery it wears on its back, how high its jump goes
 (1 for neither), how long it glides (ticks) and how its fall slows while it
 does (a step of its velocity a tick toward this) */
@@ -112,6 +122,23 @@ long shadowrun_hologram_variant(
 long shadowrun_hologram_place(
 	long unit_index,
 	real_point3d const *position);
+/* port: anti-magic, which the anti-magic grenade makes where it lands
+(units.c, FUN_0026EA00, FUN_0026FCA0): a shrinking zone; whether the unit
+is inside one (its spells fail there, and it is hurt by the zone) */
+void shadowrun_antimagic_zone(
+	long owner_object_index,
+	real_point3d const *position);
+boolean shadowrun_antimagic_at(
+	long unit_index);
+/* whether the unit is an enemy of the zone's (the zones are the thrower's)
+and inside it: its spells fail (shadowrun_magic.c) */
+boolean shadowrun_spells_blocked(
+	long unit_index);
+void shadowrun_antimagic_update(
+	void);
+void shadowrun_antimagic_initialize_for_new_map(
+	void);
+
 /* whether the actor is a hologram's: its attacks do no damage (ai.c) */
 boolean shadowrun_hologram_active(
 	long actor_index);
