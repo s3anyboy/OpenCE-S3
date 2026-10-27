@@ -180,18 +180,19 @@ void shadowrun_tech_render_nav_points(
 	/* (Shadowrun's 60 m, in world units: SHADOWRUN_VISION_RADIUS) */
 	radius_squared = SHADOWRUN_VISION_RADIUS * SHADOWRUN_VISION_RADIUS;
 	object_iterator_new(&iterator, _object_mask_biped, 0);
-	while ((object = object_iterator_next(&iterator)) != NULL)
+	while (object_iterator_next(&iterator))
 	{
 		real_point3d origin;
 		real dx, dy, dz;
 		short render_type;
 
-		if (TEST_FLAG(object->object.damage_flags, _object_dead_bit) ||
+		object = object_get(iterator.index);
+		if (!object || TEST_FLAG(object->object.damage_flags, _object_dead_bit) ||
 			object->object.owner_team_index == caster->object.owner_team_index)
 		{
 			continue;
 		}
-		object_get_origin(DATUM_INDEX_TO_ABSOLUTE_INDEX(object->header.index), &origin);
+		object_get_origin(iterator.index, &origin);
 		dx = origin.x - head.x;
 		dy = origin.y - head.y;
 		dz = origin.z - head.z;
