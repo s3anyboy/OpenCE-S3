@@ -120,6 +120,11 @@ static const struct config_setting config_settings[] =
 	{ "display.max_fps", _config_integer, "0", "HALO_MAX_FPS", _environment_value, _platform_desktop,
 		"With vsync off, the most frames a second: 0 for twice the display's\n"
 		"refresh rate, -1 for no limit (which can hang some Intel graphics)." },
+	{ "display.frames_in_flight", _config_integer, "3", "HALO_FRAMES_IN_FLIGHT", _environment_value,
+		_platform_desktop,
+		"The most frames the GPU has queued (1 to 8): a frame waits for the GPU\n"
+		"to finish the one this many before it, so that frames come evenly when\n"
+		"the GPU is the slower; 0 leaves it to the driver." },
 	{ "display.anti_aliasing", _config_string, "\"off\"", "HALO_ANTI_ALIASING", _environment_value, _platform_all,
 		"Smoothing of jagged edges, which the Xbox did not have: \"off\"; \"fxaa\"\n"
 		"or \"smaa\" smooth the 3D view once it is drawn (the HUD and menus stay\n"
@@ -183,24 +188,6 @@ static const struct config_setting config_settings[] =
 		"from the game's first tick, which the items' respawn periods count from\n"
 		"too: a weapon is back on the map at every multiple of its period on the\n"
 		"clock." },
-	{ "display.campaign_timer", _config_boolean, "false", "HALO_CAMPAIGN_TIMER", _environment_value, _platform_all,
-		"Draw a clock at the bottom right in the campaign (and online co-op),\n"
-		"counting up from the level's start. The main menu's scene has none." },
-	{ "display.campaign_score", _config_boolean, "false", "HALO_CAMPAIGN_SCORE", _environment_value, _platform_all,
-		"Score the campaign: each enemy a player kills is worth points by its\n"
-		"actor variant (a base by the kind of actor, times a rank by the\n"
-		"variant's name, times the difficulty: easy 0.5, normal 1, heroic 2,\n"
-		"legendary 5, rounded up to a multiple of 5). A ghost, banshee or wraith\n"
-		"destroyed is worth 50, 75 or 100, and every kill's points fall with the\n"
-		"level's time (the campaign timer's): x1 at 0, to x0.25 at 30 minutes.\n"
-		"The score is drawn at the bottom right,\n"
-		"and a summary is shown when a level is won, until A or B is pressed. In\n"
-		"online co-op the scoreboard (Tab) lists each player's own score, kills and deaths." },
-	{ "display.headshot_party", _config_boolean, "false", "HALO_HEADSHOT_PARTY", _environment_value, _platform_all,
-		"A grunt that a player kills with a shot to the head pops with confetti\n"
-		"(drawn on the screen, from where its head was) and plays party.wav, a\n"
-		"WAV file in the data folder (no file, no sound). Campaign only; only a\n"
-		"single player and the host of a co-op game see it." },
 	{ "display.scoreboard_team_layout", _config_string, "\"teams\"", "HALO_SCOREBOARD_TEAM_LAYOUT", _environment_value,
 		_platform_all,
 		"How the scoreboard lists a team game's players: \"teams\" in a column for\n"
@@ -227,7 +214,7 @@ static const struct config_setting config_settings[] =
 		"screen's top right, with bars (the host: its slowest player's), and\n"
 		"\"Connection problem\" when the host has sent nothing for two seconds;\n"
 		"the scoreboard's pings in the same colours, as this machine times them." },
-	{ "display.subtitles", _config_boolean, "false", "HALO_SUBTITLES", _environment_value, _platform_all,
+		{ "display.subtitles", _config_boolean, "false", "HALO_SUBTITLES", _environment_value, _platform_all,
 		"Show subtitles at the bottom of the screen for the sound tags that the\n"
 		"subtitles name (built into the game, or display.subtitles_file), while they\n"
 		"play. Also Video Setup, Extra Effects in the menus." },
@@ -245,6 +232,10 @@ static const struct config_setting config_settings[] =
 		"\"spanish\" or \"portuguese\". Its lines are in subtitles_<language>.txt (next\n"
 		"to the maps, or built into the game); a line it lacks is shown in English.\n"
 		"Also Video Setup, Extra Effects in the menus." },
+	{ "display.shader_cache", _config_boolean, "true", "HALO_SHADER_CACHE", _environment_value, _platform_desktop,
+		"Keep the GPU programs the game links under the save root (shader_cache),\n"
+		"and load them from there next time instead of linking them again, which\n"
+		"stalls a frame on some drivers; false links each every run." },
 	{ "display.per_pixel_lighting", _config_boolean, "false", "HALO_PER_PIXEL_LIGHTING", _environment_value,
 		_platform_all,
 		"Light the models (characters, weapons, vehicles, scenery) for each\n"
@@ -649,12 +640,6 @@ static const struct config_setting config_settings[] =
 		"false, they walk through each other (the AI's characters they still\n"
 		"bump into). PLAYER COLLISIONS in co-op's Server Setup > Co-op Options\n"
 		"writes its choice here." },
-	{ "network.coop_score_type", _config_string, "\"cooperative\"", "HALO_NET_COOP_SCORE_TYPE", _environment_value,
-		_platform_all,
-		"How an online co-op game's campaign score (display.campaign_score) is\n"
-		"kept: \"cooperative\" adds the players' scores together, \"competitive\"\n"
-		"gives each player a score of their own. SCORING TYPE in co-op's\n"
-		"Server Setup > Co-op Options writes its choice here; the host's counts." },
 	{ "network.coop_enemies_mode", _config_string, "\"per_player\"", "HALO_NET_COOP_ENEMIES_MODE", _environment_value,
 		_platform_all,
 		"Online co-op's extra enemies: \"none\", \"per_player\" (each squad of\n"
@@ -1880,7 +1865,6 @@ static const struct
 	{ "network.shield_effects", { "stock", "glow", "light_show", "overshield", "glow_overshield",
 		"light_show_overshield", "players", NULL }, NULL },
 	{ "network.coop_enemies_mode", { "none", "per_player", "multiplier", NULL }, NULL },
-	{ "network.coop_score_type", { "cooperative", "competitive", NULL }, NULL },
 	{ "streamer.slurs", { "off", "severe", "strong", "mild", NULL }, NULL },
 	{ "streamer.swearing", { "off", "severe", "strong", "mild", NULL }, NULL },
 	{ "streamer.insults", { "off", "severe", "strong", "mild", NULL }, NULL },
