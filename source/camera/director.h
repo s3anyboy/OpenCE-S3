@@ -137,7 +137,9 @@ director_perspective director_get_perspective(
 	short local_player_index);
 short director_desired_perspective(
 	long unit_index,
-	director_perspective *perspective);
+	director_perspective *perspective,
+	/* port: a melee weapon may hold the camera in third person (game.third_person_melee) */
+	boolean third_person_melee);
 short director_camera_deterministic(
 	long unit_index,
 	real_point3d *position,

@@ -399,6 +399,14 @@ static const struct config_setting config_settings[] =
 		"to throw and reload, and a player turns with the aim while throwing;\n"
 		"false: the original animations, which freeze the legs and stand a\n"
 		"rider up." },
+	{ "game.third_person_melee", _config_string, "\"auto\"", "HALO_THIRD_PERSON_MELEE", _environment_value, _platform_all,
+		"The camera with a melee weapon in hand (one with no magazines, such as\n"
+		"Shadowrun's katana), which the stock game shows in first person off a\n"
+		"vehicle's seat: \"auto\" (the default) keeps a Shadowrun prototype\n"
+		"map's weapons in third person and every other map's first person,\n"
+		"\"true\" holds either in third person, and \"false\" as the stock game\n"
+		"always does. The netcode's aiming camera stays first person, so every\n"
+		"machine computes the same shots." },
 	{ "game.custom_edition", _config_boolean, "true", "HALO_CUSTOM_EDITION", _environment_value, _platform_all,
 		"Load and run Halo Custom Edition maps (not those that need OpenSauce):\n"
 		"put them and Custom Edition's bitmaps.map, sounds.map and loc.map in\n"
