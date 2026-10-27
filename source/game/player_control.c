@@ -213,6 +213,7 @@ symbols in this file:
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c; after the limit2d alias above */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c, shadowrun_races.c */
+#include "halo_keyboard.h" /* port: the d-pad, port/linux/src/xinput_sdl.c */
 
 /* ---------- constants */
 
@@ -1498,11 +1499,15 @@ static void get_local_player_input_blob(
 					effective_buttons[_button_switch_grenade] == TRUE);
 				/* port: on the Shadowrun prototype's maps the switch-grenade
 				control (the right bumper) casts the spell chosen, sent as the
-				flashlight's flag, and the flashlight control (the left bumper)
-				chooses the spell, or grenade, instead
-				(port/linux/game/shadowrun_units.c, shadowrun_buy_menu.c) */
+				flashlight's flag, and the d-pad's right chooses the spell, or
+				grenade, instead (port/linux/game/shadowrun_units.c,
+				shadowrun_buy_menu.c). The d-pad's up and down walk the buy menu,
+				so the cycle has its right, and its left, which the buy menu's
+				pages use too */
 				if (shadowrun_map_loaded())
 				{
+					unsigned int dpad = halo_linux_gamepad_dpad(gamepad_index);
+
 					SET_FLAG(
 						input->unit_control_flags,
 						_unit_control_integrated_light_bit,
@@ -1510,7 +1515,7 @@ static void get_local_player_input_blob(
 					SET_FLAG(
 						input->player_control_flags,
 						_player_control_rotate_grenades_bit,
-						effective_buttons[_button_flashlight] == TRUE);
+						(dpad & HALO_LINUX_DPAD_RIGHT) != 0);
 					/* the Back control opens Shadowrun's buy menu; while it is
 					open the stick (or the d-pad) and the jump, melee and action
 					controls work it, and the player does nothing else */
@@ -1520,9 +1525,9 @@ static void get_local_player_input_blob(
 						effective_buttons[_button_jump] == TRUE,
 						effective_buttons[_button_melee_attack] == TRUE,
 						effective_buttons[_button_action_reload] == TRUE,
-						gamepad->buttons[_gamepad_binary_button_dpad_up] ? 1.f :
-							gamepad->buttons[_gamepad_binary_button_dpad_down] ? -1.f : input->throttle.i,
-						input->throttle.j))
+						(dpad & HALO_LINUX_DPAD_UP) ? 1.f :
+							(dpad & HALO_LINUX_DPAD_DOWN) ? -1.f : input->throttle.i,
+						(dpad & HALO_LINUX_DPAD_LEFT) ? -1.f : input->throttle.j))
 					{
 						input->unit_control_flags = 0;
 						input->player_control_flags = 0;

@@ -2,8 +2,9 @@
 SHADOWRUN_HUD.C
 
 The Shadowrun prototype's magic on the HUD (shadowrun.h), at the bottom of
-the screen: the spell the right bumper casts (or Grenade, when the left
-bumper has chosen the grenades) and the unit's magic, a cell a point: lit what it has, dim what it has
+the screen: the spell the right bumper casts (or Grenade, when the d-pad's
+right has chosen the grenades) and the unit's magic, a cell a point: lit
+what it has, dim what it has
 not, and dark red what its spells hold back. The numbers are the
 executable's own ("%d/%d"). A spell that could not be cast makes the line
 flash red for a second; one waiting to be cast again is grey.

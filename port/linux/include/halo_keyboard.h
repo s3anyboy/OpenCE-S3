@@ -77,6 +77,20 @@ enum halo_chat_pad_button
 };
 
 unsigned long halo_chat_pad_buttons(void);
+
+/* the d-pad of a controller as its last read found it: the control of one of
+the game's own (source/input/input.h) does not carry the d-pad, and the
+Shadowrun prototype's maps read it for their spells and their buy menu
+(port/linux/src/xinput_sdl.c, source/game/player_control.c) */
+enum halo_linux_dpad_button
+{
+	HALO_LINUX_DPAD_UP = 1,
+	HALO_LINUX_DPAD_DOWN = 2,
+	HALO_LINUX_DPAD_LEFT = 4,
+	HALO_LINUX_DPAD_RIGHT = 8,
+};
+
+unsigned int halo_linux_gamepad_dpad(short gamepad_index);
 /* the taps on the touchscreen outside the menus since the last call while
 that keyboard is up, and where the latest was (0 to 1 across and down the
 window) */

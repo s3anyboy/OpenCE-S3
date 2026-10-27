@@ -169,6 +169,29 @@ int halo_linux_mouse_look(short gamepad_index, float *yaw, float *pitch)
 	return TRUE;
 }
 
+/* ---------- the d-pad */
+
+/* a gamepad's d-pad, as its last read found it (HALO_LINUX_DPAD_*) */
+static unsigned int dpad;
+
+static void dpad_record(const XINPUT_GAMEPAD *pad)
+{
+	unsigned int buttons = 0;
+
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_UP) buttons |= HALO_LINUX_DPAD_UP;
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN) buttons |= HALO_LINUX_DPAD_DOWN;
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT) buttons |= HALO_LINUX_DPAD_LEFT;
+	if (pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) buttons |= HALO_LINUX_DPAD_RIGHT;
+	dpad = buttons;
+}
+
+/* the d-pad of the first controller (the one a player's spells and the buy
+menu are read from: player_control.c) */
+unsigned int halo_linux_gamepad_dpad(short gamepad_index)
+{
+	return gamepad_index == 0 ? dpad : 0;
+}
+
 #if defined(HALO_ANDROID) || defined(HALO_WEB)
 /* the touch controls moved the player or the aim (halo_linux_touch_aiming) */
 static void touch_used(void)
@@ -1300,8 +1323,10 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 		touch_input_controls(&state->Gamepad, input.menus);
 #endif
 		/* (the text chat's on-screen keyboard reads them, and takes them
-		while it is up) */
+		while it is up; the d-pad is kept for the game's own reads, which it
+does not take: see the header) */
 		chat_pad_record(&state->Gamepad);
+		dpad_record(&state->Gamepad);
 		chat_pad_hold_over(&state->Gamepad);
 		if (abs(state->Gamepad.sThumbRX) > STICK_AIMING_DEFLECTION ||
 			abs(state->Gamepad.sThumbRY) > STICK_AIMING_DEFLECTION)

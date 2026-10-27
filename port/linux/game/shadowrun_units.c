@@ -961,10 +961,10 @@ void shadowrun_unit_delete(
 	return;
 }
 
-/* port: the flashlight control (the left bumper, on these maps) chooses the
-spell the right bumper casts: each spell the unit knows in turn, then its
-grenades (rotated as they are otherwise, with no spell to cast), then its
-first spell again. The executable's player chose them
+/* port: the d-pad's right (on these maps) chooses the spell the right bumper
+casts: each spell the unit knows in turn, then its grenades (rotated as they
+are otherwise, with no spell to cast), then its first spell again. The
+executable's player chose them
 from a radial menu, its own HUD's (the globals' assignment scheme). Returns
 whether the control was taken; a unit that knows no spell rotates its
 grenades as ever */
