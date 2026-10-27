@@ -178,7 +178,6 @@ static struct tag_schema_definition const shadowrun_weapon_data_race_schema =
 
 static struct tag_schema_field const shadowrun_weapon_data_fields[] =
 {
-	TAG_SCHEMA_ENUM(struct shadowrun_weapon_data, fires, 2, 0),
 	TAG_SCHEMA_BLOCK(struct shadowrun_weapon_data, races, shadowrun_weapon_data_race_schema, MAXIMUM_SHADOWRUN_RACES),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_weapon_data, smartlinked, TAG_SCHEMA_GROUPS(SHADOWRUN_WEAPON_DATA_TAG)),
 	TAG_SCHEMA_END
@@ -211,78 +210,6 @@ static struct tag_schema_field const shadowrun_buy_menu_fields[] =
 static struct tag_schema_definition const shadowrun_buy_menu_schema =
 	TAG_SCHEMA_DEFINITION(shadowrun_buy_menu, struct shadowrun_buy_menu_definition, shadowrun_buy_menu_fields);
 
-/* t1ed: Enhanced Vision and the Hologram. Its references are the effects and
-damages the dump names (vision_1st.effe, vision_3rd.jpt!), and the blocks
-their per-level choices. */
-
-static struct tag_schema_field const shadowrun_tech1_fields[] =
-{
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_effe_090,
-		TAG_SCHEMA_GROUPS('effe', 'jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_jpt_0a0, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_effe_0b0,
-		TAG_SCHEMA_GROUPS('effe', 'jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_jpt_0c0, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_effe_0d0,
-		TAG_SCHEMA_GROUPS('effe', 'jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_jpt_0e0, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, vision_first_person_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_jpt_1b0, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_effe_1c0, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_jpt_1d0, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech1_definition, reference_proj_29c, TAG_SCHEMA_GROUPS('proj')),
-	TAG_SCHEMA_END
-};
-
-static struct tag_schema_definition const shadowrun_tech1_schema =
-	TAG_SCHEMA_DEFINITION(shadowrun_tech1, struct shadowrun_tech1_definition, shadowrun_tech1_fields);
-
-/* t2ed: the Grapple, the Glider and Smartlink */
-
-static struct tag_schema_field const shadowrun_tech2_fields[] =
-{
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_projectile, TAG_SCHEMA_GROUPS('proj')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_encounter, TAG_SCHEMA_GROUPS('scen')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_fire_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_hit_success_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_hit_success_effect_2, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_hit_bounce_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_hit_bounce_effect_2, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_travel_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_player_travel_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_player_attach_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_player_release_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_cable_release_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, grapple_cable_snap_effect, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, glider_encounter, TAG_SCHEMA_GROUPS('scen')),
-	TAG_SCHEMA_END
-};
-
-static struct tag_schema_definition const shadowrun_tech2_schema =
-	TAG_SCHEMA_DEFINITION(shadowrun_tech2, struct shadowrun_tech2_definition, shadowrun_tech2_fields);
-
-/* t3ed: the anti-magic grenade (which nothing reads) */
-
-static struct tag_schema_field const shadowrun_tech3_fields[] =
-{
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_scen_380, TAG_SCHEMA_GROUPS('scen')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_scen_390, TAG_SCHEMA_GROUPS('scen')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_jpt_3a0, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_effe_3b0, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_jpt_3e4, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_jpt_404, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_effe_418, TAG_SCHEMA_GROUPS('effe')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_jpt_428, TAG_SCHEMA_GROUPS('jpt!')),
-	TAG_SCHEMA_REFERENCE(struct shadowrun_tech3_definition, reference_effe_438, TAG_SCHEMA_GROUPS('effe')),
-	/* (the dump's last reference is an 'elec' tag, a group this build does not
-	know: nothing reads it, and asserting a group would refuse a map that has
-	one) */
-	TAG_SCHEMA_END
-};
-
-static struct tag_schema_definition const shadowrun_tech3_schema =
-	TAG_SCHEMA_DEFINITION(shadowrun_tech3, struct shadowrun_tech3_definition, shadowrun_tech3_fields);
-
 /* ---------- globals */
 
 struct tag_schema_group const tag_schema_shadowrun_groups[] =
@@ -293,8 +220,5 @@ struct tag_schema_group const tag_schema_shadowrun_groups[] =
 	{ SHADOWRUN_MAGIC3_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic3_schema },
 	{ SHADOWRUN_WEAPON_DATA_TAG, { NONE, NONE }, &shadowrun_weapon_data_schema },
 	{ SHADOWRUN_BUY_MENU_DEFINITION_TAG, { NONE, NONE }, &shadowrun_buy_menu_schema },
-	{ SHADOWRUN_TECH1_DEFINITION_TAG, { NONE, NONE }, &shadowrun_tech1_schema },
-	{ SHADOWRUN_TECH2_DEFINITION_TAG, { NONE, NONE }, &shadowrun_tech2_schema },
-	{ SHADOWRUN_TECH3_DEFINITION_TAG, { NONE, NONE }, &shadowrun_tech3_schema },
 	{ 0 }
 };

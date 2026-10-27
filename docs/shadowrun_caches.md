@@ -15,7 +15,7 @@ The maps examined are the prototype's `missionlet.map` (the level
 
 Put the map in the data root's `maps` folder, beside the game's own: the
 Xbox caches' loader reads it from there. It is listed in the map lists'
-SHADOWRUN (New Game's, and the Map screen's), with the Custom
+CUSTOM SINGLEPLAYER (New Game's, and the Map screen's), with the Custom
 Edition campaign maps, and played as they are: alone at the difficulty
 chosen next, or hosted as network co-op (not tried). As a Custom Edition
 map can, it may have beside it `<name>.bmp`, its picture, and `<name>.txt`,
@@ -109,25 +109,17 @@ The groups this build knows are laid out as its own: the tag validator
 passes every one of missionlet's 3144 tags and `ui.map`'s, with the
 corrections below.
 
-Shadowrun's own groups are laid out by this build's schemas
-(`tag_schema_shadowrun.c`) where the game or the validator reads them:
+Shadowrun's own groups, which this build has no schema or code for, are left
+as they are. Nothing reads them:
 
 | Group | Name | In missionlet |
 | --- | --- | --- |
 | `srwd` | Shadowrun weapon | 23 |
 | `srud` | Shadowrun unit | 4 |
-| `srac` | Shadowrun actor | 10 (no schema: nothing reads it) |
+| `srac` | Shadowrun actor | 10 |
 | `m1ed`, `m2ed`, `m3ed` | magic effect data | 3, 2, 1 |
 | `t1ed`, `t2ed`, `t3ed` | tech effect data | 1, 1, 1 |
 | `buym` | buy menu | 1 |
-
-The tech tags' layouts come from `original/custom_tag_dumps/`, which names the
-tags each field refers to: `t1ed` is Enhanced Vision and the Hologram
-(`vision_1st.effe`, `vision_3rd.jpt!`, an encounter named "hologram"), `t2ed`
-the Grapple and the Glider (`grapple.proj`, `grapple.scen`, `glider.scen` and
-the grapple's eight effects), `t3ed` the anti-magic grenade. The references
-are checked by the validator; the numbers are not read by any code yet, so
-the tech themselves are not played in this build.
 
 Shadowrun extended some enums that this build reads:
 
@@ -204,7 +196,7 @@ races), its head, a pool of mana and the spells of its race's magic tags
 | Tree of Life | a thrown seed grows a tree that heals those near it, and withers |
 | Resurrection | raises the dead near the caster as undead on its side |
 | Strangle | thorns grow from the surfaces where the caster aims, and hold |
-| Summon Elemental | an actor of the elemental's actor variant fights for the caster for a time |
+| Summon Elemental | an elemental (an encounter of the map) fights for the caster for a time |
 | Spirit Animal | the caster grows into its animal form while its mana lasts |
 | Smoke | the caster fades into smoke, unseen and unharmed, while its mana lasts |
 
@@ -215,22 +207,12 @@ that burn those of other sides. Magic shows at the bottom of the HUD: the
 spell, the mana, a cell a point (what spells hold back in dark red).
 
 Its controls are simpler than the prototype's, whose radial menu assigned
-spells to slots on the triggers and buttons: on these maps the right d-pad
-casts the current spell, the left d-pad goes through the known spells and
-then the grenades, and the left bumper uses the tech chosen. (The cast and the
-choice are sent as the flashlight and grenade-rotate controls; a keyboard or
-mouse player, with no d-pad, keeps the prototype's bumpers: right casts the
-spell, left chooses it.) The left trigger throws grenades as ever. The scripts'
-`player_set_magic` and `player_change_magic` give the players spells;
-`game_set_assignment_scheme` is kept but only the one scheme plays.
-
-The buy menu sells tech (Grapple, Glider, Hologram, Smartlink, Enhanced
-Vision) as it sells spells: a unit that buys one keeps it as a power of its
-own, after the spells, and the left bumper uses it. Two do something:
-Enhanced Vision marks every enemy within 60 m with a nav point, and the
-Hologram spawns an actor of the hologram's actor variant where the caster
-looks, on its side (`shadowrun_tech.c`). The rest have a layout but no
-behaviour: what they do is in the prototype's executable, not in its tags.
+spells to slots on the triggers and buttons: on these maps the right bumper
+(the switch-grenade control) casts the current spell, and the left bumper
+(the flashlight control, which lights nothing here) goes through the known
+spells and then the grenades. The left trigger throws grenades as ever. The scripts' `player_set_magic` and
+`player_change_magic` give the players spells; `game_set_assignment_scheme`
+is kept but only the one scheme plays.
 
 ## Races
 
@@ -274,9 +256,8 @@ This build runs the prototype's maps on Halo's game code; of Shadowrun's own
 systems these are not there:
 
 - tech (the `t?ed` tags), anti-magic and essence;
-- Shadowrun's weapons as Shadowrun defined them (`srwd`): but for whether one
-  fires and each race's speed with it, they play as Halo's do from their Halo
-  tags;
+- Shadowrun's weapons as Shadowrun defined them (`srwd`): but for each
+  race's speed with them, they play as Halo's do from their Halo tags;
 - Shadowrun's AI behaviours for its new actor types (they play as the types
   above), its extra AI state, and the actors' spells (the elf mage's and the
   ninja's teleport);

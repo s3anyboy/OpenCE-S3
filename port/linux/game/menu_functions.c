@@ -926,18 +926,19 @@ static boolean campaign_continue(short controller)
 }
 
 /* ---- the map lists (New Game's and the Map screen's): their first row's
-chooser of SHADOWRUN (the Shadowrun prototype's maps), MULTIPLAYER maps (the
-Xbox's) or CUSTOM MULTIPLAYER maps (the Custom Edition maps of the custom_maps
-folder, by the scenario type their files give: custom_edition_maps.c)
-(port_settings.MAP_KIND_CHOOSER), then the kind's rows, scrolling as
-list_scroll scrolls. A Shadowrun map is played as the campaign's levels are
-(alone, or hosted as network co-op), a multiplayer kind's as multiplayer
-maps are. */
+chooser of SINGLEPLAYER (the campaign's levels), MULTIPLAYER maps (the
+Xbox's), CUSTOM SINGLEPLAYER or CUSTOM MULTIPLAYER maps (the Custom Edition
+maps of the custom_maps folder, by the scenario type their files give:
+custom_edition_maps.c) (port_settings.MAP_KIND_CHOOSER), then the kind's
+rows, scrolling as list_scroll scrolls. A singleplayer kind's map is played
+as the campaign is (alone, or hosted as network co-op), a multiplayer kind's
+as multiplayer maps are. */
 
 enum
 {
-	MAP_KIND_SHADOWRUN,
+	MAP_KIND_SINGLEPLAYER,
 	MAP_KIND_MULTIPLAYER,
+	MAP_KIND_CUSTOM_SINGLEPLAYER,
 	MAP_KIND_CUSTOM_MULTIPLAYER,
 	NUMBER_OF_MAP_KINDS
 };
@@ -950,7 +951,7 @@ short ui_widget_port_multiplayer_maps(char const *const **names, short *last_use
 
 static boolean map_kind_singleplayer(short kind)
 {
-	return kind == MAP_KIND_SHADOWRUN;
+	return kind == MAP_KIND_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
 }
 
 /* The kind the chooser shows, kept to the multiplayer kinds unless
@@ -962,7 +963,7 @@ static short map_kind_shown(struct widget_instance *list, boolean singleplayer, 
 	short kind;
 
 	if (!spinner)
-		return singleplayer ? MAP_KIND_SHADOWRUN : MAP_KIND_MULTIPLAYER;
+		return singleplayer ? MAP_KIND_SINGLEPLAYER : MAP_KIND_MULTIPLAYER;
 	kind = (short)PIN(spinner->parameters.list.selected_index, 0, NUMBER_OF_MAP_KINDS - 1);
 	if (!singleplayer && map_kind_singleplayer(kind))
 	{
@@ -1060,6 +1061,11 @@ static void custom_map_text(boolean campaign, short map, wchar_t *text)
 	text[ROW_TEXT_LENGTH - 1] = 0;
 }
 
+static void custom_campaign_map_text(short map, wchar_t *text)
+{
+	custom_map_text(TRUE, map, text);
+}
+
 static void custom_multiplayer_map_text(short map, wchar_t *text)
 {
 	custom_map_text(FALSE, map, text);
@@ -1095,10 +1101,11 @@ static void map_description_show(struct widget_instance *description, short leve
 		widget->parameters.text_box.string_list_index = map;
 }
 
-/* New Game's list: SHADOWRUN's maps, played as the campaign's levels are, at
-the difficulty chosen next, or MULTIPLAYER's maps, played alone to walk
-around (no game engine: a campaign game on the map); CUSTOM MULTIPLAYER's
-walked around as MULTIPLAYER's are */
+/* New Game's list: SINGLEPLAYER's levels, the profile's reached, or
+MULTIPLAYER's maps, played alone to walk around (no game engine: a campaign
+game on the map); CUSTOM SINGLEPLAYER's maps played as the campaign's levels
+are, at the difficulty chosen next, and CUSTOM MULTIPLAYER's walked around
+as MULTIPLAYER's are */
 static struct
 {
 	short kind;
@@ -1113,23 +1120,25 @@ static short map_kind_count(short kind, short multiplayer_map_count)
 {
 	switch (kind)
 	{
+	case MAP_KIND_SINGLEPLAYER:
+		return NUMBER_OF_SINGLE_PLAYER_LEVELS;
 	case MAP_KIND_MULTIPLAYER:
 		return xbox_multiplayer_map_count(multiplayer_map_count);
-	case MAP_KIND_CUSTOM_MULTIPLAYER:
-		return custom_edition_maps_count(FALSE);
+	case MAP_KIND_CUSTOM_SINGLEPLAYER:
+		return custom_edition_maps_count(TRUE);
 	default:
-		return custom_edition_shadowrun_count();
+		return custom_edition_maps_count(FALSE);
 	}
 }
 
-/* the display index of a multiplayer or Shadowrun kind's entry, for its
+/* the display index of a multiplayer or Custom Edition kind's entry, for its
 description (map_description_show) */
 static short map_kind_display_index(short kind, short entry)
 {
 	switch (kind)
 	{
-	case MAP_KIND_SHADOWRUN:
-		return custom_edition_shadowrun_display_index_of(entry);
+	case MAP_KIND_CUSTOM_SINGLEPLAYER:
+		return custom_edition_maps_display_index_of(TRUE, entry);
 	case MAP_KIND_CUSTOM_MULTIPLAYER:
 		return custom_edition_maps_display_index_of(FALSE, entry);
 	default:
@@ -1140,64 +1149,43 @@ static short map_kind_display_index(short kind, short entry)
 /* the level name of a Custom Edition kind's entry, or NULL */
 static char const *custom_map_level_name(short kind, short entry)
 {
-	return kind == MAP_KIND_SHADOWRUN ?
-		custom_edition_shadowrun_level_name(map_kind_display_index(kind, entry)) :
-		custom_edition_maps_level_name(map_kind_display_index(kind, entry));
+	return custom_edition_maps_level_name(map_kind_display_index(kind, entry));
 }
 
-/* "initialize sp level list solo": the map lists open on the Shadowrun
-prototype's maps, the first chosen (the campaign's levels are not in the
-chooser any more) */
+/* "initialize sp level list solo" starts on the level last played */
 static boolean level_list_initialize(struct widget_instance *list, short controller)
 {
 	struct player_profile profile;
-	char const *const *names;
-	short last_used;
+	short level, last_used;
 
 	if (!campaign_profile(controller, &profile))
 		return FALSE;
 	campaign_levels_read(&profile);
-	level_list.map_count = ui_widget_port_multiplayer_maps(&names, &last_used);
-	/* (the Shadowrun prototype's maps, else the multiplayer maps when there are
-	none of them) */
-	level_list.kind = custom_edition_shadowrun_count() ? MAP_KIND_SHADOWRUN : MAP_KIND_MULTIPLAYER;
-	level_list.chosen = 0;
-	level_list.first = map_kind_first(0, custom_edition_shadowrun_count());
-	campaign.shown_level = 0;
+	level = PIN(profile.last_single_player_map_played, 0, NUMBER_OF_SINGLE_PLAYER_LEVELS - 1);
+	if (campaign.saved_level != NONE)
+		level = campaign.saved_level;
+	if (!campaign.levels[level].available)
+		level = 0;
+	campaign.shown_level = level;
+	level_list.map_count = ui_widget_port_multiplayer_maps(&level_list.map_names, &last_used);
+	level_list.kind = MAP_KIND_SINGLEPLAYER;
+	level_list.chosen = level;
+	level_list.first = map_kind_first(level, NUMBER_OF_SINGLE_PLAYER_LEVELS);
 	map_kind_set(list, level_list.kind);
 	map_kind_focus(list, level_list.first, level_list.chosen);
 	return TRUE;
 }
 
-/* a Shadowrun prototype map's name (the menus find its name, picture and
-description by its display index: custom_edition_maps.c) */
-static void shadowrun_map_text(short map, wchar_t *text)
+static void level_row_text(short level, wchar_t *text)
 {
-	wchar_t const *name = custom_edition_shadowrun_name(custom_edition_shadowrun_display_index_of(map));
-
-	ustrncpy(text, name ? name : L"", ROW_TEXT_LENGTH - 1);
-	text[ROW_TEXT_LENGTH - 1] = 0;
-}
-
-/* a row of a map list's first kind its rows: the rows are of the kind being
-shown (map_row_kind) */
-static short map_row_kind;
-
-static void map_row_text(short entry, wchar_t *text)
-{
-	if (map_row_kind == MAP_KIND_SHADOWRUN)
-		shadowrun_map_text(entry, text);
-	else if (map_row_kind == MAP_KIND_MULTIPLAYER)
-		multiplayer_map_text(entry, text);
-	else
-		custom_multiplayer_map_text(entry, text);
+	string_get("pc\\main_menu\\map_list", campaign.levels[level].available ? level : LEVEL_UNAVAILABLE, text);
 }
 
 /* "solo map list update" */
 static void level_list_update(struct widget_instance *list)
 {
 	struct widget_instance *description = list->parameters.list.extended_description;
-	short kind = map_kind_shown(list, TRUE, level_list.kind), count, entry;
+	short kind = map_kind_shown(list, TRUE, level_list.kind), count, entry, level;
 
 	if (kind != level_list.kind)
 	{
@@ -1205,31 +1193,44 @@ static void level_list_update(struct widget_instance *list)
 		level_list.first = level_list.chosen = 0;
 	}
 	count = map_kind_count(kind, level_list.map_count);
-	map_row_kind = kind;
-	entry = map_kind_rows_update(list, &level_list.first, count, map_row_text);
+	entry = map_kind_rows_update(list, &level_list.first, count,
+		kind == MAP_KIND_SINGLEPLAYER ? level_row_text :
+		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text :
+		kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? custom_campaign_map_text : custom_multiplayer_map_text);
 	if (entry != NONE)
 		level_list.chosen = entry;
-	/* (a Shadowrun map opens the difficulties next, as a campaign level did) */
+	if (kind != MAP_KIND_SINGLEPLAYER)
+	{
+		map_description_show(description, NONE,
+			level_list.chosen < count ? map_kind_display_index(kind, level_list.chosen) : NONE);
+		profile_name_show(description);
+		return;
+	}
+	map_description_show(description, 0, NONE);
 	campaign.shown_level = level_list.chosen;
-	map_description_show(description, NONE,
-		level_list.chosen < count ? map_kind_display_index(kind, level_list.chosen) : NONE);
+	level = campaign.shown_level;
+	if (!campaign.levels[level].available)
+		level = LEVEL_UNAVAILABLE;
+	level_description(description, "replay_level", level, level == campaign.saved_level,
+		level == LEVEL_UNAVAILABLE ? NULL : campaign.levels[level].finished, NONE);
 	profile_name_show(description);
 }
 
-/* "solo level set map": the Shadowrun map shown, for the difficulty menu; or
-the multiplayer map, played at once (FALSE: no difficulty menu). The list is
-read again first: a tap on the touchscreen focuses a row and activates it at
-once, before the list's update has read which row it is (it started the level
-shown before, Pillar of Autumn on a new profile). The map and gametype lists
-do the same. */
+/* "solo level set map": the level shown, if reached, or the Custom Edition
+campaign map, for the difficulty menu; or the multiplayer map, played at
+once (FALSE: no difficulty menu). The list is read again first: a tap on
+the touchscreen focuses a row and activates it at once, before the list's
+update has read which row it is (it started the level shown before, Pillar
+of Autumn on a new profile). The map and gametype lists do the same. */
 static boolean level_choose(struct widget_instance *list, short controller)
 {
-	short count;
+	short level, count;
 
 	level_list_update(list);
+	level = campaign.shown_level;
 	count = map_kind_count(level_list.kind, level_list.map_count);
 
-	if (level_list.chosen < 0 || level_list.chosen >= count)
+	if (level_list.kind != MAP_KIND_SINGLEPLAYER && (level_list.chosen < 0 || level_list.chosen >= count))
 		return campaign_fail();
 	if (level_list.kind == MAP_KIND_MULTIPLAYER || level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
 	{
@@ -1242,9 +1243,9 @@ static boolean level_choose(struct widget_instance *list, short controller)
 		campaign_start(map_name, main_get_difficulty(), controller);
 		return FALSE;
 	}
+	if (level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER)
 	{
-		char const *map_name = level_list.kind == MAP_KIND_SHADOWRUN ?
-			custom_map_level_name(level_list.kind, level_list.chosen) : main_get_solo_level_name(level_list.chosen);
+		char const *map_name = custom_map_level_name(level_list.kind, level_list.chosen);
 
 		if (!map_name)
 			return campaign_fail();
@@ -1252,6 +1253,13 @@ static boolean level_choose(struct widget_instance *list, short controller)
 		main_defer_map_map_change();
 		return TRUE;
 	}
+	if (level < 0 || level >= NUMBER_OF_SINGLE_PLAYER_LEVELS || !campaign.levels[level].available)
+		return campaign_fail();
+	/* (not yet: setting it at the main menu changes map, as the Xbox's has it
+	not) */
+	main_set_map_name(main_get_solo_level_name(level));
+	main_defer_map_map_change();
+	return TRUE;
 }
 
 /* the difficulty menu: "difficulty item select" starts the game at the
@@ -2995,12 +3003,13 @@ static boolean multiplayer_host(struct widget_instance *widget, struct event_rec
 	return ui_widget_port_host(widget, event, widget_deleted);
 }
 
-/* ---- the map list (the Map screen's): its chooser's SHADOWRUN maps, the
-MULTIPLAYER maps, CUSTOM MULTIPLAYER maps (the map lists', above). A
-Shadowrun map chosen lists the difficulties (B goes back to the map) and is
-hosted as a network co-op game, which goes to Server Setup; a multiplayer map
-goes on to the gametypes. Split screen hosts only multiplayer maps, its
-chooser kept to the multiplayer kinds. */
+/* ---- the map list (the Map screen's): its chooser's SINGLEPLAYER levels,
+MULTIPLAYER maps, CUSTOM SINGLEPLAYER or CUSTOM MULTIPLAYER maps (the map
+lists', above). A level or Custom Edition campaign map chosen lists the
+difficulties (B goes back to the map) and is hosted as a network co-op game,
+which goes to Server Setup; a multiplayer map goes on to the gametypes.
+Split screen hosts only multiplayer maps, its chooser kept to the
+multiplayer kinds. */
 
 enum
 {
@@ -3043,13 +3052,17 @@ static void map_step_open(struct widget_instance *list, short step, short entry)
 	map_kind_focus(list, map_list.first, map_list.chosen);
 }
 
+static void map_level_text(short level, wchar_t *text)
+{
+	string_get("pc\\main_menu\\map_list", level, text);
+}
+
 static void map_difficulty_text(short difficulty, wchar_t *text)
 {
 	string_get("pc\\main_menu\\player_profiles_select\\difficulty_names", difficulty, text);
 }
 
-/* "mp level list initialize": on the map used last, of the kind it was of
-(the Shadowrun prototype's start the chooser) */
+/* "mp level list initialize": on the multiplayer map used last */
 static boolean map_list_initialize(struct widget_instance *list)
 {
 	char const *const *names;
@@ -3059,23 +3072,15 @@ static boolean map_list_initialize(struct widget_instance *list)
 	/* (the maps folders looked for again as the list opens) */
 	custom_edition_maps_look_again();
 	map_list.map_count = ui_widget_port_multiplayer_maps(&names, &last_used);
-	/* (the Shadowrun prototype's maps start the chooser, as New Game's, the
-	multiplayer maps when there are none; a Custom Edition map's kind, when it
-	was the one used last) */
-	map_list.kind = MAP_KIND_SHADOWRUN;
-	map_list.chosen = 0;
+	/* (a Custom Edition map's kind, when it was one) */
+	map_list.kind = MAP_KIND_MULTIPLAYER;
 	if (last_used >= xbox_multiplayer_map_count(map_list.map_count))
 	{
 		map_list.kind = MAP_KIND_CUSTOM_MULTIPLAYER;
 		last_used -= xbox_multiplayer_map_count(map_list.map_count);
 	}
-	else if (!custom_edition_shadowrun_count())
-	{
-		map_list.kind = MAP_KIND_MULTIPLAYER;
-		last_used = PIN(last_used, 0, MAX(xbox_multiplayer_map_count(map_list.map_count) - 1, 0));
-	}
 	map_kind_set(list, map_list.kind);
-	map_step_open(list, MAP_STEP_MAPS, map_list.kind == MAP_KIND_SHADOWRUN ? 0 : last_used);
+	map_step_open(list, MAP_STEP_MAPS, last_used);
 	return TRUE;
 }
 
@@ -3094,17 +3099,26 @@ static void map_list_update(struct widget_instance *list)
 		map_list.first = map_list.chosen = 0;
 	}
 	count = map_step_count();
-	map_row_kind = kind;
 	entry = map_kind_rows_update(list, &map_list.first, count, map_list.step == MAP_STEP_DIFFICULTIES ?
-		map_difficulty_text : map_row_text);
+		map_difficulty_text : kind == MAP_KIND_SINGLEPLAYER ? map_level_text :
+		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text :
+		kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? custom_campaign_map_text : custom_multiplayer_map_text);
 	if (entry != NONE)
 		map_list.chosen = entry;
 	visible_set(named(description, "mp_map_right_item", 0), map_list.chosen < count);
 	/* (the map whose difficulties are listed, else the one chosen) */
 	shown = map_list.step == MAP_STEP_DIFFICULTIES ? map_list.level : map_list.chosen;
-	/* (a Shadowrun map opens the difficulties next, as a campaign level did) */
-	map_description_show(description, NONE,
-		map_list.step == MAP_STEP_DIFFICULTIES || map_list.chosen < count ? map_kind_display_index(kind, shown) : NONE);
+	if (kind == MAP_KIND_SINGLEPLAYER)
+	{
+		map_description_show(description, shown, NONE);
+		level_description(description, "replay_level", shown, FALSE, NULL, NONE);
+	}
+	else
+	{
+		map_description_show(description, NONE,
+			map_list.step == MAP_STEP_DIFFICULTIES || map_list.chosen < count ? map_kind_display_index(kind, shown) :
+			NONE);
+	}
 	profile_name_show(description);
 }
 
@@ -3122,7 +3136,8 @@ static boolean map_list_choose(struct widget_instance *list, boolean *widget_del
 		return campaign_fail();
 	if (map_list.step == MAP_STEP_DIFFICULTIES)
 	{
-		char const *map_name = custom_map_level_name(map_list.kind, map_list.level);
+		char const *map_name = map_list.kind == MAP_KIND_SINGLEPLAYER ? main_get_solo_level_name(map_list.level) :
+			custom_map_level_name(map_list.kind, map_list.level);
 
 		/* the co-op game set up, then Server Setup in the gametypes' place */
 		if (!ui_widget_port_cooperative_level_choose(map_name, chosen))

@@ -8,8 +8,9 @@
 		<on event="left_mouse" run="mouse spinner 1wide click"/>
 	</widget>
 	<strings name="main_menu/new_select/var_map_kinds">
-		<string text="SHADOWRUN"/>
+		<string text="SINGLEPLAYER"/>
 		<string text="MULTIPLAYER"/>
+		<string text="CUSTOM SINGLEPLAYER"/>
 		<string text="CUSTOM MULTIPLAYER"/>
 	</strings>
 </menus>

@@ -34,9 +34,6 @@ enum
 	it keeps */
 	MAXIMUM_SHADOWRUN_RESURRECTED_ACTORS = 6,
 	MAXIMUM_SHADOWRUN_SUMMONS = 5,
-	/* port: summons a unit keeps at once (the array is the executable's five;
-	one, as the Hologram, the rest being unused) */
-	MAXIMUM_LIVING_SHADOWRUN_SUMMONS = 1,
 
 	/* strangle's thorns growing at once, a unit's (the executable's list has
 	no bound), and the thorns kept in all (the definitions' bound is 100) */
@@ -146,10 +143,6 @@ definition (0x10F0) */
 	long summon_time;
 	long summon_lifetime_ticks;
 	long summon_name_index;
-
-	/* port: the Hologram's actor, of which there is one at a time
-	(port/linux/game/shadowrun_tech.c) */
-	long hologram_actor_index;
 
 	/* tree of life: the unit's last trees (0x574), their scale grown
 	(0x5AC) and their ticks left to grow (0x5BC), and its older ones

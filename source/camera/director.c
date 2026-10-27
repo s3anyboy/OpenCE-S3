@@ -127,7 +127,6 @@ symbols in this file:
 #include "flying_camera.h"
 #include "following_camera.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c */
-#include "camera_third_person.h" /* port: port/linux/game/camera_third_person.c */
 #include "observer.h"
 #include "orbiting_camera.h"
 
@@ -329,10 +328,7 @@ director_perspective director_get_perspective(
 
 short director_desired_perspective(
 	long unit_index,
-	director_perspective *perspective,
-	/* port: a melee weapon may hold the camera in third person (game.third_person_melee)
-	a player's own view passes TRUE, the netcode's deterministic camera FALSE */
-	boolean third_person_melee)
+	director_perspective *perspective)
 {
 	short following = FALSE;
 
@@ -372,15 +368,6 @@ short director_desired_perspective(
 			{
 				*perspective = 2;
 			}
-		}
-		/* port: with game.third_person_melee, a melee weapon is held in third
-		person off a seat too (camera_third_person.c). The netcode's
-		deterministic camera passes FALSE here, so the first person it aims
-		projectiles from is the same on every machine */
-		else if (third_person_melee && camera_third_person_wanted(unit_index))
-		{
-			*perspective = 2;
-			following = TRUE;
 		}
 
 		if (*perspective == 1 || *perspective == 3)
@@ -638,7 +625,7 @@ static void director_choose_game_perspective(
 	struct director *director = director_get(local_player_index);
 
 	unit_index = player_control_get_unit_index(local_player_index);
-	following = director_desired_perspective(unit_index, &perspective, TRUE);
+	following = director_desired_perspective(unit_index, &perspective);
 	/* port: the local passenger view must not change the deterministic
 	camera used by player_aim_projectile. Reconsider a menu toggle even
 	when the seat's enter/exit state has not changed. */
@@ -1102,7 +1089,7 @@ short director_camera_deterministic(
 	director_perspective perspective;
 	short following;
 
-	following = director_desired_perspective(unit_index, &perspective, FALSE);
+	following = director_desired_perspective(unit_index, &perspective);
 	if (!following)
 		first_person_camera_deterministic(unit_index, position, forward);
 	else

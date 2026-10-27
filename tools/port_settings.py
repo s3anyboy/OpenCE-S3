@@ -819,8 +819,8 @@ OVERRIDE_ORIGINALS = {
     "main_menu/settings_select/multiplayer_setup/item_options_edit/var_weapon_set": list(range(13)) + [None],
 }
 
-# the map lists' first row: SHADOWRUN, MULTIPLAYER or CUSTOM MULTIPLAYER maps
-# (_map_kind)
+# the map lists' first row: SINGLEPLAYER, MULTIPLAYER, CUSTOM SINGLEPLAYER or
+# CUSTOM MULTIPLAYER maps (_map_kind)
 MAP_KIND_CHOOSER = "main_menu/new_select/list_item_0_map_kind"
 
 # changes to the PC version's widgets (by our names): attributes set, all
@@ -871,8 +871,7 @@ WIDGET_PATCHES = {
         f"{MT}/multiplayer_type_gametypes_item": [f'<child widget="{MT}/multiplayer_type_coop_item" y="309"/>'],
     }},
     # (the Map screen's and New Game's lists: SINGLEPLAYER or MULTIPLAYER
-    # maps, the first row's chooser's (_map_kind: SHADOWRUN and CUSTOM
-    # MULTIPLAYER too); B on the Map screen goes
+    # maps, the first row's chooser's (_map_kind); B on the Map screen goes
     # from a co-op level's difficulties back to the level, else out of the
     # screen: menu_functions.c's map list)
     f"{MT}/mp_map_select/mp_map_select_list_2": {"swap": {"main_menu/new_select/list_item_0": MAP_KIND_CHOOSER},
@@ -1745,15 +1744,15 @@ def _teamplay_options_extras() -> list:
 
 def _map_kind() -> list:
     """the map lists' first row (New Game's and the Map screen's), as the
-    gametype list's chooser: a spinner of the Shadowrun prototype's maps or
-    MULTIPLAYER maps, or the Custom Edition maps of the custom_maps folder
+    gametype list's chooser: a spinner of SINGLEPLAYER or MULTIPLAYER maps,
+    or the Custom Edition maps of the custom_maps folder of either kind
     (menu_functions.c's map lists), for either controller (split screen
     co-op's New Game takes both)"""
     lines = _widget(MAP_KIND_CHOOSER, [("width", 256), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
                                        ("bitmap", "bitmaps/option_bkds_sm"), ("font", "ui\\large_ui"),
                                        ("color", "#FF2896FF"), ("align", "center"), ("text_y", 3)],
                     [f'<child widget="{MAP_KIND_CHOOSER}_spinner" x="9" y="2"/>'])
-    # (wider than the gametype chooser's: the map kinds' names are longer, its
+    # (wider than the gametype chooser's, for CUSTOM SINGLEPLAYER, its
     # arrows at the row's ends)
     lines += _widget(f"{MAP_KIND_CHOOSER}_spinner",
                      [("type", "spinner"), ("width", 238), ("height", 22), ("flags", "left_right_tabs_items"),
@@ -1763,7 +1762,7 @@ def _map_kind() -> list:
                       ("header_bounds", "7 -6 19 0"), ("footer_bounds", "7 238 19 244")],
                      ['<on event="left_mouse" run="mouse spinner 1wide click"/>'])
     lines += _strings("main_menu/new_select/var_map_kinds",
-                      ["SHADOWRUN", "MULTIPLAYER", "CUSTOM MULTIPLAYER"])
+                      ["SINGLEPLAYER", "MULTIPLAYER", "CUSTOM SINGLEPLAYER", "CUSTOM MULTIPLAYER"])
     return lines
 
 

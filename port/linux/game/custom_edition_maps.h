@@ -4,9 +4,9 @@ CUSTOM_EDITION_MAPS.H
 Custom Edition maps in the menus. With game.custom_edition on, the CE maps
 of the custom_maps folder are listed: the multiplayer maps after the Xbox
 levels in the multiplayer level list (ui_widget_event_handler_functions.c),
-and MULTIPLAYER's in the map lists (port/linux/game/menu_functions.c), beside
-the Shadowrun prototype's maps, which have a kind of their own. A CE map's
-level name is custom_maps\<name> (custom_edition_cache.h).
+and both kinds in the map lists' CUSTOM SINGLEPLAYER and CUSTOM MULTIPLAYER
+(port/linux/game/menu_functions.c). A CE map's level name is
+custom_maps\<name> (custom_edition_cache.h).
 
 The menus that show a level (ui_widget_game_data_input_functions.c) refer
 to it by an index into their own tags' strings and frames. Maps that the
@@ -16,8 +16,8 @@ ui_widget.c ask this file for their names, descriptions and pictures.
 	below 0x1000   Xbox multiplayer level (the tags' own index)
 	0x3000 + n     stock campaign level n (co-op)
 	0x4000 + n     CE multiplayer map
-	0x6000 + n     CE campaign map (played alone or as co-op)
-	0x6400 + n     Shadowrun prototype map (the map lists' SHADOWRUN)
+	0x6000 + n     CE campaign map (played alone or as co-op), or a
+	               Shadowrun prototype map (SHADOWRUN_LEVEL_NAME_PREFIX)
 */
 
 #ifndef __CUSTOM_EDITION_MAPS_H
@@ -40,12 +40,6 @@ caches' loader reads from maps\<name>.map (docs/shadowrun_caches.md) */
 struct bitmap_data;
 
 /* ---------- prototypes/CUSTOM_EDITION_MAPS.C */
-
-/* the Shadowrun prototype's maps have display indices just past the Custom
-Edition campaign maps', below ui_widget.c's spinner descriptions' (0x7000),
-so that a list can have them only (the map lists' SHADOWRUN kind): 0x6400 + n
-*/
-#define FIRST_SHADOWRUN_DISPLAY_INDEX 0x6400
 
 /* whether a level name is a Shadowrun prototype map's (shadowrun\<name>) */
 boolean shadowrun_level_name(
@@ -95,21 +89,6 @@ short custom_edition_maps_count(
 short custom_edition_maps_display_index_of(
 	boolean campaign,
 	short index);
-
-/* The Shadowrun prototype's maps, sorted by name: how many there are, and the
-display index of the one at `index` (NONE past them). Scans for maps the
-first time. */
-short custom_edition_shadowrun_count(
-	void);
-short custom_edition_shadowrun_display_index_of(
-	short index);
-
-/* a Shadowrun map's level name to load, or its name for the menus, for a
-display index, or NULL */
-char const *custom_edition_shadowrun_level_name(
-	short display_index);
-wchar_t *custom_edition_shadowrun_name(
-	short display_index);
 
 /* the level name to load for a display index, or NULL */
 char const *custom_edition_maps_level_name(
