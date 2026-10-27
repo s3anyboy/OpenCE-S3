@@ -265,8 +265,8 @@ purchases are its own: they are not sent to the host.
 
 ## Tech
 
-On these maps a player's left bumper uses its tech (`port/linux/game/
-shadowrun_tech.c`; the crouch control, which they do not crouch with). The
+On these maps a player's left bumper (the flashlight control, which lights
+nothing there) uses its tech (`port/linux/game/shadowrun_tech.c`). The
 prototype's logic for it is in its executable (`FUN_0027d9c0` dispatches the
 techs and spells by id; `player_change_tech` gives a player one), but
 missionlet leaves the `t1ed` values a tech reads empty, so each is ported as

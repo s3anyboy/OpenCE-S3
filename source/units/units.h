@@ -144,6 +144,14 @@ typedef char verify_unit_control_port_action_only_bit[
 	UNIT_CONTROL_PORT_ACTION_ONLY_BIT >= NUMBER_OF_UNIT_CONTROL_FLAGS &&
 	UNIT_CONTROL_PORT_ACTION_ONLY_BIT < 16 ? 1 : -1];
 
+/* port: the left bumper, which on the Shadowrun prototype's maps uses the
+player's tech (shadowrun_units.c, shadowrun_tech.c). It has a bit of its own
+past the game's fifteen (the unit's control flags are an unsigned long), and
+like them goes no further than the unit's control */
+#define UNIT_CONTROL_PORT_TECH_BIT 16
+typedef char verify_unit_control_port_tech_bit[
+	UNIT_CONTROL_PORT_TECH_BIT >= NUMBER_OF_UNIT_CONTROL_FLAGS ? 1 : -1];
+
 enum
 {
 	_unit_state_idle = 0,

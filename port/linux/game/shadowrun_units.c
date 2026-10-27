@@ -790,12 +790,12 @@ void shadowrun_unit_update(
 					shadowrun_spell_cast(unit_index, (short)(shadowrun_unit->current_spell - 1));
 				}
 			}
-			/* port: a player's left bumper uses its tech (the crouch control,
-			which on these maps does not crouch: port/linux/game/shadowrun_tech.c) */
+			/* port: a player's left bumper uses its tech (port/linux/game/
+			shadowrun_tech.c; player_control.c sends it as the port's bit) */
 			if (unit->unit.player_index != NONE &&
-				TEST_FLAG(unit->unit.control_flags, _unit_control_crouch_modifier_bit))
+				TEST_FLAG(unit->unit.control_flags, UNIT_CONTROL_PORT_TECH_BIT))
 			{
-				SET_FLAG(unit->unit.control_flags, _unit_control_crouch_modifier_bit, FALSE);
+				SET_FLAG(unit->unit.control_flags, UNIT_CONTROL_PORT_TECH_BIT, FALSE);
 				shadowrun_tech_cast(unit_index);
 			}
 			shadowrun_unit->teleported = FALSE;

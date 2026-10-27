@@ -27,6 +27,7 @@ srud's: this is a plainer one, of the same facts.
 #include "text/font_group.h"
 #include "units/units.h"
 #include "shadowrun_units.h"
+#include "shadowrun_tech.h"
 
 #include <stdio.h>
 
@@ -61,6 +62,26 @@ static char const *const shadowrun_spell_names[NUMBER_OF_SHADOWRUN_SPELLS] =
 	"Pillar of Salt",
 	"Smoke",
 };
+
+/* port: the techs' names, by the executable's ids (units.c, FUN_0027d4e0),
+for the tech the left bumper uses */
+static char const *shadowrun_tech_name(
+	short tech)
+{
+	switch (tech)
+	{
+	case _shadowrun_tech_vision_id: return "Enhanced Vision";
+	case _shadowrun_tech_smartlink_id: return "Smartlink";
+	case _shadowrun_tech_gecko_id: return "Gecko";
+	case _shadowrun_tech_glider_id: return "Glider";
+	case _shadowrun_tech_grapple_id: return "Grapple";
+	case _shadowrun_tech_zoom_id: return "Zoom";
+	case _shadowrun_tech_hologram_id: return "Hologram";
+	case _shadowrun_tech_hearing_id: return "Hearing";
+	case _shadowrun_tech_heal_id: return "Heal";
+	default: return "";
+	}
+}
 
 /* ---------- globals */
 
@@ -214,6 +235,35 @@ void shadowrun_hud_draw(
 			{
 				draw_quad(&cell, shadowrun_hud_pixel(&filling));
 			}
+		}
+	}
+
+	/* port: the tech the left bumper uses, after the spell (the executable
+	draws the one power it has chosen, and its tech is the next) */
+	{
+		short tech = shadowrun_unit_tech(unit_index);
+		char const *tech_name = tech != 0 ? shadowrun_tech_name(tech) : NULL;
+
+		if (tech_name && *tech_name)
+		{
+			real_argb_color tech_color;
+
+			if (shadowrun_unit->tech_ticks > 0)
+			{
+				shadowrun_hud_set_color(&tech_color, 0.95f, 0.45f, 0.7f, 1.0f);
+			}
+			else
+			{
+				shadowrun_hud_set_color(&tech_color, 0.9f, 0.55f, 0.55f, 0.6f);
+			}
+			snprintf(text, sizeof(text), "%s", tech_name);
+			snprintf(text + strlen(text), sizeof(text) - strlen(text), ", left bumper");
+			bounds.x0 = left;
+			bounds.x1 = (short)(left + 400);
+			bounds.y0 = (short)(top - line_height);
+			bounds.y1 = top;
+			draw_string_set_draw_mode(font_index, NONE, _shadowrun_hud_text_left, 0, &tech_color);
+			rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
 		}
 	}
 
