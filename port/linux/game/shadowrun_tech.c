@@ -96,6 +96,8 @@ static void shadowrun_holograms_clear(
 	long unit_index);
 static void shadowrun_holograms_update(
 	void);
+static void shadowrun_hologram_remove(
+	long *actor_index);
 static void shadowrun_vision_clear(
 	long unit_index);
 static void shadowrun_vision_mark(
@@ -281,6 +283,8 @@ boolean shadowrun_tech_cast(
 			{
 				add_vectors3d((real_vector3d const *)&target, &vector, (real_vector3d *)&target);
 			}
+			/* (the pull starts where the bolt holds or lands: the map's projectile's
+			attach and detonation, both of which shadowrun_magic.c hears) */
 			if (shadowrun_grapple_fire(unit_index, projectile_definition_index) == NONE)
 			{
 				return FALSE;
@@ -422,18 +426,32 @@ real shadowrun_glider_jump_scale(
 	return shadowrun_glider_worn(unit_index) ? SHADOWRUN_GLIDER_JUMP_SCALE : 1.f;
 }
 
-/* the glider put on the unit's back: a scenery of the map's, attached at its
-back marker (a biped has none: at its body's, behind it) */
+/* the glider put on the unit's back: a scenery of the map's, attached to its
+back's node ("body": the glider's own model has no markers, so it is
+attached by node, not by marker: object_attach_to_marker would ask it for
+one, and assert) */
 static long shadowrun_glider_begin(
 	long unit_index)
 {
 	long definition_index = shadowrun_glider_scenery();
 	struct object_placement_data placement;
 	long scenery_index;
+	long parent_node_index = NONE;
+	struct object_marker markers[1];
+	char const *marker_name = NULL;
 
 	if (definition_index == NONE)
 	{
 		return NONE;
+	}
+	/* (a biped's "back", or the nearest it has) */
+	if (object_get_marker_by_name(unit_index, "back", markers, NUMBEROF(markers)) > 0)
+	{
+		marker_name = "back";
+	}
+	else if (object_get_marker_by_name(unit_index, "body", markers, NUMBEROF(markers)) > 0)
+	{
+		marker_name = "body";
 	}
 	object_placement_data_new(&placement, definition_index, unit_index);
 	object_get_origin(unit_index, &placement.position);
@@ -442,13 +460,17 @@ static long shadowrun_glider_begin(
 	scenery_index = object_new(&placement);
 	if (scenery_index != NONE)
 	{
-		if (object_get_marker_by_name(unit_index, "back", NULL, 0) > 0)
+		if (marker_name && object_get_marker_by_name(unit_index, marker_name, markers, NUMBEROF(markers)) > 0)
 		{
-			object_attach_to_marker(unit_index, "back", scenery_index, NULL);
+			parent_node_index = markers[0].node_index;
+			/* (where the marker is: the glider's model has no marker to align
+			with, so it is placed by position) */
+			object_set_position(scenery_index, &markers[0].matrix.position, &markers[0].matrix.forward,
+				&markers[0].matrix.up);
 		}
-		else
+		if (parent_node_index != NONE)
 		{
-			object_attach_to_marker(unit_index, "body", scenery_index, NULL);
+			object_attach_to_node(unit_index, scenery_index, (short)parent_node_index);
 		}
 	}
 
@@ -574,8 +596,10 @@ boolean shadowrun_grapple_projectile_is(
 		projectile->definition_index == shadowrun_grapple_projectile_index;
 }
 
-/* the projectile's caster pulled to where it landed, over the pull's ticks
-(shadowrun_grapple_update moves it, as a teleport's moves it) */
+/* the projectile's caster pulled to where it goes, over the pull's ticks
+(shadowrun_grapple_update moves it, as a teleport's moves it). Where it goes
+is the bolt's own position each tick while the bolt flies, and where it
+landed once it is gone */
 void shadowrun_grapple_pull(
 	long projectile_index,
 	real_point3d const *position)
@@ -586,8 +610,16 @@ void shadowrun_grapple_pull(
 
 	if (shadowrun_unit && unit_try_and_get(unit_index) && biped_try_and_get(unit_index))
 	{
+		/* (a pull already running follows its own bolt: the map's projectile
+		may say it landed while this one still flies) */
+		if (shadowrun_unit->grapple_ticks > 0)
+		{
+			shadowrun_unit->grapple_target = *position;
+			return;
+		}
 		shadowrun_unit->grapple_origin = object_get(unit_index)->object.position;
 		shadowrun_unit->grapple_target = *position;
+		shadowrun_unit->grapple_projectile = projectile_index;
 		shadowrun_unit->grapple_pull_ticks = SHADOWRUN_GRAPPLE_PULL_TICKS;
 		shadowrun_unit->grapple_ticks = SHADOWRUN_GRAPPLE_PULL_TICKS;
 	}
@@ -613,6 +645,20 @@ void shadowrun_grapple_update(
 	unit = unit_get(unit_index);
 	from = shadowrun_unit->grapple_origin;
 	to = shadowrun_unit->grapple_target;
+	/* (the bolt's own place, while it flies: the pull follows it) */
+	{
+		struct object_datum *bolt = shadowrun_unit->grapple_projectile != NONE ?
+			object_try_and_get_and_verify_type(shadowrun_unit->grapple_projectile, _object_mask_projectile) : NULL;
+
+		if (bolt)
+		{
+			to = shadowrun_unit->grapple_target = bolt->object.position;
+		}
+		else
+		{
+			shadowrun_unit->grapple_projectile = NONE;
+		}
+	}
 	fraction = (real)(shadowrun_unit->grapple_pull_ticks - shadowrun_unit->grapple_ticks + 1) /
 		(real)shadowrun_unit->grapple_pull_ticks;
 	if (fraction > 1.f)
@@ -649,6 +695,11 @@ void shadowrun_player_controls(
 	long unit_index,
 	unsigned long flags)
 {
+	if ((flags & FLAG(UNIT_CONTROL_PORT_SWITCH_TECH_BIT)) && shadowrun_map_loaded())
+	{
+		/* the d-pad's left: the next tech the player has bought */
+		shadowrun_players_switch_tech();
+	}
 	if (UNIT_CONTROL_PORT_TECH_BIT < 32 && (flags & FLAG(UNIT_CONTROL_PORT_TECH_BIT)) &&
 		shadowrun_map_loaded())
 	{
@@ -720,6 +771,135 @@ void shadowrun_unit_tech_delete(
 	return;
 }
 
+/* port: whether the player has bought that tech */
+boolean shadowrun_player_has_tech(
+	struct shadowrun_player *shadowrun_player,
+	short tech)
+{
+	short index;
+
+	if (!shadowrun_player || tech < 0)
+	{
+		return FALSE;
+	}
+	for (index = 0; index < shadowrun_player->known_tech_count; index++)
+	{
+		if (shadowrun_player->known_techs[index] == tech)
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* port: the player takes up one of the techs it has bought (d-pad left goes
+through them). TRUE if it changed */
+boolean shadowrun_player_select_tech(
+	struct shadowrun_player *shadowrun_player,
+	long unit_index,
+	short tech)
+{
+	if (!shadowrun_player || !shadowrun_player_has_tech(shadowrun_player, tech))
+	{
+		return FALSE;
+	}
+	shadowrun_player->chosen_tech = tech;
+	if (unit_index != NONE)
+	{
+		shadowrun_unit_set_tech(unit_index, tech);
+	}
+
+	return TRUE;
+}
+
+/* port: the next tech the player has bought, after the one it has chosen (and
+round again) */
+short shadowrun_player_next_tech(
+	struct shadowrun_player *shadowrun_player)
+{
+	short index;
+
+	if (!shadowrun_player || shadowrun_player->known_tech_count <= 0)
+	{
+		return _shadowrun_tech_none;
+	}
+	for (index = 0; index < shadowrun_player->known_tech_count; index++)
+	{
+		if (shadowrun_player->known_techs[index] == shadowrun_player->chosen_tech)
+		{
+			return (short)shadowrun_player->known_techs[(index + 1) % shadowrun_player->known_tech_count];
+		}
+	}
+
+	return (short)shadowrun_player->known_techs[0];
+}
+
+/* port: the player buys the tech: it is added to those it has (once each),
+and taken up, so the rest are kept */
+boolean shadowrun_player_buy_tech(
+	struct shadowrun_player *shadowrun_player,
+	long unit_index,
+	short tech)
+{
+	if (!shadowrun_player || tech < 0 || tech >= MAXIMUM_SHADOWRUN_TECHS)
+	{
+		return FALSE;
+	}
+	if (!shadowrun_player_has_tech(shadowrun_player, tech))
+	{
+		/* port: at most two techs (port/linux/game/shadowrun_units.h) */
+		if (shadowrun_player->known_tech_count >= MAXIMUM_SHADOWRUN_PLAYER_TECHS)
+		{
+			return FALSE;
+		}
+		shadowrun_player->known_techs[shadowrun_player->known_tech_count++] = tech;
+	}
+	shadowrun_player->chosen_tech = tech;
+	if (unit_index != NONE)
+	{
+		shadowrun_unit_set_tech(unit_index, tech);
+	}
+
+	return TRUE;
+}
+
+/* port: a player takes the tech off; the others it has stay, and it takes up
+one of them (so taking one off does not leave it with none) */
+boolean shadowrun_player_remove_tech(
+	struct shadowrun_player *shadowrun_player,
+	long unit_index,
+	short tech)
+{
+	short index;
+
+	if (!shadowrun_player)
+	{
+		return FALSE;
+	}
+	for (index = 0; index < shadowrun_player->known_tech_count; index++)
+	{
+		if (shadowrun_player->known_techs[index] == tech)
+		{
+			short last = --shadowrun_player->known_tech_count;
+
+			for (; index < last; index++)
+			{
+				shadowrun_player->known_techs[index] = shadowrun_player->known_techs[index + 1];
+			}
+			break;
+		}
+	}
+	shadowrun_player->chosen_tech = shadowrun_player->known_tech_count > 0 ?
+		(short)shadowrun_player->known_techs[0] : _shadowrun_tech_none;
+	if (unit_index != NONE)
+	{
+		shadowrun_unit_set_tech(unit_index, shadowrun_player->chosen_tech);
+	}
+
+	return TRUE;
+}
+
 /* the scripts' player_change_tech (and the console's): the players know the
 tech, which their units take. FALSE if they are not on a Shadowrun map */
 boolean shadowrun_players_change_tech(
@@ -729,7 +909,7 @@ boolean shadowrun_players_change_tech(
 	struct player_datum *player;
 	boolean changed = FALSE;
 
-	if (!shadowrun_map_loaded() || tech < 0 || tech > _shadowrun_tech_zoom_id)
+	if (!shadowrun_map_loaded() || tech < 0 || tech >= MAXIMUM_SHADOWRUN_TECHS)
 	{
 		return FALSE;
 	}
@@ -740,16 +920,37 @@ boolean shadowrun_players_change_tech(
 
 		if (shadowrun_player)
 		{
-			shadowrun_player->known_tech = tech;
-			if (player->unit_index != NONE)
-			{
-				shadowrun_unit_set_tech(player->unit_index, tech);
-			}
+			/* (the script gives the tech: it is bought, so the others stay) */
+			shadowrun_player_buy_tech(shadowrun_player, player->unit_index, tech);
 			changed = TRUE;
 		}
 	}
 
 	return changed;
+}
+
+/* port: the d-pad's left, on a Shadowrun map: the local players take up the
+next of their techs */
+void shadowrun_players_switch_tech(
+	void)
+{
+	short local_player_index = local_player_get_next(NONE);
+
+	while (local_player_index != NONE)
+	{
+		long player_index = local_player_get_player_index(local_player_index);
+		struct player_datum *player = player_try_and_get(player_index);
+		struct shadowrun_player *shadowrun_player = shadowrun_player_get(player_index);
+		short next = shadowrun_player_next_tech(shadowrun_player);
+
+		if (player && next != _shadowrun_tech_none)
+		{
+			shadowrun_player_select_tech(shadowrun_player, player->unit_index, next);
+		}
+		local_player_index = local_player_get_next(local_player_index);
+	}
+
+	return;
 }
 
 /* ---------- private code */
@@ -772,8 +973,30 @@ boolean shadowrun_hologram_active(
 	return FALSE;
 }
 
-/* the holograms whose time is up, or whose caster is gone, go: killed (a
-summon's actors are) and forgotten */
+/* a hologram taken out of the world: its actor and its unit deleted (not
+killed: a kill leaves a body, and a hologram leaves nothing) */
+static void shadowrun_hologram_remove(
+	long *actor_index)
+{
+	struct actor_datum *actor = actor_try_and_get(*actor_index);
+
+	if (actor)
+	{
+		long unit_index = actor->meta.unit_index;
+
+		actor_delete(*actor_index, TRUE);
+		if (unit_index != NONE && object_try_and_get_and_verify_type(unit_index, NONE))
+		{
+			object_delete(unit_index);
+		}
+	}
+	*actor_index = NONE;
+
+	return;
+}
+
+/* the holograms whose time is up, or whose caster is gone, go: deleted and
+forgotten */
 static void shadowrun_holograms_update(
 	void)
 {
@@ -792,11 +1015,8 @@ static void shadowrun_holograms_update(
 		}
 		if (gone)
 		{
-			if (actor_try_and_get(hologram->actor_index))
-			{
-				actor_kill(hologram->actor_index, TRUE, FALSE);
-			}
 			shadowrun_holograms[index] = shadowrun_holograms[--shadowrun_hologram_count];
+			shadowrun_hologram_remove(&hologram->actor_index);
 		}
 	}
 
@@ -815,11 +1035,10 @@ static void shadowrun_holograms_clear(
 
 		if (hologram->owner_unit_index == unit_index)
 		{
-			if (actor_try_and_get(hologram->actor_index))
-			{
-				actor_kill(hologram->actor_index, TRUE, FALSE);
-			}
+			long actor_index = hologram->actor_index;
+
 			shadowrun_holograms[index] = shadowrun_holograms[--shadowrun_hologram_count];
+			shadowrun_hologram_remove(&actor_index);
 		}
 	}
 

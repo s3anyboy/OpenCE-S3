@@ -578,6 +578,20 @@ void shadowrun_projectile_detonate(
 	return;
 }
 
+/* port: a projectile that attached (projectiles.c): a grapple's bolt pulls
+its caster where it holds, as one that detonates does where it lands */
+void shadowrun_projectile_attached(
+	long projectile_index,
+	real_point3d const *position)
+{
+	if (shadowrun_map_loaded() && shadowrun_grapple_projectile_is(projectile_index))
+	{
+		shadowrun_grapple_pull(projectile_index, position);
+	}
+
+	return;
+}
+
 boolean shadowrun_unit_intangible(
 	long unit_index)
 {

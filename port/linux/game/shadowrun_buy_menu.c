@@ -945,9 +945,10 @@ static void shadowrun_shop_buy(
 
 			if (tech != NONE)
 			{
-				if (shadowrun_unit_tech(unit_index) == tech)
+				if (shadowrun_player_has_tech(shadowrun_player, tech))
 				{
-					/* (worn: the removal's price takes it off, as the menu says) */
+					/* (had: the removal's price takes it off, as the menu says;
+					the techs it also has stay) */
 					long removal_price = shadowrun_shop_price(definition,
 						shadowrun_shop_items[state->selection].removal_price_index);
 
@@ -958,8 +959,7 @@ static void shadowrun_shop_buy(
 					else
 					{
 						shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech_owned);
-						shadowrun_unit_set_tech(unit_index, _shadowrun_tech_none);
-						shadowrun_player->known_tech = _shadowrun_tech_none;
+						shadowrun_player_remove_tech(shadowrun_player, unit_index, tech);
 						shadowrun_player->money -= removal_price;
 						state->purchase_time = game_time_get();
 					}
@@ -967,8 +967,7 @@ static void shadowrun_shop_buy(
 				else
 				{
 					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech);
-					shadowrun_unit_set_tech(unit_index, tech);
-					shadowrun_player->known_tech = tech;
+					shadowrun_player_buy_tech(shadowrun_player, unit_index, tech);
 					shadowrun_player->money -= price;
 					state->purchase_time = game_time_get();
 				}
@@ -1131,10 +1130,12 @@ static boolean shadowrun_shop_owned(
 	}
 	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
 	{
-		/* port: the tech the item sells is the one the unit has on */
+		/* port: the tech the item sells, which the player has bought (it may
+		have several) */
 		short tech = shadowrun_shop_tech_id(item);
 
-		result = tech != NONE && shadowrun_unit_tech(unit_index) == tech;
+		result = tech != NONE && shadowrun_player_has_tech(
+			shadowrun_player_get(player_index_from_unit_index(unit_index)), tech);
 	}
 	else if (action >= _shadowrun_shop_first_magic && action <= _shadowrun_shop_last_magic)
 	{
@@ -1186,9 +1187,22 @@ static boolean shadowrun_shop_available(
 	}
 	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
 	{
-		/* port: a tech the port plays is sold once, until it is taken off */
+		/* port: a tech the port plays is sold once, until it is taken off, and
+		no more than the player's two (port/linux/game/shadowrun_units.h) */
+		struct shadowrun_player *shadowrun_player =
+			shadowrun_player_get(player_index_from_unit_index(unit_index));
+
 		result = shadowrun_shop_tech_id((short)item) != NONE &&
-			shadowrun_unit_tech(unit_index) != shadowrun_shop_tech_id((short)item);
+			!shadowrun_shop_owned(unit_index, definition, item) && shadowrun_player &&
+			shadowrun_player->known_tech_count < MAXIMUM_SHADOWRUN_PLAYER_TECHS;
+	}
+	else if (action >= _shadowrun_shop_first_magic && action <= _shadowrun_shop_last_magic)
+	{
+		/* port: a spell it does not know, while the player has fewer than its
+		two */
+		result = !shadowrun_shop_owned(unit_index, definition, item) &&
+			shadowrun_player_known_spell_count(
+				shadowrun_player_get(player_index_from_unit_index(unit_index))) < MAXIMUM_SHADOWRUN_PLAYER_SPELLS;
 	}
 	else if (action < _shadowrun_shop_grenade)
 	{

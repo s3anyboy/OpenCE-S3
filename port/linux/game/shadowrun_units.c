@@ -96,16 +96,16 @@ void shadowrun_initialize_for_new_map(
 	void)
 {
 	csmemset(shadowrun_globals.players, 0, HALO_PORT_MAXIMUM_NETWORK_PLAYERS * sizeof(struct shadowrun_player));
-	/* port: a player knows no tech until it is given one, which is not 0:
-	reflexes is (shadowrun_tech.h) */
-	{
-		short player_index;
-
-		for (player_index = 0; player_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; player_index++)
+		/* port: a player has bought no tech, and has none chosen, which is not
+		0: reflexes is (shadowrun_tech.h) */
 		{
-			shadowrun_globals.players[player_index].known_tech = _shadowrun_tech_none;
-		}
+	short player_index;
+
+	for (player_index = 0; player_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; player_index++)
+	{
+		shadowrun_globals.players[player_index].chosen_tech = _shadowrun_tech_none;
 	}
+		}
 	shadowrun_magic_initialize_for_new_map();
 	shadowrun_buy_menu_initialize_for_new_map();
 
@@ -235,6 +235,7 @@ void shadowrun_unit_new(
 		/* port: no tech, which is not 0 (reflexes is: shadowrun_tech.h) */
 		shadowrun_unit->tech = _shadowrun_tech_none;
 		shadowrun_unit->vision_nav_index = NONE;
+		shadowrun_unit->grapple_projectile = NONE;
 		shadowrun_unit->strangle_looping_sound_index = NONE;
 		shadowrun_unit->resurrection_ball_index = NONE;
 		for (index = 0; index < MAXIMUM_SHADOWRUN_RESURRECTED_ACTORS; index++)
@@ -892,8 +893,11 @@ void shadowrun_player_spawned(
 
 		shadowrun_buy_menu_player_spawned(player_index);
 		shadowrun_unit_set_race(player->unit_index, shadowrun_player->race_index);
-		/* port: the tech the player knows (shadowrun_tech.c) */
-		shadowrun_unit_set_tech(player->unit_index, (short)shadowrun_player->known_tech);
+		/* port: the tech the player has taken up, of those it has bought
+		(shadowrun_tech.c) */
+		shadowrun_unit_set_tech(player->unit_index,
+			shadowrun_player_has_tech(shadowrun_player, shadowrun_player->chosen_tech) ?
+				shadowrun_player->chosen_tech : _shadowrun_tech_none);
 		for (power = 0; power < MAXIMUM_SHADOWRUN_POWERS; power++)
 		{
 			if (shadowrun_player->known_powers[power] != 0)
@@ -915,6 +919,29 @@ void shadowrun_player_spawned(
 	return;
 }
 
+/* port: the spells a player has (of the powers it knows, those that are
+spells: a power's index below the spells' count is one) */
+short shadowrun_player_known_spell_count(
+	struct shadowrun_player *shadowrun_player)
+{
+	short count = 0;
+	short power;
+
+	if (!shadowrun_player)
+	{
+		return 0;
+	}
+	for (power = 0; power < NUMBER_OF_SHADOWRUN_SPELLS; power++)
+	{
+		if (shadowrun_player->known_powers[power] != 0)
+		{
+			count++;
+		}
+	}
+
+	return count;
+}
+
 /* 0x27D3A0: the unit learns the power (magic, or tech); its player keeps it */
 boolean shadowrun_unit_learn_power(
 	long unit_index,
@@ -930,6 +957,13 @@ boolean shadowrun_unit_learn_power(
 	{
 		struct shadowrun_player *shadowrun_player = shadowrun_player_get(unit->unit.player_index);
 
+		/* port: a player has at most two spells (port/linux/game/shadowrun_units.h)
+		; an actor's are its race's, and have no such bound */
+		if (shadowrun_player && shadowrun_player_known_spell_count(shadowrun_player) >=
+			MAXIMUM_SHADOWRUN_PLAYER_SPELLS)
+		{
+			return FALSE;
+		}
 		shadowrun_unit->known_powers[power] = 1;
 		shadowrun_unit->known_power_count++;
 		if (shadowrun_player)

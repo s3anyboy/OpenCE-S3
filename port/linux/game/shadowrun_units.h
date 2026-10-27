@@ -24,6 +24,14 @@ the biped's after those, from 0x101C), a player's in the player's datum.
 /* port: the units a vision marks at once (shadowrun_tech.c) */
 #define MAXIMUM_SHADOWRUN_VISION_TARGETS 32
 
+/* port: the techs, as FUN_0027d4e0 numbers them (shadowrun_tech.h's) */
+#define MAXIMUM_SHADOWRUN_TECHS 15
+
+/* port: the spells and the techs a player may have at once (no more are bought:
+its buy menu says so by not selling them) */
+#define MAXIMUM_SHADOWRUN_PLAYER_SPELLS 2
+#define MAXIMUM_SHADOWRUN_PLAYER_TECHS 2
+
 enum
 {
 	/* a grenade type the executable has beyond this build's two (the
@@ -91,7 +99,7 @@ definition (0x10F0) */
 	boolean spell_failed[NUMBER_OF_SHADOWRUN_SPELLS];
 	byte pad0[3];
 
-	/* port: the tech the left bumper uses (0 for none), the ticks its look
+	/* port: the tech the left bumper uses (_shadowrun_tech_none for none), the ticks its look
 	lasts, and its output: the number of the navpoint it marks it against
 	(-1 for none), the units it marked and how many (shadowrun_tech.c) */
 	long tech;
@@ -100,6 +108,8 @@ definition (0x10F0) */
 	left and all it takes (shadowrun_tech.c) */
 	real_point3d grapple_origin;
 	real_point3d grapple_target;
+	/* the bolt it follows, while it flies */
+	long grapple_projectile;
 	long grapple_ticks;
 	long grapple_pull_ticks;
 	long vision_nav_index;
@@ -242,8 +252,13 @@ struct shadowrun_player
 	long money;
 	boolean given_money;
 	byte pad2[3];
-	/* port: the tech it knows, which its units take (shadowrun_tech.c) */
-	long known_tech;
+	/* port: the techs it has bought, in the order it bought them, and how
+	many (its units take the one it has chosen: shadowrun_tech.c) */
+	long known_techs[MAXIMUM_SHADOWRUN_PLAYER_TECHS];
+	short known_tech_count;
+	/* the one it has chosen of them (its units take that) */
+	short chosen_tech;
+	byte pad3[2];
 };
 
 /* ---------- prototypes/SHADOWRUN_UNITS.C */
@@ -325,7 +340,13 @@ void shadowrun_unit_release_capacity(
 void shadowrun_unit_set_race(
 	long unit_index,
 	long race_index);
-/* the unit learns the power (a spell, or tech): FALSE if it knew it */
+/* port: the spells a player has (of the powers it knows), and its
+player_change_tech's techs */
+short shadowrun_player_known_spell_count(
+	struct shadowrun_player *shadowrun_player);
+
+/* the unit learns the power (a spell, or tech): FALSE if it knew it, or the
+player already has its two (shadowrun_units.c) */
 boolean shadowrun_unit_learn_power(
 	long unit_index,
 	short power);

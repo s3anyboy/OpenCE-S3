@@ -39,7 +39,7 @@ it has one */
 	_shadowrun_tech_hologram_id = 12,
 	_shadowrun_tech_hearing_id = 13,
 	_shadowrun_tech_heal_id = 14,
-	NUMBER_OF_SHADOWRUN_TECHS,
+	/* (MAXIMUM_SHADOWRUN_TECHS, of shadowrun_units.h, is their count) */
 
 	/* no tech (reflexes is 0, so 0 cannot be that) */
 	_shadowrun_tech_none = -1,
@@ -178,6 +178,30 @@ players know the tech (a player's is kept for its units). FALSE if they are
 not on a Shadowrun map */
 boolean shadowrun_players_change_tech(
 	short tech);
+/* port: the techs a player has bought, and the one it has taken up:
+player_change_tech, the buy menu and the d-pad's left (shadowrun_tech.c) */
+struct shadowrun_player;
+boolean shadowrun_player_has_tech(
+	struct shadowrun_player *shadowrun_player,
+	short tech);
+boolean shadowrun_player_select_tech(
+	struct shadowrun_player *shadowrun_player,
+	long unit_index,
+	short tech);
+short shadowrun_player_next_tech(
+	struct shadowrun_player *shadowrun_player);
+boolean shadowrun_player_buy_tech(
+	struct shadowrun_player *shadowrun_player,
+	long unit_index,
+	short tech);
+boolean shadowrun_player_remove_tech(
+	struct shadowrun_player *shadowrun_player,
+	long unit_index,
+	short tech);
+/* the local players, each to the next of its techs (player_control.c) */
+void shadowrun_players_switch_tech(
+	void);
+
 /* the tech one unit knows, as the console's shadowrun_tech <id> gives it to
 the first local player */
 boolean shadowrun_local_player_change_tech(

@@ -152,6 +152,12 @@ like them goes no further than the unit's control */
 typedef char verify_unit_control_port_tech_bit[
 	UNIT_CONTROL_PORT_TECH_BIT >= NUMBER_OF_UNIT_CONTROL_FLAGS ? 1 : -1];
 
+/* port: the d-pad's left, which on those maps goes to the next tech the
+player has bought (the tech's own bit, as the left bumper's) */
+#define UNIT_CONTROL_PORT_SWITCH_TECH_BIT 17
+typedef char verify_unit_control_port_switch_tech_bit[
+	UNIT_CONTROL_PORT_SWITCH_TECH_BIT != UNIT_CONTROL_PORT_TECH_BIT ? 1 : -1];
+
 enum
 {
 	_unit_state_idle = 0,

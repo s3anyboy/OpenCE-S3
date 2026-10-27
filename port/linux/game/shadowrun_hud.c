@@ -265,13 +265,15 @@ text changes). Bright while it runs, grey otherwise */
 			char tech_text[64];
 			real_argb_color tech_color;
 
+			/* (blue while it may be used, as the spell's is, and grey while it
+			runs: its own time, as the spell's cooldown) */
 			if (shadowrun_unit->tech_ticks > 0)
 			{
-				shadowrun_hud_set_color(&tech_color, 0.95f, 0.45f, 0.7f, 1.0f);
+				shadowrun_hud_set_color(&tech_color, 0.9f, 0.55f, 0.55f, 0.6f);
 			}
 			else
 			{
-				shadowrun_hud_set_color(&tech_color, 0.9f, 0.55f, 0.55f, 0.6f);
+				shadowrun_hud_set_color(&tech_color, 1.0f, 0.55f, 0.75f, 1.0f);
 			}
 			snprintf(tech_text, sizeof(tech_text), "%s", tech_name);
 			bounds.x0 = (short)(left - SHADOWRUN_HUD_TECH_GAP - 400);

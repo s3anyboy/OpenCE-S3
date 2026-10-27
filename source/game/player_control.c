@@ -1525,6 +1525,12 @@ static void get_local_player_input_blob(
 						input->unit_control_flags,
 						UNIT_CONTROL_PORT_TECH_BIT,
 						effective_buttons[_button_flashlight] == TRUE);
+					/* port: the d-pad's left goes to the next tech the player has
+					bought (a press once, as its right's cycle of the spells) */
+					SET_FLAG(
+						input->unit_control_flags,
+						UNIT_CONTROL_PORT_SWITCH_TECH_BIT,
+						halo_linux_gamepad_dpad_pressed(dpad) & HALO_LINUX_DPAD_LEFT);
 					/* the Back control opens Shadowrun's buy menu; while it is
 					open the stick (or the d-pad) and the jump, melee and action
 					controls work it, and the player does nothing else */
