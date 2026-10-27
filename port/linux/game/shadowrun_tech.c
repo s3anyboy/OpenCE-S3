@@ -29,6 +29,7 @@ marked with the port's navpoints.
 #include "units/biped_definitions.h"
 #include "units/bipeds.h"
 #include "units/units.h"
+#include "shadowrun.h"
 #include "shadowrun_units.h"
 #include "shadowrun_tech.h"
 
@@ -243,6 +244,22 @@ boolean shadowrun_tech_cast(
 	}
 
 	return FALSE;
+}
+
+/* port: the controls a local player's unit was given this tick
+(players.c), which the game's own control flags cannot carry the left
+bumper's tech in: it is used here, where the unit's controls are its own */
+void shadowrun_player_controls(
+	long unit_index,
+	unsigned long flags)
+{
+	if (UNIT_CONTROL_PORT_TECH_BIT < 32 && (flags & FLAG(UNIT_CONTROL_PORT_TECH_BIT)) &&
+		shadowrun_map_loaded())
+	{
+		shadowrun_tech_cast(unit_index);
+	}
+
+	return;
 }
 
 void shadowrun_unit_tech_died(

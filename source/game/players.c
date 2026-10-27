@@ -4983,6 +4983,15 @@ void players_update_before_game(
 						"c:\\halo\\SOURCE\\game\\players.c",
 						0x2E5,
 						(NONE == control_data.zoom_level) || ((control_data.zoom_level >= 0)));
+					/* port: the Shadowrun prototype's tech, which the left bumper uses
+					(player_control.c, UNIT_CONTROL_PORT_TECH_BIT): the control's
+					flags are the game's fifteen, so it is raised here, with the
+					unit's controls, rather than carried in them */
+					{ 
+						extern void shadowrun_player_controls(long unit_index, unsigned long flags);
+
+						shadowrun_player_controls(player->unit_index, action->control_flags);
+					}
 					unit_control(player->unit_index, &control_data);
 				}
 				else if (unit->unit.swarm_actor_index == NONE &&

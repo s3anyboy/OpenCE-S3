@@ -790,14 +790,10 @@ void shadowrun_unit_update(
 					shadowrun_spell_cast(unit_index, (short)(shadowrun_unit->current_spell - 1));
 				}
 			}
-			/* port: a player's left bumper uses its tech (port/linux/game/
-			shadowrun_tech.c; player_control.c sends it as the port's bit) */
-			if (unit->unit.player_index != NONE &&
-				TEST_FLAG(unit->unit.control_flags, UNIT_CONTROL_PORT_TECH_BIT))
-			{
-				SET_FLAG(unit->unit.control_flags, UNIT_CONTROL_PORT_TECH_BIT, FALSE);
-				shadowrun_tech_cast(unit_index);
-			}
+			/* port: a player's tech (the left bumper) is used where its controls
+			are made the unit's (players.c, shadowrun_player_controls in
+			port/linux/game/shadowrun_tech.c): the game's control flags are the
+			word unit_control_data carries, and have no room for it */
 			shadowrun_unit->teleported = FALSE;
 			shadowrun_spells_update(unit_index);
 			shadowrun_unit_head_update(unit_index);
