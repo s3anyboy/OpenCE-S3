@@ -2014,6 +2014,12 @@ static void shadowrun_trees_update(
 starts as it does (the map's tags are walked: a tag_loaded takes an exact
 name, and a protected map's tags have no names to find it by). NONE if the
 map has neither. The result is kept in `cache` (a map's tags do not change) */
+/* port: the map's actor variant of that name, else the first whose name
+starts as it does (the map's tags are walked: a tag_loaded takes an exact
+name, and a protected map's tags have no names to find it by). NONE if the
+map has neither. `cache` holds NONE until it is looked for once, then the
+index found, or SHADOWRUN_NAMED_VARIANT_NOT_FOUND (-2: a value no index is)
+if there was none, so that a map is walked once */
 #define SHADOWRUN_NAMED_VARIANT_NOT_FOUND (-2)
 
 static long shadowrun_actor_variant_named(
@@ -2025,9 +2031,9 @@ static long shadowrun_actor_variant_named(
 	long found = NONE;
 	long tag_index;
 
-	if (*cache > SHADOWRUN_NAMED_VARIANT_NOT_FOUND)
+	if (*cache != NONE)
 	{
-		return *cache;
+		return *cache == SHADOWRUN_NAMED_VARIANT_NOT_FOUND ? NONE : *cache;
 	}
 	tag_iterator_new(&iterator, SHADOWRUN_ACTOR_VARIANT_TAG);
 	while (found == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
