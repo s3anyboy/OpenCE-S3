@@ -44,8 +44,19 @@ the rest) */
 	SHADOWRUN_VISION_RANGE = 600,
 	SHADOWRUN_VISION_TICKS = 30 * 30,
 
-	/* gecko: how long the wearer climbs anything (30 s) */
+	/* gecko: how long the wearer climbs anything (30 s), and the most biped
+definitions it keeps the flag on at once */
 	SHADOWRUN_GECKO_TICKS = 30 * 30,
+	MAXIMUM_SHADOWRUN_GECKO_DEFINITIONS = 16,
+
+	/* hologram: how far before the caster its aim starts, how far it reaches
+	(world units: a metre is ten: 20 m), and how long it stays */
+	SHADOWRUN_HOLOGRAM_ORIGIN_OFFSET = 1,
+	SHADOWRUN_HOLOGRAM_RANGE = 200,
+	SHADOWRUN_HOLOGRAM_TICKS = 30 * 30,
+
+	/* the holograms standing at once (all the units') */
+	MAXIMUM_SHADOWRUN_HOLOGRAMS = 8,
 };
 
 /* ---------- prototypes/SHADOWRUN_TECH.C */
@@ -56,6 +67,15 @@ void shadowrun_unit_set_tech(
 	short tech);
 short shadowrun_unit_tech(
 	long unit_index);
+/* port: the map's actor variant the Hologram tech makes (shadowrun_magic.c),
+and a hologram of it placed at `position` on the unit's side, as a summon's
+actor is. NONE if the map has none, or none could be placed */
+long shadowrun_hologram_variant(
+	void);
+long shadowrun_hologram_place(
+	long unit_index,
+	real_point3d const *position);
+
 /* the techs' place on the HUD (shadowrun_tech.c): what vision marks */
 void shadowrun_tech_initialize(
 	void);

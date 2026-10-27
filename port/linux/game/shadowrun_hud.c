@@ -45,8 +45,11 @@ enum
 	SHADOWRUN_HUD_MAXIMUM_CELLS = 30,
 	/* how long a failed cast flashes (ticks) */
 	SHADOWRUN_HUD_FAILURE_TICKS = 30,
-	/* draw_string.c's left-justified text (its enum is its own) */
+	/* the gap between the tech and the spell on the one line */
+	SHADOWRUN_HUD_TECH_GAP = 12,
+	/* draw_string.c's justifications (its enum is its own) */
 	_shadowrun_hud_text_left = 0,
+	_shadowrun_hud_text_right,
 };
 
 /* the spells' names, as the executable names them (at 0x4865E8) */
@@ -238,14 +241,27 @@ void shadowrun_hud_draw(
 		}
 	}
 
-	/* port: the tech the left bumper uses, after the spell (the executable
-	draws the one power it has chosen, and its tech is the next) */
+	/* the spell, and the numbers */
+	snprintf(text + strlen(text), sizeof(text) - strlen(text), "  %d/%d",
+		(int)shadowrun_unit->mana, (int)(capacity + 0.5f));
+	bounds.x0 = left;
+	bounds.x1 = (short)(left + 400);
+	bounds.y0 = top;
+	bounds.y1 = (short)(top + line_height);
+	draw_string_set_draw_mode(font_index, NONE, _shadowrun_hud_text_left, 0, &text_color);
+	rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
+
+	/* port: the tech the left bumper uses, on the spell's line, to the left of
+	the spell (right-justified against it, so neither moves when the other's
+
+text changes). Bright while it runs, grey otherwise */
 	{
 		short tech = shadowrun_unit_tech(unit_index);
 		char const *tech_name = tech != 0 ? shadowrun_tech_name(tech) : NULL;
 
 		if (tech_name && *tech_name)
 		{
+			char tech_text[64];
 			real_argb_color tech_color;
 
 			if (shadowrun_unit->tech_ticks > 0)
@@ -256,26 +272,15 @@ void shadowrun_hud_draw(
 			{
 				shadowrun_hud_set_color(&tech_color, 0.9f, 0.55f, 0.55f, 0.6f);
 			}
-			snprintf(text, sizeof(text), "%s", tech_name);
-			snprintf(text + strlen(text), sizeof(text) - strlen(text), ", left bumper");
-			bounds.x0 = left;
-			bounds.x1 = (short)(left + 400);
-			bounds.y0 = (short)(top - line_height);
-			bounds.y1 = top;
-			draw_string_set_draw_mode(font_index, NONE, _shadowrun_hud_text_left, 0, &tech_color);
-			rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
+			snprintf(tech_text, sizeof(tech_text), "%s", tech_name);
+			bounds.x0 = (short)(left - SHADOWRUN_HUD_TECH_GAP - 400);
+			bounds.x1 = (short)(left - SHADOWRUN_HUD_TECH_GAP);
+			bounds.y0 = top;
+			bounds.y1 = (short)(top + line_height);
+			draw_string_set_draw_mode(font_index, NONE, _shadowrun_hud_text_right, 0, &tech_color);
+			rasterizer_draw_string(&bounds, NULL, NULL, 0, tech_text);
 		}
 	}
-
-	/* the spell, and the numbers */
-	snprintf(text + strlen(text), sizeof(text) - strlen(text), "  %d/%d",
-		(int)shadowrun_unit->mana, (int)(capacity + 0.5f));
-	bounds.x0 = left;
-	bounds.x1 = (short)(left + 400);
-	bounds.y0 = top;
-	bounds.y1 = (short)(top + line_height);
-	draw_string_set_draw_mode(font_index, NONE, _shadowrun_hud_text_left, 0, &text_color);
-	rasterizer_draw_string(&bounds, NULL, NULL, 0, text);
 
 	/* the buy menu, if it is open (shadowrun_buy_menu.c) */
 	shadowrun_buy_menu_draw(local_player_index);

@@ -122,9 +122,15 @@ and the raised take ten times its damage */
 the energy sword (the prototype's elemental is an elite:
 docs/shadowrun_caches.md), on any map that has it; else the map's first
 variant of a name starting so */
-#define SHADOWRUN_SUMMONED_ACTOR_VARIANT "characters\\elemental\\elite commander\\elite commander energy sword.actor_variant"
-#define SHADOWRUN_SUMMONED_ACTOR_VARIANT_NAME "elite commander\\elite commander energy sword.actor_variant"
-#define SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX "elite commander\\elite commander"
+/* (a tag's name has no group's extension: tag_get_name gives
+"characters\elemental\elite commander\elite commander energy sword", which is
+what these are compared with) */
+#define SHADOWRUN_SUMMONED_ACTOR_VARIANT "characters\\elemental\\elite commander\\elite commander energy sword"
+#define SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX "elite commander"
+
+/* port: the actor variant the Hologram tech makes: its hologram with the
+assault rifle (shadowrun_tech.c). No prefix search: this is the whole name */
+#define SHADOWRUN_HOLOGRAM_ACTOR_VARIANT "characters\\hologram\\hologram assault rifle"
 /* (the actor variant group's: ACTOR_VARIANT_DEFINITION_TAG) */
 #define SHADOWRUN_ACTOR_VARIANT_TAG 'actv'
 
@@ -360,10 +366,10 @@ void object_port_update(long object_index); /* port: objects/objects.c */
 void object_port_check_body(long object_index); /* port: objects/damage.c */
 
 /* port: the map's actor variant Summon Elemental summons, found once a map
-(shadowrun_summon_elemental_variant); none, or not found yet; and how many
-of the map's actor variants the log has named */
+(shadowrun_summon_elemental_variant); none, or not found yet */
 static long shadowrun_summoned_variant;
-static short shadowrun_summoned_variants_told;
+/* ... and the Hologram tech's */
+static long shadowrun_hologram_variant_index;
 
 /* ---------- public code */
 
@@ -381,7 +387,7 @@ void shadowrun_magic_initialize_for_new_map(
 	csmemset(shadowrun_magic_globals, 0, sizeof(*shadowrun_magic_globals));
 	/* port: looked for in this map's tags */
 	shadowrun_summoned_variant = NONE;
-	shadowrun_summoned_variants_told = 0;
+	shadowrun_hologram_variant_index = NONE;
 
 	return;
 }
@@ -2004,63 +2010,70 @@ static void shadowrun_trees_update(
 	return;
 }
 
-/* port: the map's actor variant Summon Elemental summons, the elite commander
-with the energy sword, and one of its name starting so. The map's tags are
-walked for them (a tag_loaded takes an exact name, and a protected map's tags
-have no names to find it by). NONE if the map has neither, and the spell
-summons the definition's encounter's actor as it did. Found once a map: the
-first time it is asked for */
-#define SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND (-2)
-#define SHADOWRUN_SUMMONED_VARIANTS_TOLD 24
+/* port: the map's actor variant of that name, else the first whose name
+starts as it does (the map's tags are walked: a tag_loaded takes an exact
+name, and a protected map's tags have no names to find it by). NONE if the
+map has neither. The result is kept in `cache` (a map's tags do not change) */
+#define SHADOWRUN_NAMED_VARIANT_NOT_FOUND (-2)
 
-static long shadowrun_summon_elemental_variant(
-	void)
+static long shadowrun_actor_variant_named(
+	char const *name,
+	char const *prefix,
+	long *cache)
 {
 	struct tag_iterator iterator;
-	long prefix = NONE;
+	long found = NONE;
 	long tag_index;
 
-	if (shadowrun_summoned_variant > SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND)
+	if (*cache > SHADOWRUN_NAMED_VARIANT_NOT_FOUND)
 	{
-		return shadowrun_summoned_variant;
+		return *cache;
 	}
 	tag_iterator_new(&iterator, SHADOWRUN_ACTOR_VARIANT_TAG);
-	while (shadowrun_summoned_variant == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
+	while (found == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
 		/* (a tag's name is its path without the group: a map may keep the
 		path whole, so either form is taken) */
-		char const *name = tag_name_strip_path(tag_get_name(tag_index));
-		boolean named = !_stricmp(tag_get_name(tag_index), SHADOWRUN_SUMMONED_ACTOR_VARIANT) ||
-			!_stricmp(name, SHADOWRUN_SUMMONED_ACTOR_VARIANT_NAME);
+		char const *tag_name = tag_get_name(tag_index);
 
-		if (named)
+		if (!_stricmp(tag_name, name) || !_stricmp(tag_name_strip_path(tag_name), name))
 		{
-			shadowrun_summoned_variant = tag_index;
-		}
-		else if (prefix == NONE && !_strnicmp(name, SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX,
-			strlen(SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX)))
-		{
-			prefix = tag_index;
-		}
-		/* port: the first map's list of its actor variants, to know the names
-		a map gives them (one the game does not show says nothing) */
-		if (shadowrun_summoned_variants_told < SHADOWRUN_SUMMONED_VARIANTS_TOLD)
-		{
-			error(_error_silent, "shadowrun: actor variant '%s'%s", tag_get_name(tag_index), named ? " (summoned)" : "");
-			shadowrun_summoned_variants_told++;
+			found = tag_index;
 		}
 	}
-	if (shadowrun_summoned_variant == NONE)
+	if (found == NONE && prefix)
 	{
-		shadowrun_summoned_variant = prefix;
+		tag_iterator_new(&iterator, SHADOWRUN_ACTOR_VARIANT_TAG);
+		while (found == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
+		{
+			if (!_strnicmp(tag_name_strip_path(tag_get_name(tag_index)), prefix, strlen(prefix)))
+			{
+				found = tag_index;
+			}
+		}
 	}
-	if (shadowrun_summoned_variant == NONE)
+	if (found == NONE)
 	{
-		error(_error_silent, "shadowrun: the map has no %s", SHADOWRUN_SUMMONED_ACTOR_VARIANT);
-		shadowrun_summoned_variant = SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND;
+		error(_error_silent, "shadowrun: the map has no %s", name);
+		*cache = SHADOWRUN_NAMED_VARIANT_NOT_FOUND;
+	}
+	else
+	{
+		*cache = found;
 	}
 
-	return shadowrun_summoned_variant > SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND ? shadowrun_summoned_variant : NONE;
+	return found;
+}
+
+/* port: the map's actor variant Summon Elemental summons, the elite commander
+with the energy sword, and one of its name starting so. NONE if the map has
+neither, and the spell summons the definition's encounter's actor as it did.
+Found once a map: the first time it is asked for */
+static long shadowrun_summon_elemental_variant(
+	void)
+{
+	return shadowrun_actor_variant_named(SHADOWRUN_SUMMONED_ACTOR_VARIANT,
+		SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX, &shadowrun_summoned_variant);
 }
 
 /* port: one actor of that variant, at `position`, facing the caster's way. It
@@ -2081,6 +2094,53 @@ static long shadowrun_summon_elemental_place(
 	starting_location.facing = arctangent(caster->object.forward.j, caster->object.forward.i);
 
 	return actor_place(variant, NONE, 0, &starting_location, FALSE, 0);
+}
+
+/* port: the map's actor variant the Hologram tech makes (shadowrun_tech.c),
+the hologram with the assault rifle. NONE if the map has none. Found once a
+map: the first time it is asked for */
+long shadowrun_hologram_variant(
+	void)
+{
+	return shadowrun_actor_variant_named(SHADOWRUN_HOLOGRAM_ACTOR_VARIANT, NULL, &shadowrun_hologram_variant_index);
+}
+
+/* port: a hologram of the map's, at `position`, facing the caster's way, on
+its side: an actor of its variant, placed as a summon's is. NONE if the map
+has no hologram, or none could be placed */
+long shadowrun_hologram_place(
+	long unit_index,
+	real_point3d const *position)
+{
+	long variant = shadowrun_hologram_variant();
+	long actor_index = variant != NONE ? shadowrun_summon_elemental_place(variant, unit_index, position) : NONE;
+	struct actor_datum *actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
+	struct unit_datum *caster = unit_try_and_get(unit_index);
+
+	if (actor && caster)
+	{
+		struct unit_datum *hologram = unit_get(actor->meta.unit_index);
+		struct player_datum *player = player_try_and_get(caster->unit.player_index);
+
+		/* (a hologram is the caster's: its side, as a summon's is its caster's) */
+		if (player)
+		{
+			actor->meta.team_index = (short)player->team_index;
+			hologram->object.owner_team_index = (short)player->team_index;
+		}
+		else if (caster->unit.actor_index != NONE)
+		{
+			struct actor_datum *caster_actor = actor_try_and_get(caster->unit.actor_index);
+
+			if (caster_actor)
+			{
+				actor->meta.team_index = caster_actor->meta.team_index;
+				hologram->object.owner_team_index = caster_actor->meta.team_index;
+			}
+		}
+	}
+
+	return actor_index;
 }
 
 /* 0x2657E0: each tree heals the players' units, and the actors' but those

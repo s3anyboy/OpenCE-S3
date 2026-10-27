@@ -16,6 +16,7 @@ marked with the port's navpoints.
 
 #include "cseries.h"
 #include "cseries/errors.h"
+#include "ai/actors.h"
 #include "game/game.h"
 #include "interface/hud_definitions.h"
 #include "game/game_allegiance.h"
@@ -23,6 +24,7 @@ marked with the port's navpoints.
 #include "interface/hud.h"
 #include "objects/objects.h"
 #include "objects/object_types.h"
+#include "physics/collisions.h"
 #include "scenario/scenario.h"
 #include "units/biped_definitions.h"
 #include "units/bipeds.h"
@@ -47,10 +49,41 @@ static char const *const shadowrun_vision_nav_names[] =
 extern struct hud_globals_definition *hud_globals;
 short find_nav_point(char const *name);
 
+/* ---------- globals */
+
+/* the biped definitions gecko has made climb anything, and whether they did
+before (they are the map's tags: every biped of one shares its flag) */
+struct shadowrun_gecko_held_definition
+{
+	long definition_index;
+	boolean climbed;
+};
+
+static struct shadowrun_gecko_held_definition shadowrun_gecko_held[MAXIMUM_SHADOWRUN_GECKO_DEFINITIONS];
+static short shadowrun_gecko_held_count;
+
+/* the holograms standing (a tech's actors, of the map), each with the unit
+that made it and the time it goes, and how many */
+struct shadowrun_hologram
+{
+	long actor_index;
+	long owner_unit_index;
+	long end_time;
+};
+
+static struct shadowrun_hologram shadowrun_holograms[MAXIMUM_SHADOWRUN_HOLOGRAMS];
+static short shadowrun_hologram_count;
+
 /* ---------- private prototypes */
 
+static void shadowrun_gecko_begin(
+	long unit_index);
 static void shadowrun_gecko_end(
 	long unit_index);
+static void shadowrun_holograms_clear(
+	long unit_index);
+static void shadowrun_holograms_update(
+	void);
 static void shadowrun_vision_clear(
 	long unit_index);
 static void shadowrun_vision_mark(
@@ -78,6 +111,8 @@ void shadowrun_tech_update(
 	struct object_iterator iterator;
 	struct object_datum *object;
 
+	shadowrun_holograms_update();
+
 	object_iterator_new(&iterator, _object_mask_unit, 0);
 	while ((object = object_iterator_next(&iterator)) != NULL)
 	{
@@ -91,6 +126,7 @@ void shadowrun_tech_update(
 		{
 			shadowrun_vision_clear(iterator.index);
 			shadowrun_gecko_end(iterator.index);
+			shadowrun_holograms_clear(iterator.index);
 		}
 		else if (shadowrun_unit->tech == _shadowrun_tech_vision_id)
 		{
@@ -157,9 +193,51 @@ boolean shadowrun_tech_cast(
 			{
 				return FALSE;
 			}
-			/* (an actor's own flag is its variant's: this is the wearer's) */
-			SET_FLAG(biped->biped.flags, _biped_climbs_anything_bit, TRUE);
+			/* (the engine's climbing reads the biped's definition, not the unit's
+			own flags: bipeds.c tests definition->biped.flags) */
+			shadowrun_gecko_begin(unit_index);
 			shadowrun_unit->tech_ticks = SHADOWRUN_GECKO_TICKS;
+			return TRUE;
+		}
+
+	case _shadowrun_tech_hologram_id:
+		/* port: hologram, which makes an actor of the map's hologram variant,
+		where the caster aims (as summon elemental does with its elemental) */
+		{
+			struct unit_datum *unit = unit_get(unit_index);
+			real_vector3d vector;
+			real_point3d target;
+			struct collision_result collision;
+
+			unit_get_head_position(unit_index, &target);
+			point_from_line3d(&target, &unit->unit.aiming_vector, SHADOWRUN_HOLOGRAM_ORIGIN_OFFSET, &target);
+			scale_vector3d(&unit->unit.aiming_vector, SHADOWRUN_HOLOGRAM_RANGE, &vector);
+			if (collision_test_vector(_collision_test_for_projectiles_flags, &target, &vector, unit_index, &collision))
+			{
+				target = collision.point;
+			}
+			else
+			{
+				add_vectors3d((real_vector3d const *)&target, &vector, (real_vector3d *)&target);
+			}
+			{
+				long actor_index = shadowrun_hologram_place(unit_index, &target);
+
+				if (actor_index == NONE)
+				{
+					return FALSE;
+				}
+				/* (it lasts as long as the tech does, then goes) */
+				if (shadowrun_hologram_count < MAXIMUM_SHADOWRUN_HOLOGRAMS)
+				{
+					struct shadowrun_hologram *hologram = &shadowrun_holograms[shadowrun_hologram_count++];
+
+					hologram->actor_index = actor_index;
+					hologram->owner_unit_index = unit_index;
+					hologram->end_time = game_time_get() + SHADOWRUN_HOLOGRAM_TICKS;
+				}
+			}
+			shadowrun_unit->tech_ticks = SHADOWRUN_HOLOGRAM_TICKS;
 			return TRUE;
 		}
 	}
@@ -177,6 +255,7 @@ void shadowrun_unit_tech_died(
 		shadowrun_unit->tech_ticks = 0;
 		shadowrun_vision_clear(unit_index);
 		shadowrun_gecko_end(unit_index);
+		shadowrun_holograms_clear(unit_index);
 	}
 
 	return;
@@ -245,16 +324,152 @@ boolean shadowrun_players_change_tech(
 
 /* ---------- private code */
 
-/* gecko's time up: the unit climbs as its biped's definition does again */
+/* the holograms whose time is up, or whose caster is gone, go: killed (a
+summon's actors are) and forgotten */
+static void shadowrun_holograms_update(
+	void)
+{
+	long now = game_time_get();
+	short index;
+
+	for (index = shadowrun_hologram_count - 1; index >= 0; index--)
+	{
+		struct shadowrun_hologram *hologram = &shadowrun_holograms[index];
+		boolean gone = now >= hologram->end_time || !actor_try_and_get(hologram->actor_index);
+
+		/* (a caster dead for good leaves no unit: its holograms go with it) */
+		if (!gone && !object_try_and_get_and_verify_type(hologram->owner_unit_index, NONE))
+		{
+			gone = TRUE;
+		}
+		if (gone)
+		{
+			if (actor_try_and_get(hologram->actor_index))
+			{
+				actor_kill(hologram->actor_index, TRUE, FALSE);
+			}
+			shadowrun_holograms[index] = shadowrun_holograms[--shadowrun_hologram_count];
+		}
+	}
+
+	return;
+}
+
+/* the holograms a unit made taken away, at once */
+static void shadowrun_holograms_clear(
+	long unit_index)
+{
+	short index;
+
+	for (index = shadowrun_hologram_count - 1; index >= 0; index--)
+	{
+		struct shadowrun_hologram *hologram = &shadowrun_holograms[index];
+
+		if (hologram->owner_unit_index == unit_index)
+		{
+			if (actor_try_and_get(hologram->actor_index))
+			{
+				actor_kill(hologram->actor_index, TRUE, FALSE);
+			}
+			shadowrun_holograms[index] = shadowrun_holograms[--shadowrun_hologram_count];
+		}
+	}
+
+	return;
+}
+
+/* Gecko's flag is on the biped's definition, which every biped of that tag
+shares: it is set on, and put back as it was at the end. What was set is
+kept by the definition's tag, so a unit that ends while another is geckoing
+does not take the flag off the other. */
+static void shadowrun_gecko_begin(
+	long unit_index)
+{
+	struct biped_datum *biped = biped_try_and_get(unit_index);
+	struct biped_definition *definition;
+	long definition_index;
+	short index;
+
+	if (!biped)
+	{
+		return;
+	}
+	definition_index = biped->definition_index;
+	definition = biped_definition_get(definition_index);
+	if (!definition)
+	{
+		return;
+	}
+	for (index = 0; index < shadowrun_gecko_held_count; index++)
+	{
+		if (shadowrun_gecko_held[index].definition_index == definition_index)
+		{
+			/* (already on for another: the first one's state is what goes back) */
+			return;
+		}
+	}
+	if (shadowrun_gecko_held_count < MAXIMUM_SHADOWRUN_GECKO_DEFINITIONS)
+	{
+		shadowrun_gecko_held[shadowrun_gecko_held_count].definition_index = definition_index;
+		shadowrun_gecko_held[shadowrun_gecko_held_count].climbed =
+			TEST_FLAG(definition->biped.flags, _biped_climbs_anything_bit) ? TRUE : FALSE;
+		shadowrun_gecko_held_count++;
+	}
+	SET_FLAG(definition->biped.flags, _biped_climbs_anything_bit, TRUE);
+
+	return;
+}
+
+/* Gecko's time up: the definition's flag goes back to what it was, unless
+another unit of it is still geckoing */
 static void shadowrun_gecko_end(
 	long unit_index)
 {
 	struct biped_datum *biped = biped_try_and_get(unit_index);
+	struct object_iterator iterator;
+	struct object_datum *object;
+	long definition_index;
+	short held;
 
-	if (biped)
+	if (!biped)
 	{
-		SET_FLAG(biped->biped.flags, _biped_climbs_anything_bit, FALSE);
+		return;
 	}
+	definition_index = biped->definition_index;
+	for (held = 0; held < shadowrun_gecko_held_count; held++)
+	{
+		if (shadowrun_gecko_held[held].definition_index == definition_index)
+		{
+			break;
+		}
+	}
+	if (held == shadowrun_gecko_held_count)
+	{
+		return;
+	}
+	/* (another unit of the definition still geckoing keeps it on) */
+	object_iterator_new(&iterator, _object_mask_unit, 0);
+	while ((object = object_iterator_next(&iterator)) != NULL)
+	{
+		struct shadowrun_unit *other = shadowrun_unit_get(iterator.index);
+		struct biped_datum *other_biped = biped_try_and_get(iterator.index);
+
+		if (iterator.index != unit_index && other && other_biped && other->tech_ticks > 0 &&
+			other->tech == _shadowrun_tech_gecko_id && other_biped->definition_index == definition_index)
+		{
+			return;
+		}
+	}
+	{
+		struct biped_definition *definition = biped_definition_get(definition_index);
+
+		if (definition)
+		{
+			SET_FLAG(definition->biped.flags, _biped_climbs_anything_bit,
+				shadowrun_gecko_held[held].climbed);
+		}
+	}
+	shadowrun_gecko_held[held] = shadowrun_gecko_held[--shadowrun_gecko_held_count];
 
 	return;
 }
