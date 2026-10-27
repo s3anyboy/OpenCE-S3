@@ -259,8 +259,7 @@ for a new one, with both hands full), grenades (up to two), spells and a
 gift of $250 to a teammate, at the prices of the player's `srud`. The stick
 or the d-pad moves through it, the jump control buys, the melee control goes
 back a page or closes it, and the action control buys a magazine for the
-weapon in hand; while it is open the player does nothing else. Tech and the
-anti-magic grenade are listed but cannot be bought. A co-op client's
+weapon in hand; while it is open the player does nothing else. A co-op client's
 purchases are its own: they are not sent to the host.
 
 ## Tech
@@ -275,18 +274,25 @@ a rule of its own:
 | Tech | What it does |
 | --- | --- |
 | Vision (1) | marks every enemy unit within 60 m on the HUD for 30 seconds, with the HUD's red nav point (`target_red`, else `default_red`) (the nearest first, 32 at most); the marks follow units in and out of range |
+| Reflexes (0) | port: 10 s of faster movement (×1.6), reload (×0.6) and a higher jump (×1.3). **Not the prototype's**: its `t1ed` block is read by `bipeds.c` as a timed aura that hurts units near the wearer |
+| Gecko (4) | the wearer's biped climbs anything while it runs (the engine's own climbing, on the biped definition's flag) |
+| Glider (5) | a toggle: the map's `glider.scenery` on the wearer's back, its fall held off, and its turning scaled by speed (`bipeds.c`) |
+| Grapple (6) | fires `shadowrunstuff\grapple\grapple`; where it attaches or lands, the caster is reeled to it over 15 ticks |
+| Hologram (12) | an actor of `characters\hologram\hologram assault rifle` at where the caster aims: it fights, deals no damage, and is erased when its 30 s are up or another is made |
+| Anti-magic (in the buy menu as a grenade) | a shrinking zone at where the anti-magic grenade lands: enemies inside are hurt and drained each second, and lose anti-magic on leaving it (`shadowrun_definitions.h`'s `t3ed`) |
 
-The rest (reflexes, grapple, glider, anti-magic, hologram, zoom) are not
-played. `player_change_tech <id>` gives the players a tech, from the console
-or a map's script (`shadowrun_tech.h`'s ids).
+A player has at most two spells and two techs. The d-pad's left goes through
+the techs it has bought, and `player_change_tech <id>` gives one from the
+console or a map's script (`shadowrun_tech.h`'s ids). The rest (smartlink,
+zoom, hearing, heal) are not played.
 
 ## What does not work
 
 This build runs the prototype's maps on Halo's game code; of Shadowrun's own
 systems these are not there:
 
-- tech, but for vision (see [Tech](#tech)): its tags' effects, anti-magic and
-  essence are not there, and the `t?ed` tags are read by nothing yet;
+- tech, but for those in [Tech](#tech): smartlink, zoom, hearing and heal, and
+  the AI's own use of its tech, are not there;
 - Shadowrun's weapons as Shadowrun defined them (`srwd`): but for each
   race's speed with them, they play as Halo's do from their Halo tags;
 - Shadowrun's AI behaviours for its new actor types (they play as the types

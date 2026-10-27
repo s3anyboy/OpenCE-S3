@@ -360,7 +360,6 @@ struct shadowrun_tech3_definition
 	/* the levels (a spell's: the magic's, in the same place) */
 	struct tag_block antimagic_levels;
 	real antimagic_level_scale;
-	/* (0x3F4's block is 0xC: the levels, and the scale after them)
 	/* what it drains (essence; 0x404), its scale (0x414) */
 	struct tag_reference antimagic_drain_damage;
 	real antimagic_drain_scale;
