@@ -121,8 +121,9 @@ and the raised take ten times its damage */
 the energy sword (the prototype's elemental is an elite:
 docs/shadowrun_caches.md), on any map that has it; else the map's first
 variant of a name starting so */
-#define SHADOWRUN_SUMMONED_ACTOR_VARIANT "levels\\test\\hangemhigh\\elite commander energy sword.actor_variant"
-#define SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX "elite commander"
+#define SHADOWRUN_SUMMONED_ACTOR_VARIANT "characters\\elemental\\elite commander\\elite commander energy sword.actor_variant"
+#define SHADOWRUN_SUMMONED_ACTOR_VARIANT_NAME "elite commander\\elite commander energy sword.actor_variant"
+#define SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX "elite commander\\elite commander"
 /* (the actor variant group's: ACTOR_VARIANT_DEFINITION_TAG) */
 #define SHADOWRUN_ACTOR_VARIANT_TAG 'actv'
 
@@ -358,8 +359,10 @@ void object_port_update(long object_index); /* port: objects/objects.c */
 void object_port_check_body(long object_index); /* port: objects/damage.c */
 
 /* port: the map's actor variant Summon Elemental summons, found once a map
-(shadowrun_summon_elemental_variant); none, or not found yet */
+(shadowrun_summon_elemental_variant); none, or not found yet; and how many
+of the map's actor variants the log has named */
 static long shadowrun_summoned_variant;
+static short shadowrun_summoned_variants_told;
 
 /* ---------- public code */
 
@@ -377,6 +380,7 @@ void shadowrun_magic_initialize_for_new_map(
 	csmemset(shadowrun_magic_globals, 0, sizeof(*shadowrun_magic_globals));
 	/* port: looked for in this map's tags */
 	shadowrun_summoned_variant = NONE;
+	shadowrun_summoned_variants_told = 0;
 
 	return;
 }
@@ -1999,43 +2003,62 @@ static void shadowrun_trees_update(
 }
 
 /* port: the map's actor variant Summon Elemental summons, the elite commander
-with the energy sword: its tag, else the map's first of a name starting as
-that one does (the map's tags are walked for that: a tag_loaded takes an
-exact name, and a protected map's tags have no names to find it by). NONE if
-the map has neither, and the spell summons the definition's encounter's
-actor as it did. Found once a map: the first time it is asked for */
+with the energy sword, and one of its name starting so. The map's tags are
+walked for them (a tag_loaded takes an exact name, and a protected map's tags
+have no names to find it by). NONE if the map has neither, and the spell
+summons the definition's encounter's actor as it did. Found once a map: the
+first time it is asked for */
 #define SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND (-2)
+#define SHADOWRUN_SUMMONED_VARIANTS_TOLD 24
 
 static long shadowrun_summon_elemental_variant(
 	void)
 {
 	struct tag_iterator iterator;
-	long variant;
+	long prefix = NONE;
 	long tag_index;
 
 	if (shadowrun_summoned_variant > SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND)
 	{
 		return shadowrun_summoned_variant;
 	}
-	variant = tag_loaded(SHADOWRUN_ACTOR_VARIANT_TAG, SHADOWRUN_SUMMONED_ACTOR_VARIANT);
 	tag_iterator_new(&iterator, SHADOWRUN_ACTOR_VARIANT_TAG);
-	while (variant == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
+	while (shadowrun_summoned_variant == NONE && (tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
-		if (!strncmp(tag_get_name(tag_index), SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX,
+		/* (a tag's name is its path without the group: a map may keep the
+		path whole, so either form is taken) */
+		char const *name = tag_name_strip_path(tag_get_name(tag_index));
+		boolean named = !_stricmp(tag_get_name(tag_index), SHADOWRUN_SUMMONED_ACTOR_VARIANT) ||
+			!_stricmp(name, SHADOWRUN_SUMMONED_ACTOR_VARIANT_NAME);
+
+		if (named)
+		{
+			shadowrun_summoned_variant = tag_index;
+		}
+		else if (prefix == NONE && !_strnicmp(name, SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX,
 			strlen(SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX)))
 		{
-			variant = tag_index;
+			prefix = tag_index;
+		}
+		/* port: the first map's list of its actor variants, to know the names
+		a map gives them (one the game does not show says nothing) */
+		if (shadowrun_summoned_variants_told < SHADOWRUN_SUMMONED_VARIANTS_TOLD)
+		{
+			error(_error_silent, "shadowrun: actor variant '%s'%s", tag_get_name(tag_index), named ? " (summoned)" : "");
+			shadowrun_summoned_variants_told++;
 		}
 	}
-	if (variant == NONE)
+	if (shadowrun_summoned_variant == NONE)
+	{
+		shadowrun_summoned_variant = prefix;
+	}
+	if (shadowrun_summoned_variant == NONE)
 	{
 		error(_error_silent, "shadowrun: the map has no %s", SHADOWRUN_SUMMONED_ACTOR_VARIANT);
 		shadowrun_summoned_variant = SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND;
-		return NONE;
 	}
-	shadowrun_summoned_variant = variant;
 
-	return variant;
+	return shadowrun_summoned_variant > SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND ? shadowrun_summoned_variant : NONE;
 }
 
 /* port: one actor of that variant, at `position`, facing the caster's way. It
@@ -2575,6 +2598,11 @@ static void shadowrun_summon_cast(
 		/* port: the map's elite commander, where it has one, comes in the
 		encounter's actor's place (the prototype's elemental) */
 		actor_variant_index = shadowrun_summon_elemental_variant();
+		/* port: said, so that a summon's actor is known to have been found */
+		if (actor_variant_index != NONE)
+		{
+			error(_error_silent, "shadowrun: summon elemental summons %s", tag_get_name(actor_variant_index));
+		}
 		if (!shadowrun_unit_has_mana(unit_index, (real)mana_cost) ||
 			!shadowrun_unit_can_reserve_capacity(unit_index, capacity_reserved))
 		{
@@ -2592,6 +2620,12 @@ static void shadowrun_summon_cast(
 					shadowrun_summon_elemental_place(actor_variant_index, unit_index, &target) :
 					encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
 				struct actor_datum *actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
+
+				/* port: said, as a summon that does not come is otherwise silent */
+				if (!actor)
+				{
+					error(_error_silent, "shadowrun: summon elemental placed no actor (%ld)", actor_variant_index);
+				}
 
 				shadowrun_unit_fire_projectile(unit_index, magic->summon_projectile.index, NULL);
 				shadowrun_unit->summon_time = game_time_get();

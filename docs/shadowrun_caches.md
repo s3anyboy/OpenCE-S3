@@ -14,7 +14,10 @@ The maps examined are the prototype's `missionlet.map` (the level
 ## Running a map
 
 Put the map in the data root's `maps` folder, beside the game's own: the
-Xbox caches' loader reads it from there. It is listed in the map lists'
+Xbox caches' loader reads it from there (`d:\maps` to the game). The
+prototype's own install is not it: its `maps` folder holds the maps only
+as the Xbox's did, and this build's `maps` folder is the data root's (where
+`bitmaps.map` and the rest of the game's data are). It is listed in the map lists'
 CUSTOM SINGLEPLAYER (New Game's, and the Map screen's), with the Custom
 Edition campaign maps, and played as they are: alone at the difficulty
 chosen next, or hosted as network co-op (not tried). As a Custom Edition
@@ -195,7 +198,7 @@ races), its head, a pool of mana and the spells of its race's magic tags
 | Tree of Life | a thrown seed grows a tree that heals those near it, and withers |
 | Resurrection | raises the dead near the caster as undead on its side |
 | Strangle | thorns grow from the surfaces where the caster aims, and hold |
-| Summon Elemental | the map's `elite commander energy sword.actor_variant` fights for the caster for a time, where the map has it (the prototype's elemental is an elite: else the first actor variant whose name starts `elite commander`, else the definition's encounter's actor as before), placed where the caster aimed |
+| Summon Elemental | the map's `characters\elemental\elite commander\elite commander energy sword.actor_variant` (the prototype's elemental is an elite) fights for the caster for a time, placed where the caster aimed: else the first actor variant whose name starts `elite commander\elite commander`, else the definition's encounter's actor as before. The log names the variant it summons, or says the map has none |
 | Spirit Animal | the caster grows into its animal form while its mana lasts |
 | Smoke | the caster fades into smoke, unseen and unharmed, while its mana lasts |
 
