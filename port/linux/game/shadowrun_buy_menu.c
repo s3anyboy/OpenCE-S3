@@ -70,6 +70,8 @@ enum
 	_shadowrun_shop_open_empty = 7,
 	_shadowrun_shop_grenade = 8,
 	_shadowrun_shop_anti_magic_grenade = 9,
+	/* port: the grenade type the menu's plain Grenade is (units.h's first) */
+	_shadowrun_shop_grenade_type = 0,
 	_shadowrun_shop_first_magic = 10,
 	_shadowrun_shop_last_magic = 16,
 	_shadowrun_shop_razorclaws = 17,
@@ -888,14 +890,18 @@ static void shadowrun_shop_buy(
 		{
 			/* (another purchase so soon is not made) */
 		}
-		else if (action == _shadowrun_shop_grenade)
+		else if (action == _shadowrun_shop_grenade || action == _shadowrun_shop_anti_magic_grenade)
 		{
 			struct unit_datum *unit = unit_get(unit_index);
+			/* port: the anti-magic grenade is the unit's second type of grenade
+			(shadowrun_tech.h): it is carried and thrown as one */
+			short type = action == _shadowrun_shop_anti_magic_grenade ?
+				SHADOWRUN_ANTIMAGIC_GRENADE_TYPE : _shadowrun_shop_grenade_type;
 
-			if (unit->unit.grenade_counts[0] < SHADOWRUN_SHOP_MAXIMUM_GRENADES)
+			if (unit->unit.grenade_counts[type] < SHADOWRUN_SHOP_MAXIMUM_GRENADES)
 			{
 				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_bought);
-				unit->unit.grenade_counts[0]++;
+				unit->unit.grenade_counts[type]++;
 				shadowrun_player->money -= price;
 				state->purchase_time = game_time_get();
 			}
@@ -997,7 +1003,7 @@ static void shadowrun_shop_buy(
 		}
 		else
 		{
-			/* port: the anti-magic grenade is not played */
+			/* (an item the menu has no way to sell) */
 			shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
 		}
 	}
@@ -1144,7 +1150,12 @@ static boolean shadowrun_shop_owned(
 
 	if (action == _shadowrun_shop_grenade)
 	{
-		result = unit_get_grenade_count(unit_index, 0) > 0;
+		result = unit_get_grenade_count(unit_index, _shadowrun_shop_grenade_type) > 0;
+	}
+	else if (action == _shadowrun_shop_anti_magic_grenade)
+	{
+		/* port: the unit's second type of grenade */
+		result = unit_get_grenade_count(unit_index, SHADOWRUN_ANTIMAGIC_GRENADE_TYPE) > 0;
 	}
 	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
 	{
@@ -1197,11 +1208,13 @@ static boolean shadowrun_shop_available(
 
 	if (action == _shadowrun_shop_grenade)
 	{
-		result = unit_get_grenade_count(unit_index, 0) < SHADOWRUN_SHOP_MAXIMUM_GRENADES;
+		result = unit_get_grenade_count(unit_index, _shadowrun_shop_grenade_type) < SHADOWRUN_SHOP_MAXIMUM_GRENADES;
 	}
 	else if (action == _shadowrun_shop_anti_magic_grenade)
 	{
-		result = FALSE;
+		/* port: up to two, as a grenade's kind is */
+		result = unit_get_grenade_count(unit_index, SHADOWRUN_ANTIMAGIC_GRENADE_TYPE) <
+			SHADOWRUN_SHOP_MAXIMUM_GRENADES;
 	}
 	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
 	{

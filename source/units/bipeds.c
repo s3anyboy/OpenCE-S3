@@ -1873,9 +1873,9 @@ static boolean biped_jump(
 		}
 		if (cheat.super_jump && biped->unit.player_index!=NONE)
 			jump_magnitude *= 4.f;
-		/* port: the Shadowrun prototype's techs, the glider worn on the back
-		and reflexes, jump higher (port/linux/game/shadowrun_tech.c) */
-		jump_magnitude *= shadowrun_glider_jump_scale(biped_index);
+		/* port: the Shadowrun prototype's reflexes jump higher
+		(port/linux/game/shadowrun_tech.c). Its glider does not: it flies, and
+		its flight is its turn rates' (shadowrun_glider_update) */
 		jump_magnitude *= shadowrun_reflexes_jump_scale(biped_index);
 
 		jump_velocity = biped->object.translational_velocity;
@@ -3424,6 +3424,9 @@ static void biped_update_turning(
 			{
 				real turn_step =
 					definition->biped.moving_turning_speed/TICKS_PER_SECOND;
+				/* port: the Shadowrun prototype's glider, which turns by how fast it
+				moves (port/linux/game/shadowrun_tech.c) */
+				turn_step *= shadowrun_glider_turn_scale(biped_index);
 				real cosine = (real)cos(turn_step);
 				real sine = (real)sin(turn_step);
 				real progress;

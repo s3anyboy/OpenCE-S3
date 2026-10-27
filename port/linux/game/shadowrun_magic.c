@@ -454,6 +454,14 @@ void shadowrun_projectile_detonated(
 	{
 		shadowrun_grapple_pull(projectile_index, position);
 	}
+	/* port: the anti-magic grenade's makes its zone where it lands, by its
+	definition rather than by a flag (the map's projectiles carry none of the
+	port's: units.c, FUN_0026EA00, is what the executable asks) */
+	if (shadowrun_antimagic_grenade_is(projectile_index) &&
+		projectile->object.owner_object_index != NONE)
+	{
+		shadowrun_antimagic_zone(projectile->object.owner_object_index, position);
+	}
 	/* (the executable gives one without an owner a local player's unit, and
 	waits for one: here it has none) */
 	if (flags && projectile->object.owner_object_index != NONE)
@@ -462,12 +470,7 @@ void shadowrun_projectile_detonated(
 
 		if (owner && biped_try_and_get(projectile->object.owner_object_index))
 		{
-			/* port: the anti-magic grenade makes its zone where it detonates, on
-			the thrower's side (port/linux/game/shadowrun_tech.c) */
-			if (flags & SHADOWRUN_PROJECTILE_ANTI_MAGIC_FLAG)
-			{
-				shadowrun_antimagic_zone(projectile->object.owner_object_index, position);
-			}
+
 			if (flags & SHADOWRUN_PROJECTILE_TREE_OF_LIFE_FLAG)
 			{
 				owner->cast_cooldown_ticks = 0;

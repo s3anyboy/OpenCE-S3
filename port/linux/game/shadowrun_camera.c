@@ -19,6 +19,7 @@ played.)
 #include "items/weapon_definitions.h"
 #include "objects/objects.h"
 #include "units/units.h"
+#include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
 #include "shadowrun_units.h"
 
 /* ---------- constants */
@@ -40,7 +41,8 @@ static boolean shadowrun_unit_melee_weapon(
 /* ---------- public code */
 
 /* 0x118C30's: whether a player's unit is seen from behind: one holding a
-melee weapon, or one in its smoke not looking through a scope */
+melee weapon, one in its smoke not looking through a scope, or one gliding
+or being reeled in by a grapple (port) */
 boolean shadowrun_unit_third_person(
 	long unit_index)
 {
@@ -56,8 +58,13 @@ boolean shadowrun_unit_third_person(
 			/* 0x115B30: the player looks through a scope */
 			boolean zoomed = unit->unit.current_zoom_level != NONE;
 
+			/* port: and one gliding or being reeled in by a grapple
+			(port/linux/game/shadowrun_tech.c) */
+			boolean gliding = shadowrun_glider_worn(unit_index);
+			boolean reeling = shadowrun_unit->grapple_ticks > 0;
+
 			result = shadowrun_unit_melee_weapon(unit_index) ||
-				(shadowrun_unit->smoke_active && !zoomed);
+				(shadowrun_unit->smoke_active && !zoomed) || gliding || reeling;
 		}
 	}
 

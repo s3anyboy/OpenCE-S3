@@ -24,6 +24,7 @@ marked with the port's navpoints.
 #include "objects/object_definitions.h"
 #include "math/real_math.h"
 #include "game/game.h"
+#include "game/game_globals.h"
 #include "interface/hud_definitions.h"
 #include "game/game_allegiance.h"
 #include "game/players.h"
@@ -139,7 +140,6 @@ void shadowrun_tech_update(
 		/* (a grapple's pull moves the unit whether or not its tech's time
 		has run: the projectile was fired, and it is being reeled in) */
 		shadowrun_grapple_update(iterator.index);
-		shadowrun_glider_update(iterator.index);
 
 		if (!shadowrun_unit || shadowrun_unit->tech_ticks <= 0)
 		{
@@ -249,13 +249,14 @@ boolean shadowrun_tech_cast(
 		return TRUE;
 
 	case _shadowrun_tech_glider_id:
-		/* port: glider, worn on the back: it is taken out, put on, and worn
-		while it is the unit's; its jump is higher, and it glides */
-		shadowrun_glider_end(unit_index);
-		if (shadowrun_glider_begin(unit_index) == NONE)
+		/* port: glider, a toggle (units.c 0x251EE0): out, the scenery is put on
+		its back and it climbs (its fall held off); pressed again, it goes */
+		if (shadowrun_glider_worn(unit_index))
 		{
-			return FALSE;
+			shadowrun_glider_end(unit_index);
+			return TRUE;
 		}
+		shadowrun_glider_begin(unit_index);
 		shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_WEAR_TICKS;
 		return TRUE;
 
@@ -415,11 +416,28 @@ static struct shadowrun_tech3_definition *shadowrun_antimagic_definition(
 	return (struct shadowrun_tech3_definition *)tag_get(SHADOWRUN_TECH3_DEFINITION_TAG, definition_index);
 }
 
+/* port: the map's second grenade (the second type of grenade a unit has, the
+Covenant's plasma: units.h) made the anti-magic grenade: its projectile is the
+map's anti-magic grenade, and its count the unit's own. A unit carrying two
+throws it as it throws any grenade (the left trigger) */
 void shadowrun_antimagic_initialize_for_new_map(
 	void)
 {
+	struct game_globals_grenade *grenade;
+
 	shadowrun_antimagic_zone_count = 0;
 	shadowrun_antimagic_definition_index = NONE;
+	if (!shadowrun_map_loaded())
+	{
+		return;
+	}
+	if (SHADOWRUN_ANTIMAGIC_GRENADE_TYPE >= scenario_get_game_globals()->grenades.count)
+	{
+		return;
+	}
+	grenade = TAG_BLOCK_GET_ELEMENT(&scenario_get_game_globals()->grenades,
+		SHADOWRUN_ANTIMAGIC_GRENADE_TYPE, struct game_globals_grenade);
+	grenade->projectile.index = shadowrun_antimagic_grenade_projectile();
 
 	return;
 }
@@ -754,29 +772,42 @@ static long shadowrun_glider_scenery(
 	return shadowrun_glider_scenery_index;
 }
 
-/* whether the unit wears it: an object on its back (the unit's own, attached
-rather than in the world: shadowrun_glider_begin) */
+/* whether the unit's glider is out: its tech is the glider, and its ticks
+are not up (bipeds.c's 0x1a4, the executable's scale, is 1.0 when it is not) */
 boolean shadowrun_glider_worn(
 	long unit_index)
 {
-	struct object_iterator iterator;
-	struct object_datum *object;
-	boolean worn = FALSE;
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
-	object_iterator_new(&iterator, _object_mask_scenery, 0);
-	while (!worn && (object = object_iterator_next(&iterator)) != NULL)
-	{
-		worn = object->object.parent_object_index == unit_index;
-	}
-
-	return worn;
+	return shadowrun_unit && shadowrun_unit->tech == _shadowrun_tech_glider_id &&
+		shadowrun_unit->tech_ticks > 0;
 }
 
-/* how much the unit's jump is scaled: the glider's, or 1 (none) */
-real shadowrun_glider_jump_scale(
+/* 0x251f30: the glider's flight, which turns the biped by how fast it moves
+(the executable's turn rates at bipd +0x30c, this build's
+moving_turning_speed): a fast glider turns, a still one barely does. The
+turn step bipeds.c takes is scaled by that (shadowrun_glider_turn_scale) */
+real shadowrun_glider_turn_scale(
 	long unit_index)
 {
-	return shadowrun_glider_worn(unit_index) ? SHADOWRUN_GLIDER_JUMP_SCALE : 1.f;
+	struct biped_datum *biped = biped_try_and_get(unit_index);
+	struct biped_definition *definition;
+	real speed;
+
+	if (!biped || !shadowrun_glider_worn(unit_index))
+	{
+		return 1.f;
+	}
+	definition = biped_definition_get(biped->definition_index);
+	if (!definition || definition->biped.moving_turning_speed <= 0.f)
+	{
+		return 1.f;
+	}
+	/* (a tick's worth of turning, as the executable divides it) */
+	speed = magnitude3d(&biped->object.translational_velocity) /
+		(definition->biped.moving_turning_speed / TICKS_PER_SECOND);
+
+	return PIN(speed, SHADOWRUN_GLIDER_TURN_SCALE_MINIMUM, 1.f);
 }
 
 /* the glider put on the unit's back: a scenery of the map's, attached to its
@@ -826,6 +857,25 @@ static long shadowrun_glider_begin(
 			object_attach_to_node(unit_index, scenery_index, (short)parent_node_index);
 		}
 	}
+	/* (0x251C00: out, the unit's fall is held off: its downward velocity is
+	made at least none, so it rides the glider rather than dropping) */
+	{
+		struct biped_datum *biped = biped_try_and_get(unit_index);
+
+		if (biped)
+		{
+			real downward = dot_product3d(&biped->object.translational_velocity, &biped->object.up);
+
+			if (downward < 0.f)
+			{
+				real_vector3d correction;
+
+				scale_vector3d(&biped->object.up, -downward, &correction);
+				add_vectors3d(&biped->object.translational_velocity, &correction,
+					&biped->object.translational_velocity);
+			}
+		}
+	}
 
 	return scenery_index;
 }
@@ -849,37 +899,7 @@ static void shadowrun_glider_end(
 	return;
 }
 
-/* while it is worn and the unit is in the air, it glides: its fall slows
-toward a gentle one, and it moves a little further forward (a short glide) */
-void shadowrun_glider_update(
-	long unit_index)
-{
-	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
-	struct biped_datum *biped = biped_try_and_get(unit_index);
 
-	if (!shadowrun_unit || !biped || !shadowrun_glider_worn(unit_index))
-	{
-		return;
-	}
-	if (TEST_FLAG(biped->biped.flags, _biped_airborne_bit))
-	{
-		real downward = dot_product3d(&biped->object.translational_velocity, &biped->object.up);
-
-		if (downward < -SHADOWRUN_GLIDER_FALL_SPEED)
-		{
-			real_vector3d correction;
-
-			/* (the fall taken back toward the glider's speed, a tenth a tick) */
-			scale_vector3d(&biped->object.up, -SHADOWRUN_GLIDER_FALL_SPEED, &correction);
-			add_vectors3d(&biped->object.translational_velocity, &correction, &correction);
-			scale_vector3d(&correction, 0.35f, &correction);
-			add_vectors3d(&biped->object.translational_velocity, &correction, &biped->object.translational_velocity);
-			biped->biped.airborne_ticks = MIN(biped->biped.airborne_ticks, SHADOWRUN_GLIDER_TICKS);
-		}
-	}
-
-	return;
-}
 
 /* ---------- grapple ---------- */
 
@@ -936,6 +956,36 @@ long shadowrun_grapple_fire(
 	projectile_index = object_new(&placement);
 
 	return projectile_index;
+}
+
+/* port: the map's anti-magic grenade projectile, looked for once a map (the
+executable asks where it explodes, units.c FUN_0026EA00; the map's projectiles
+carry none of the port's flags) */
+static long shadowrun_antimagic_grenade_index = NONE;
+
+long shadowrun_antimagic_grenade_projectile(
+	void)
+{
+	if (shadowrun_antimagic_grenade_index == NONE)
+	{
+		shadowrun_antimagic_grenade_index = tag_loaded(PROJECTILE_DEFINITION_TAG, SHADOWRUN_ANTIMAGIC_GRENADE_PROJECTILE);
+		if (shadowrun_antimagic_grenade_index == NONE)
+		{
+			error(_error_silent, "shadowrun: the map has no %s", SHADOWRUN_ANTIMAGIC_GRENADE_PROJECTILE);
+		}
+	}
+
+	return shadowrun_antimagic_grenade_index;
+}
+
+/* whether the projectile is the anti-magic grenade's */
+boolean shadowrun_antimagic_grenade_is(
+	long projectile_index)
+{
+	struct object_datum *projectile = object_try_and_get_and_verify_type(projectile_index, _object_mask_projectile);
+
+	return projectile && shadowrun_antimagic_grenade_index != NONE &&
+		projectile->definition_index == shadowrun_antimagic_grenade_index;
 }
 
 /* whether the projectile is a grapple's: one of its definition, fired from a

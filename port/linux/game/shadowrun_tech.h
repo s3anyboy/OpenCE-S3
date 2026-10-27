@@ -85,8 +85,12 @@ unit moves and reloads faster, and jumps a little higher */
 #define SHADOWRUN_REFLEXES_RELOAD_SCALE 0.6f
 #define SHADOWRUN_REFLEXES_JUMP_SCALE 1.3f
 
-/* port: the map's anti-magic tech tag (t3ed), as its tags name it */
+/* port: the map's anti-magic tech tag (t3ed), as its tags name it, and the
+anti-magic grenade's projectile (no flag of its own: it is found by its name) */
 #define SHADOWRUN_ANTIMAGIC_TECH_NAME "shadowrunstuff\\tech3"
+#define SHADOWRUN_ANTIMAGIC_GRENADE_PROJECTILE "shadowrunstuff\\antimagic grenade\\antimagic grenade"
+/* port: the grenade type it takes (units.h's second: the Covenant's plasma) */
+#define SHADOWRUN_ANTIMAGIC_GRENADE_TYPE 1
 
 /* port: anti-magic: the zones standing at once, and the most zones one
 player's grenades keep (units.c, FUN_0026FCA0: a global list) */
@@ -94,16 +98,15 @@ player's grenades keep (units.c, FUN_0026FCA0: a global list) */
 /* port: the units a zone keeps, to know which left it (and so lost it) */
 #define MAXIMUM_SHADOWRUN_ANTIMAGIC_INSIDE 32
 
-/* port: the glider: the scenery it wears on its back, how high its jump goes
-(1 for neither), how long it glides (ticks) and how its fall slows while it
-does (a step of its velocity a tick toward this) */
+/* port: the glider: the scenery it puts on its back (a 'scen': the map has a
+'mode' of the name too) */
 #define SHADOWRUN_GLIDER_SCENERY "shadowrunstuff\\glider\\glider"
 /* (the scenery group's: this file's headers declare no SCENERY_DEFINITION_TAG) */
 #define SHADOWRUN_SCENERY_TAG 'scen'
-#define SHADOWRUN_GLIDER_JUMP_SCALE 1.6f
-#define SHADOWRUN_GLIDER_TICKS (30 * 3)
-#define SHADOWRUN_GLIDER_FALL_SPEED 1.f
-/* how long it is worn (ticks: 15 min, until another tech takes its place) */
+/* how far its turning is scaled down at rest: none, as the executable's is
+(a fast glider turns as the biped does; a still one does not turn) */
+#define SHADOWRUN_GLIDER_TURN_SCALE_MINIMUM 0.f
+/* how long it is out (ticks: 15 min, until another tech takes its place) */
 #define SHADOWRUN_GLIDER_WEAR_TICKS (30 * 60 * 15)
 
 /* ---------- prototypes/SHADOWRUN_TECH.C */
@@ -139,6 +142,13 @@ void shadowrun_antimagic_update(
 void shadowrun_antimagic_initialize_for_new_map(
 	void);
 
+/* port: the anti-magic grenade's projectile, and whether a projectile is it
+(shadowrun_magic.c, where it detonates) */
+long shadowrun_antimagic_grenade_projectile(
+	void);
+boolean shadowrun_antimagic_grenade_is(
+	long projectile_index);
+
 /* whether the actor is a hologram's: its attacks do no damage (ai.c) */
 boolean shadowrun_hologram_active(
 	long actor_index);
@@ -154,13 +164,12 @@ long shadowrun_grapple_fire(
 /* whether the projectile is a grapple's */
 boolean shadowrun_grapple_projectile_is(
 	long projectile_index);
-/* port: whether the unit wears the glider (shadowrun_tech.c), how much its
-jump is scaled (bipeds.c), and its glide, each tick of a unit */
+/* port: whether the glider is out (shadowrun_tech.c), and its flight, each
+tick of a unit (bipeds.c, its turn rates) */
 boolean shadowrun_glider_worn(
 	long unit_index);
-real shadowrun_glider_jump_scale(
-	long unit_index);
-void shadowrun_glider_update(
+/* how much its turning is scaled while it flies (bipeds.c) */
+real shadowrun_glider_turn_scale(
 	long unit_index);
 
 /* port: whether the unit's reflexes run (shadowrun_tech.c): its jump is

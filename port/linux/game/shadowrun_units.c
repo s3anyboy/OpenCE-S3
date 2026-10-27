@@ -123,6 +123,9 @@ void shadowrun_tags_loaded(
 		long corrected = 0;
 
 		shadowrun_projectiles_loaded();
+		/* port: the second grenade made the anti-magic grenade
+		(port/linux/game/shadowrun_tech.c) */
+		shadowrun_antimagic_initialize_for_new_map();
 		/* each biped's srud, in what the validator does not check */
 		tag_iterator_new(&iterator, BIPED_DEFINITION_TAG);
 		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
