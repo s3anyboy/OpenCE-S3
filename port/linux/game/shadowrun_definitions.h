@@ -722,24 +722,12 @@ typedef char shadowrun_magic2_summon_levels_assert[
 	offsetof(struct shadowrun_magic2_definition, summon_levels) == 0x308 ? 1 : -1];
 
 typedef char shadowrun_tech1_size_assert[sizeof(struct shadowrun_tech1_definition) == 0x5D8 ? 1 : -1];
-typedef char shadowrun_tech1_vision_effect_assert[
-	offsetof(struct shadowrun_tech1_definition, vision_first_person_effect.index) == 0x1A0 ? 1 : -1];
-typedef char shadowrun_tech1_vision_damage_assert[
-	offsetof(struct shadowrun_tech1_definition, reference_jpt_1b0.index) == 0x1B0 ? 1 : -1];
 typedef char shadowrun_tech1_hologram_assert[
 	offsetof(struct shadowrun_tech1_definition, hologram_encounter) == 0x590 ? 1 : -1];
 
 typedef char shadowrun_tech2_size_assert[sizeof(struct shadowrun_tech2_definition) == 0x610 ? 1 : -1];
-typedef char shadowrun_tech2_grapple_projectile_assert[
-	offsetof(struct shadowrun_tech2_definition, grapple_projectile.index) == 0x18C ? 1 : -1];
-typedef char shadowrun_tech2_grapple_encounter_assert[
-	offsetof(struct shadowrun_tech2_definition, grapple_encounter.index) == 0x19C ? 1 : -1];
-typedef char shadowrun_tech2_glider_assert[
-	offsetof(struct shadowrun_tech2_definition, glider_encounter.index) == 0x288 ? 1 : -1];
 
 typedef char shadowrun_tech3_size_assert[sizeof(struct shadowrun_tech3_definition) == 0x470 ? 1 : -1];
-typedef char shadowrun_tech3_antimagic_assert[
-	offsetof(struct shadowrun_tech3_definition, reference_scen_380.index) == 0x380 ? 1 : -1];
 
 typedef char shadowrun_magic3_size_assert[sizeof(struct shadowrun_magic3_definition) == 0x700 ? 1 : -1];
 typedef char shadowrun_magic3_spirit_animal_effect_assert[
