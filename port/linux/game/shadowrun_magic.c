@@ -17,6 +17,7 @@ the mana for them, until they are.
 
 #include "cseries.h"
 #include "ai/ai.h"
+#include "ai/actor_placement.h"
 #include "ai/actors.h"
 #include "ai/ai_script.h"
 #include "ai/encounters.h"
@@ -113,6 +114,13 @@ and the raised take ten times its damage */
 #define FIREWALL_MAXIMUM_VICTIMS 64
 #define FIREWALL_UNDEAD_DAMAGE_SCALE 10.f
 
+/* port: the actor variant Summon Elemental summons, the elite commander with
+the energy sword (the prototype's elemental is an elite:
+docs/shadowrun_caches.md), on any map that has it; else the map's first
+variant of a name starting so */
+#define SHADOWRUN_SUMMONED_ACTOR_VARIANT "levels\\test\\hangemhigh\\elite commander energy sword.actor_variant"
+#define SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX "elite commander"
+
 /* the Shadowrun projectile flags, where this build's definitions have
 three of their own (cleared on the prototype's maps: its build had them not):
 detonating, the projectile brings about the owner's anti-magic, its tree of
@@ -152,6 +160,8 @@ the least; and its turn's bound (the executable's, 3.14) */
 #define STRANGLE_STARTING_SCALE 0.1f
 #define STRANGLE_MINIMUM_SCALE 0.01f
 #define STRANGLE_PI 3.14f
+
+/* summon elemental: cast again this soon after, it dismisses its summons */
 #define SUMMON_DISMISS_TICKS 30
 
 /* how far from where it was an actor's teleport hides it until it arrives */
@@ -1971,6 +1981,54 @@ static void shadowrun_trees_update(
 	return;
 }
 
+/* port: the actor variant Summon Elemental summons, else the map's first
+that starts as its name does: NONE if the map has neither */
+static long shadowrun_summon_elemental_variant(
+	void)
+{
+	long variant = tag_loaded(ACTOR_VARIANT_DEFINITION_TAG, SHADOWRUN_SUMMONED_ACTOR_VARIANT);
+	long index;
+
+	for (index = 0; variant == NONE && index < global_tag_count; index++)
+	{
+		if (global_tag_instances[index].group_tag == ACTOR_VARIANT_DEFINITION_TAG &&
+			!strncmp(global_tag_instances[index].name, SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX,
+				strlen(SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX)))
+		{
+			variant = global_tag_instances[index].tag_index;
+		}
+	}
+
+	return variant;
+}
+
+/* port: one actor of that variant, placed where its summoning puts it (a
+summon's placement, as encounter_port_create_actor places one). Returns the
+actor, or NONE */
+static long shadowrun_summon_elemental_place(
+	long actor_variant_definition_index,
+	long unit_index)
+{
+	struct actor_variant_definition *variant = actor_variant_definition_get(actor_variant_definition_index);
+	struct actor_starting_location starting_location;
+	long actor_index = NONE;
+
+	if (variant && variant->actor_reference.index != NONE && variant->unit_reference.index != NONE)
+	{
+		/* the placement ai.c gives an actor it places of its own: this unit's
+		place, and nothing of a squad's (the states csmemset gives, none) */
+		struct object_datum *object = object_get(unit_index);
+
+		csmemset(&starting_location, 0, sizeof(starting_location));
+		starting_location.command_list_index = NONE;
+		starting_location.position = object->object.position;
+		starting_location.facing = arctangent(object->object.forward.j, object->object.forward.i);
+		actor_index = actor_place(actor_variant_definition_index, NONE, 0, &starting_location, FALSE, 0);
+	}
+
+	return actor_index;
+}
+
 /* 0x2657E0: each tree heals the players' units, and the actors' but those
 summoned, raised or in a spirit animal's form, near it */
 static void shadowrun_trees_heal(
@@ -2393,7 +2451,8 @@ static void shadowrun_unit_stop_spell_effect(
 /* 0x26B940: summon elemental. An actor of the definition's encounter comes
 where the caster aims (up to the definition's range), on the caster's side,
 in its colour, and lives the definition's time. Cast while its summons live,
-it dismisses them instead */
+it dismisses them instead. (Port: the actor is the map's elite commander
+with the energy sword, where it has one: SHADOWRUN_SUMMONED_ACTOR_VARIANT) */
 static void shadowrun_summon_cast(
 	long unit_index)
 {
@@ -2471,6 +2530,7 @@ static void shadowrun_summon_cast(
 		real_point3d target;
 		char encounter_name[sizeof(magic->summon_encounter) + 1];
 		long ai_reference = NONE;
+		long actor_variant_index;
 
 		if (collision_test_vector(_collision_test_for_projectiles_flags, &origin, &vector, unit_index, &collision))
 		{
@@ -2484,6 +2544,14 @@ static void shadowrun_summon_cast(
 		csmemcpy(encounter_name, magic->summon_encounter, sizeof(magic->summon_encounter));
 		encounter_name[sizeof(magic->summon_encounter)] = 0;
 		ai_index_from_string(global_scenario_get(), encounter_name, &ai_reference);
+		/* port: the definition's encounter names the actor of the prototype's
+		maps (zombies, elementals); it is an elite commander here, placed as an
+		encounter of none */
+		actor_variant_index = shadowrun_summon_elemental_variant();
+		if (actor_variant_index != NONE)
+		{
+			ai_reference = NONE;
+		}
 		if (!shadowrun_unit_has_mana(unit_index, (real)mana_cost) ||
 			!shadowrun_unit_can_reserve_capacity(unit_index, capacity_reserved))
 		{
@@ -2492,9 +2560,11 @@ static void shadowrun_summon_cast(
 		else
 		{
 			shadowrun_unit_cast_feedback(unit_index, magic->summon_cast_damage.index, magic->summon_cast_effect.index);
-			if (ai_reference != NONE)
+			if (ai_reference != NONE || actor_variant_index != NONE)
 			{
-				long actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
+				long actor_index = actor_variant_index != NONE ?
+					shadowrun_summon_elemental_place(actor_variant_index, unit_index) :
+					encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
 				struct actor_datum *actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
 
 				shadowrun_unit_fire_projectile(unit_index, magic->summon_projectile.index, NULL);
