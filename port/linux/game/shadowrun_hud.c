@@ -257,7 +257,7 @@ void shadowrun_hud_draw(
 text changes). Bright while it runs, grey otherwise */
 	{
 		short tech = shadowrun_unit_tech(unit_index);
-		char const *tech_name = tech != 0 ? shadowrun_tech_name(tech) : NULL;
+		char const *tech_name = tech != _shadowrun_tech_none ? shadowrun_tech_name(tech) : NULL;
 
 		if (tech_name && *tech_name)
 		{

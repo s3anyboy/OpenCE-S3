@@ -175,7 +175,12 @@ void shadowrun_unit_set_tech(
 	{
 		if (shadowrun_unit->tech != tech)
 		{
+			/* (what the one before it left: its marks, its climb, its holograms,
+			its glider) */
 			shadowrun_vision_clear(unit_index);
+			shadowrun_gecko_end(unit_index);
+			shadowrun_holograms_clear(unit_index);
+			shadowrun_glider_end(unit_index);
 			shadowrun_unit->tech_ticks = 0;
 		}
 		shadowrun_unit->tech = tech;
@@ -189,7 +194,7 @@ short shadowrun_unit_tech(
 {
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
-	return shadowrun_unit ? (short)shadowrun_unit->tech : 0;
+	return shadowrun_unit ? (short)shadowrun_unit->tech : _shadowrun_tech_none;
 }
 
 /* the left bumper's: the unit's tech does what it does. TRUE when one ran */
@@ -198,7 +203,9 @@ boolean shadowrun_tech_cast(
 {
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
-	if (!shadowrun_unit || shadowrun_unit->tech == 0)
+	/* (reflexes is 0, so a unit's tech is _shadowrun_tech_none until it has
+	one: 0 is a tech's own) */
+	if (!shadowrun_unit || shadowrun_unit->tech == _shadowrun_tech_none)
 	{
 		return FALSE;
 	}
@@ -643,7 +650,23 @@ void shadowrun_player_controls(
 	if (UNIT_CONTROL_PORT_TECH_BIT < 32 && (flags & FLAG(UNIT_CONTROL_PORT_TECH_BIT)) &&
 		shadowrun_map_loaded())
 	{
-		shadowrun_tech_cast(unit_index);
+		/* port: said, as a tech that does nothing is otherwise silent. Said
+		once each a second, a press being one a tick while held */
+		static long last_told;
+
+		if (game_time_get() != last_told)
+		{
+			struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+
+			error(_error_silent, "shadowrun: tech %ld used%s",
+				shadowrun_unit ? shadowrun_unit->tech : -1L,
+				shadowrun_tech_cast(unit_index) ? "" : " (nothing came of it)");
+			last_told = game_time_get();
+		}
+		else
+		{
+			shadowrun_tech_cast(unit_index);
+		}
 	}
 
 	return;

@@ -958,8 +958,8 @@ static void shadowrun_shop_buy(
 					else
 					{
 						shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech_owned);
-						shadowrun_unit_set_tech(unit_index, 0);
-						shadowrun_player->known_tech = 0;
+						shadowrun_unit_set_tech(unit_index, _shadowrun_tech_none);
+						shadowrun_player->known_tech = _shadowrun_tech_none;
 						shadowrun_player->money -= removal_price;
 						state->purchase_time = game_time_get();
 					}

@@ -96,6 +96,16 @@ void shadowrun_initialize_for_new_map(
 	void)
 {
 	csmemset(shadowrun_globals.players, 0, HALO_PORT_MAXIMUM_NETWORK_PLAYERS * sizeof(struct shadowrun_player));
+	/* port: a player knows no tech until it is given one, which is not 0:
+	reflexes is (shadowrun_tech.h) */
+	{
+		short player_index;
+
+		for (player_index = 0; player_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; player_index++)
+		{
+			shadowrun_globals.players[player_index].known_tech = _shadowrun_tech_none;
+		}
+	}
 	shadowrun_magic_initialize_for_new_map();
 	shadowrun_buy_menu_initialize_for_new_map();
 
@@ -222,6 +232,9 @@ void shadowrun_unit_new(
 		short index;
 
 		csmemset(shadowrun_unit, 0, sizeof(*shadowrun_unit));
+		/* port: no tech, which is not 0 (reflexes is: shadowrun_tech.h) */
+		shadowrun_unit->tech = _shadowrun_tech_none;
+		shadowrun_unit->vision_nav_index = NONE;
 		shadowrun_unit->strangle_looping_sound_index = NONE;
 		shadowrun_unit->resurrection_ball_index = NONE;
 		for (index = 0; index < MAXIMUM_SHADOWRUN_RESURRECTED_ACTORS; index++)

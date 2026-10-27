@@ -27,7 +27,8 @@ console's shadowrun_tech).
 enum
 {
 	/* the techs, as FUN_0027d4e0 numbers them (globals.hsc's tech_vision and
-the rest) */
+the rest). Reflexes is 0: the unit's own is _shadowrun_tech_none until
+it has one */
 	_shadowrun_tech_reflexes_id = 0,
 	_shadowrun_tech_vision_id = 1,
 	_shadowrun_tech_smartlink_id = 2,
@@ -39,6 +40,9 @@ the rest) */
 	_shadowrun_tech_hearing_id = 13,
 	_shadowrun_tech_heal_id = 14,
 	NUMBER_OF_SHADOWRUN_TECHS,
+
+	/* no tech (reflexes is 0, so 0 cannot be that) */
+	_shadowrun_tech_none = -1,
 
 	/* vision: how far it reaches (world units: a metre is ten), and how long
 	it marks them (a second is 30 ticks) */
