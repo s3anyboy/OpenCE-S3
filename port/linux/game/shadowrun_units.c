@@ -95,19 +95,20 @@ void shadowrun_initialize(
 void shadowrun_initialize_for_new_map(
 	void)
 {
-	csmemset(shadowrun_globals.players, 0, HALO_PORT_MAXIMUM_NETWORK_PLAYERS * sizeof(struct shadowrun_player));
-		/* port: a player has bought no tech, and has none chosen, which is not
-		0: reflexes is (shadowrun_tech.h) */
-		{
+	/* port: a player has bought no tech, and has none chosen, which is not 0:
+	reflexes is (shadowrun_tech.h) */
 	short player_index;
 
+	csmemset(shadowrun_globals.players, 0, HALO_PORT_MAXIMUM_NETWORK_PLAYERS * sizeof(struct shadowrun_player));
 	for (player_index = 0; player_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS; player_index++)
 	{
 		shadowrun_globals.players[player_index].chosen_tech = _shadowrun_tech_none;
 	}
-		}
 	shadowrun_magic_initialize_for_new_map();
 	shadowrun_buy_menu_initialize_for_new_map();
+	/* port: the second grenade made the anti-magic grenade (port/linux/game/
+	shadowrun_tech.c): here, as the game globals the map's are made by then */
+	shadowrun_antimagic_initialize_for_new_map();
 
 	return;
 }
@@ -123,9 +124,6 @@ void shadowrun_tags_loaded(
 		long corrected = 0;
 
 		shadowrun_projectiles_loaded();
-		/* port: the second grenade made the anti-magic grenade
-		(port/linux/game/shadowrun_tech.c) */
-		shadowrun_antimagic_initialize_for_new_map();
 		/* each biped's srud, in what the validator does not check */
 		tag_iterator_new(&iterator, BIPED_DEFINITION_TAG);
 		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
