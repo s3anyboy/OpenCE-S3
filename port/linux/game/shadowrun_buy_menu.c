@@ -38,6 +38,7 @@ grenade, which this build has no grenade type for).
 #include "text/font_group.h"
 #include "units/units.h"
 #include "shadowrun_units.h"
+#include "shadowrun_tech.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -210,6 +211,22 @@ static short const shadowrun_shop_weapons[_shadowrun_shop_last_weapon - _shadowr
 	_shadowrun_shop_weapon_flechette_pistol,
 	_shadowrun_shop_weapon_shotgun,
 	_shadowrun_shop_weapon_rifle,
+};
+
+/* the tech each tech item is, by action, from the first tech's: the items'
+actions are not consecutive, so this is a table as the spells' is. -1 is an
+action the menu has no item for. */
+static short const shadowrun_shop_techs[_shadowrun_shop_last_tech - _shadowrun_shop_first_tech + 1] =
+{
+	4,  /* 19: Enhanced Vision */
+	1,  /* 20: Glider */
+	-1, /* 21 */
+	0,  /* 22: Grapple */
+	-1, /* 23 */
+	2,  /* 24: Hologram */
+	-1, /* 25 */
+	-1, /* 26 */
+	3,  /* 27: Smartlink */
 };
 
 /* a magazine's price of each weapon the menu sells (its index in the srud's
@@ -892,6 +909,28 @@ static void shadowrun_shop_buy(
 				state->purchase_time = game_time_get();
 			}
 		}
+		else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
+		{
+			/* port: tech is bought as a spell is, and, like it, does nothing
+			yet (shadowrun_tech.c); the buy menu's own tech sounds are used */
+			short tech = shadowrun_shop_techs[action - _shadowrun_shop_first_tech];
+			short power = tech >= 0 ? shadowrun_tech_power(tech) : NONE;
+
+			if (shadowrun_shop_owned(unit_index, definition, state->selection))
+			{
+				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech_owned);
+			}
+			else if (power != NONE && shadowrun_unit_learn_power(unit_index, power))
+			{
+				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech);
+				shadowrun_player->money -= price;
+				state->purchase_time = game_time_get();
+			}
+			else
+			{
+				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
+			}
+		}
 		else if (action == _shadowrun_shop_razorclaws || action == _shadowrun_shop_katana ||
 			(action >= _shadowrun_shop_first_weapon && action <= _shadowrun_shop_last_weapon))
 		{
@@ -1049,7 +1088,8 @@ static short shadowrun_shop_list(
 }
 
 /* 0x0FF3A0: whether the player has the item: grenades of its kind, the
-spell, the weapon (tech is not played) */
+spell, the weapon, or the tech (the powers after the spells' are tech: the
+srud's known_powers holds both) */
 static boolean shadowrun_shop_owned(
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
@@ -1068,6 +1108,15 @@ static boolean shadowrun_shop_owned(
 		result = shadowrun_unit &&
 			shadowrun_unit->known_powers[shadowrun_shop_spells[action - _shadowrun_shop_first_magic]] > 0;
 	}
+	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
+	{
+		/* port: the tech it has bought, which nothing plays yet (the buy
+		works the spells' way: a power of its own, after the spells') */
+		short tech = shadowrun_shop_techs[action - _shadowrun_shop_first_tech];
+		short power = tech >= 0 ? shadowrun_tech_power(tech) : NONE;
+
+		result = shadowrun_unit && power != NONE && shadowrun_unit->known_powers[power] > 0;
+	}
 	else if (action == _shadowrun_shop_razorclaws || action == _shadowrun_shop_katana ||
 		(action >= _shadowrun_shop_first_weapon && action <= _shadowrun_shop_last_weapon))
 	{
@@ -1083,8 +1132,9 @@ static boolean shadowrun_shop_owned(
 }
 
 /* 0x101F70: whether the player may buy the item: fewer than two grenades
-of its kind, a spell it does not know, a weapon it does not have (port: and
-not tech, nor an anti-magic grenade) */
+of its kind, a spell it does not know, a weapon it does not have, tech it
+has not bought (port: not an anti-magic grenade, which this build has no
+grenade type for) */
 static boolean shadowrun_shop_available(
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
@@ -1097,8 +1147,7 @@ static boolean shadowrun_shop_available(
 	{
 		result = unit_get_grenade_count(unit_index, 0) < SHADOWRUN_SHOP_MAXIMUM_GRENADES;
 	}
-	else if (action == _shadowrun_shop_anti_magic_grenade ||
-		(action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech))
+	else if (action == _shadowrun_shop_anti_magic_grenade)
 	{
 		result = FALSE;
 	}

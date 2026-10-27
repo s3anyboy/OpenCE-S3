@@ -538,6 +538,7 @@ symbols in this file:
 
 #include "cseries.h"
 #include "game_modes.h" /* port: port/linux/game/game_modes.c */
+#include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
 #include "infection.h" /* port: port/linux/game/infection.c */
 #include "cseries_windows.h"
 #include "errors.h"
@@ -5925,6 +5926,10 @@ void game_engine_render_nav_points(
 			}
 		}
 	}
+
+	/* port: Enhanced Vision's nav points, over its enemies (shadowrun_tech.c),
+	whatever the variant's goal radar is */
+	shadowrun_tech_render_nav_points(local_player_index);
 
 	return;
 }

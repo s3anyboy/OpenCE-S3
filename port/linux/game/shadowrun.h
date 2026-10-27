@@ -157,5 +157,14 @@ void shadowrun_players_change_magic(
 	short spell);
 void shadowrun_game_set_assignment_scheme(
 	short scheme);
+/* ---------- prototypes/SHADOWRUN_TECH.C */
+/* the known_powers place of a tech item (its index in the buy menu's tech
+items), or NONE past them */
+short shadowrun_tech_power(
+	short tech);
+/* the tech the unit has been given, used (player_control.c: the left bumper;
+nothing has to use it yet, so it does nothing) */
+void shadowrun_tech_use(
+	long unit_index);
 
 #endif

@@ -212,7 +212,7 @@ symbols in this file:
 #include "real_math.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c; after the limit2d alias above */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
-#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c, shadowrun_races.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c, shadowrun_races.c, shadowrun_tech.c */
 
 /* ---------- constants */
 
@@ -1496,21 +1496,42 @@ static void get_local_player_input_blob(
 					input->player_control_flags,
 					_player_control_rotate_grenades_bit,
 					effective_buttons[_button_switch_grenade] == TRUE);
-				/* port: on the Shadowrun prototype's maps the switch-grenade
-				control (the right bumper) casts the spell chosen, sent as the
-				flashlight's flag, and the flashlight control (the left bumper)
-				chooses the spell, or grenade, instead
-				(port/linux/game/shadowrun_units.c, shadowrun_buy_menu.c) */
+				/* port: on the Shadowrun prototype's maps the d-pad and the bumpers
+				work the spells and the tech: the right d-pad casts the spell chosen,
+				the left d-pad chooses the spell (or a grenade, as before), and the
+				left bumper uses the tech chosen, which are sent as the flashlight's
+				flag and the grenade-rotate flag (port/linux/game/shadowrun_units.c,
+				shadowrun_buy_menu.c). A keyboard or mouse player, with no d-pad, keeps
+				the bumpers the prototype used: the right bumper casts the spell, the
+				left one chooses it */
 				if (shadowrun_map_loaded())
 				{
-					SET_FLAG(
-						input->unit_control_flags,
-						_unit_control_integrated_light_bit,
-						effective_buttons[_button_switch_grenade] == TRUE);
-					SET_FLAG(
-						input->player_control_flags,
-						_player_control_rotate_grenades_bit,
-						effective_buttons[_button_flashlight] == TRUE);
+					boolean cast_spell = effective_buttons[_button_switch_grenade] == TRUE;
+					boolean choose = effective_buttons[_button_flashlight] == TRUE;
+					boolean use_tech = FALSE;
+
+					if (gamepad)
+					{
+						cast_spell = gamepad->buttons[_gamepad_binary_button_dpad_right] ? TRUE : cast_spell;
+						choose = gamepad->buttons[_gamepad_binary_button_dpad_left] ? TRUE : choose;
+						use_tech = gamepad->buttons[_gamepad_analog_button_white] ? TRUE : use_tech;
+					}
+					SET_FLAG(input->unit_control_flags, _unit_control_integrated_light_bit, cast_spell);
+					SET_FLAG(input->player_control_flags, _player_control_rotate_grenades_bit, choose);
+					/* port: the left bumper's tech use has nothing to do yet: the tech
+					tags have a layout but no behaviour (shadowrun_tech*.c), and no
+					control bit the game reads is free for it (the weapon-rotate bit
+					would switch the player's weapon). The control is read here so that
+					only this one place changes when the tech do something */
+					if (use_tech)
+					{
+						struct player_datum *tech_player = player_get(local_player_index);
+
+						if (tech_player && tech_player->unit_index != NONE)
+						{
+							shadowrun_tech_use(tech_player->unit_index);
+						}
+					}
 					/* the Back control opens Shadowrun's buy menu; while it is
 					open the stick (or the d-pad) and the jump, melee and action
 					controls work it, and the player does nothing else */

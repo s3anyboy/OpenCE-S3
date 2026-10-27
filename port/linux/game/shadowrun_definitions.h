@@ -33,6 +33,9 @@ enum
 	SHADOWRUN_MAGIC3_DEFINITION_TAG = 'm3ed',
 	SHADOWRUN_BUY_MENU_DEFINITION_TAG = 'buym',
 	SHADOWRUN_WEAPON_DATA_TAG = 'srwd',
+	SHADOWRUN_TECH1_DEFINITION_TAG = 't1ed',
+	SHADOWRUN_TECH2_DEFINITION_TAG = 't2ed',
+	SHADOWRUN_TECH3_DEFINITION_TAG = 't3ed',
 
 	/* the races a unit definition has (and the levels of each spell) */
 	MAXIMUM_SHADOWRUN_RACES = 5,
@@ -450,6 +453,164 @@ struct shadowrun_weapon_data
 	byte unused2[0xE4];
 };
 
+/* t1ed: the tech effect data of Enhanced Vision and the Hologram (0x800
+bytes). The layouts are from original/custom_tag_dumps/t1ed.txt, which names
+the tags each field refers to; a field the dump only gives a value for keeps
+an offset name until something reads it. (0x80-0x94 and the fields named by
+offset: no code reads them yet.) */
+struct shadowrun_tech1_definition
+{
+	byte unused_000[0x80];
+	long int_080;
+	long int_084;
+	byte unused_088[0x8];
+	/* the three effects, each with its damage: the first pair is vision's
+	(vision_1st.effe, then <none>, vision_3rd.jpt!) */
+	struct tag_reference reference_effe_090;
+	struct tag_reference reference_jpt_0a0;
+	struct tag_reference reference_effe_0b0;
+	struct tag_reference reference_jpt_0c0;
+	struct tag_reference reference_effe_0d0;
+	struct tag_reference reference_jpt_0e0;
+	byte unused_0f0[0x90];
+	real float_180;
+	real float_184;
+	struct tag_block block_188;
+	real float_194;
+	real float_198;
+	real float_19c;
+	/* vision: what it shows a unit, in the first and third person, and their
+	damage (vision_1st.effe, vision_3rd.jpt!) */
+	struct tag_reference vision_first_person_effect;
+	struct tag_reference reference_jpt_1b0;
+	struct tag_reference reference_effe_1c0;
+	struct tag_reference reference_jpt_1d0;
+	real float_1e0;
+	byte unused_1e4[0xa0];
+	real float_284;
+	real float_288;
+	real float_28c;
+	struct tag_block block_290;
+	/* (weapons\laser\laser.proj: a hologram's shot) */
+	struct tag_reference reference_proj_29c;
+	byte unused_2ac[0x1d8];
+	struct tag_block block_484;
+	byte unused_490[0xf4];
+	struct tag_block block_584;
+	/* the hologram's encounter, which missionlet names "hologram" (a 32-byte
+	string the dump reads at 0x590) */
+	char hologram_encounter[32];
+	real float_5b0;
+	real float_5b4;
+	real float_5b8;
+	real float_5bc;
+	real float_5c0;
+	real float_5c4;
+	real float_5c8;
+	long int_5cc;
+	real float_5d0;
+	real float_5d4;
+};
+
+/* t2ed: the tech effect data of the Grapple, the Glider and Smartlink
+(0x800 bytes), from original/custom_tag_dumps/t2ed.txt. The dump names the
+grapple's shot and encounter (grapple.proj, grapple.scen) and its effects
+(fire, hit_success, hit_bounce, travel, player_attach, player_release,
+cable_release, cable_snap), and the glider's encounter (glider.scen). */
+struct shadowrun_tech2_definition
+{
+	byte unused_000[0x84];
+	real float_084;
+	struct tag_block block_088;
+	byte unused_094[0xec];
+	struct tag_block block_180;
+	struct tag_reference grapple_projectile;
+	struct tag_reference grapple_encounter;
+	/* how far a grapple reaches, how fast it travels and pulls, and how long
+	(15, 10, 8, 0.4), and the ticks before it can fire again */
+	real grapple_range;
+	real grapple_speed;
+	real grapple_pull_speed;
+	real grapple_pull_delay;
+	long grapple_cooldown_ticks;
+	/* the grapple's effects, in the order the dump names them */
+	struct tag_reference grapple_fire_effect;
+	struct tag_reference grapple_hit_success_effect;
+	struct tag_reference grapple_hit_success_effect_2;
+	struct tag_reference grapple_hit_bounce_effect;
+	struct tag_reference grapple_hit_bounce_effect_2;
+	struct tag_reference grapple_travel_effect;
+	struct tag_reference grapple_player_travel_effect;
+	struct tag_reference grapple_player_attach_effect;
+	struct tag_reference grapple_player_release_effect;
+	struct tag_reference grapple_cable_release_effect;
+	struct tag_reference grapple_cable_snap_effect;
+	byte unused_270[0x14];
+	real glider_float_284;
+	/* the glider's encounter (glider.scen) */
+	struct tag_reference glider_encounter;
+	struct tag_block block_298;
+	byte unused_2a4[0x4];
+	real glider_float_2a8;
+	byte unused_2ac[0xd4];
+	long int_380;
+	struct tag_reference reference_effe_384;
+	struct tag_reference reference_effe_394;
+	real float_3a4;
+	byte unused_3a8[0x4];
+	real float_3ac;
+	byte unused_3b0[0xd4];
+	struct tag_block block_484;
+	byte unused_490[0xf8];
+	real float_588;
+	char string_58c[32];
+	long int_5ac;
+	long int_5b0;
+	struct tag_reference reference_effe_5b4;
+	struct tag_reference reference_jpt_5c4;
+	struct tag_reference reference_proj_5d4;
+	struct tag_reference reference_jpt_5e4;
+	struct tag_reference reference_effe_5f4;
+	struct tag_block block_604;
+};
+
+/* t3ed: the tech effect data of the anti-magic grenade (0x800 bytes), from
+original/custom_tag_dumps/t3ed.txt. Nothing reads it: this build has no
+grenade type for it. */
+struct shadowrun_tech3_definition
+{
+	byte unused_000[0x380];
+	/* (antimagic.scen, antimagicball.scen, antimagic.jpt!, antimagic.effe) */
+	struct tag_reference reference_scen_380;
+	struct tag_reference reference_scen_390;
+	struct tag_reference reference_jpt_3a0;
+	struct tag_reference reference_effe_3b0;
+	long int_3c0;
+	long int_3c4;
+	real float_3c8;
+	real float_3cc;
+	real float_3d0;
+	real float_3d4;
+	real float_3d8;
+	real float_3dc;
+	real float_3e0;
+	struct tag_reference reference_jpt_3e4;
+	struct tag_block block_3f4;
+	real float_400;
+	struct tag_reference reference_jpt_404;
+	real float_414;
+	struct tag_reference reference_effe_418;
+	struct tag_reference reference_jpt_428;
+	struct tag_reference reference_effe_438;
+	real float_448;
+	long int_44c;
+	struct tag_reference reference_elec_450;
+	real float_460;
+	byte unused_464[0x4];
+	real float_468;
+	real float_46c;
+};
+
 /* buym: the buy menu's sounds, and the sound of a spell that fails (0x7D0
 bytes) */
 struct shadowrun_buy_menu_definition
@@ -559,6 +720,26 @@ typedef char shadowrun_magic2_firewall_effect_assert[
 	offsetof(struct shadowrun_magic2_definition, firewall_effect.index) == 0x410 ? 1 : -1];
 typedef char shadowrun_magic2_summon_levels_assert[
 	offsetof(struct shadowrun_magic2_definition, summon_levels) == 0x308 ? 1 : -1];
+
+typedef char shadowrun_tech1_size_assert[sizeof(struct shadowrun_tech1_definition) == 0x5D8 ? 1 : -1];
+typedef char shadowrun_tech1_vision_effect_assert[
+	offsetof(struct shadowrun_tech1_definition, vision_first_person_effect.index) == 0x1A0 ? 1 : -1];
+typedef char shadowrun_tech1_vision_damage_assert[
+	offsetof(struct shadowrun_tech1_definition, reference_jpt_1b0.index) == 0x1B0 ? 1 : -1];
+typedef char shadowrun_tech1_hologram_assert[
+	offsetof(struct shadowrun_tech1_definition, hologram_encounter) == 0x590 ? 1 : -1];
+
+typedef char shadowrun_tech2_size_assert[sizeof(struct shadowrun_tech2_definition) == 0x610 ? 1 : -1];
+typedef char shadowrun_tech2_grapple_projectile_assert[
+	offsetof(struct shadowrun_tech2_definition, grapple_projectile.index) == 0x18C ? 1 : -1];
+typedef char shadowrun_tech2_grapple_encounter_assert[
+	offsetof(struct shadowrun_tech2_definition, grapple_encounter.index) == 0x19C ? 1 : -1];
+typedef char shadowrun_tech2_glider_assert[
+	offsetof(struct shadowrun_tech2_definition, glider_encounter.index) == 0x288 ? 1 : -1];
+
+typedef char shadowrun_tech3_size_assert[sizeof(struct shadowrun_tech3_definition) == 0x470 ? 1 : -1];
+typedef char shadowrun_tech3_antimagic_assert[
+	offsetof(struct shadowrun_tech3_definition, reference_scen_380.index) == 0x380 ? 1 : -1];
 
 typedef char shadowrun_magic3_size_assert[sizeof(struct shadowrun_magic3_definition) == 0x700 ? 1 : -1];
 typedef char shadowrun_magic3_spirit_animal_effect_assert[

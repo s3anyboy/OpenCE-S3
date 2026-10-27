@@ -8,9 +8,9 @@ Ported from the prototype's executable (cachesym.xbe, build 01.12.07.0132);
 each function names the one it is (its address in the executable). Its bugs
 are kept, each marked BUG (original, preserved).
 
-Played: teleport and gust. The other spells (tree of life, resurrection,
-strangle, summon elemental, spirit animal, smoke) fail as if the unit had not
-the mana for them, until they are.
+Played: every spell. Summon Elemental needs the encounter its m2ed names
+(missionlet has none called 'elemental', so there it fails as a spell that
+cannot be cast does, rather than doing nothing).
 */
 
 /* ---------- headers */
@@ -18,7 +18,9 @@ the mana for them, until they are.
 #include "cseries.h"
 #include "ai/ai.h"
 #include "ai/actors.h"
+#include "ai/actor_placement.h"
 #include "ai/ai_script.h"
+#include "ai/ai_scenario_definitions.h"
 #include "ai/encounters.h"
 #include "cache/cache_files.h"
 #include "effects/effects.h"
@@ -35,6 +37,7 @@ the mana for them, until they are.
 #include "scenario/scenario.h"
 #include "sound/game_sound.h"
 #include "tag_files/tag_groups.h"
+#include "tag_files/tag_files.h"
 #include "text/text_group.h"
 #include "units/bipeds.h"
 #include "units/biped_definitions.h"
@@ -102,6 +105,10 @@ ticks a raised body is settled for as it is made */
 /* summon elemental's aim starts before the caster's head; cast again this
 soon after, it fails rather than dismisses */
 #define SUMMON_ORIGIN_OFFSET 0.1f
+/* the actor variant a summoned elemental is, by the name its tag has in the
+map (port: the spell summons it where the caster aims, rather than an actor of
+an encounter the weapon data names, when the map has no such encounter) */
+#define SHADOWRUN_SUMMON_VARIANT "characters\\elemental\\elite commander\\elite commander energy sword"
 
 /* firewall: its fires look for surfaces as strangle's thorns do, but for
 objects; a fire stands just above its surface; the most it hurts at once;
@@ -2471,6 +2478,7 @@ static void shadowrun_summon_cast(
 		real_point3d target;
 		char encounter_name[sizeof(magic->summon_encounter) + 1];
 		long ai_reference = NONE;
+		long variant_index = NONE;
 
 		if (collision_test_vector(_collision_test_for_projectiles_flags, &origin, &vector, unit_index, &collision))
 		{
@@ -2480,92 +2488,128 @@ static void shadowrun_summon_cast(
 		{
 			add_vectors3d((real_vector3d const *)&origin, &vector, (real_vector3d *)&target);
 		}
-		shadowrun_unit->cast_cooldown_ticks = magic->summon_cooldown_ticks;
 		csmemcpy(encounter_name, magic->summon_encounter, sizeof(magic->summon_encounter));
 		encounter_name[sizeof(magic->summon_encounter)] = 0;
+		/* port: the summon is the elemental's actor variant, placed where the
+		caster aims, rather than an actor of the encounter its weapon data names
+		(missionlet has none called 'elemental', so the spell summoned nothing
+		at all there). The variant is found by name, as the Hologram's is
+		(shadowrun_tech.c): its tag index differs in every map. A map whose
+		weapon data does name an encounter keeps using it. */
 		ai_index_from_string(global_scenario_get(), encounter_name, &ai_reference);
-		if (!shadowrun_unit_has_mana(unit_index, (real)mana_cost) ||
+		variant_index = ai_reference == NONE ? tag_loaded('actv', SHADOWRUN_SUMMON_VARIANT) : NONE;
+		if (ai_reference == NONE && variant_index == NONE)
+		{
+			shadowrun_unit_cast_failed(unit_index, _shadowrun_spell_summon_elemental);
+		}
+		else if (!shadowrun_unit_has_mana(unit_index, (real)mana_cost) ||
 			!shadowrun_unit_can_reserve_capacity(unit_index, capacity_reserved))
 		{
 			shadowrun_unit_cast_failed(unit_index, _shadowrun_spell_summon_elemental);
 		}
 		else
 		{
-			shadowrun_unit_cast_feedback(unit_index, magic->summon_cast_damage.index, magic->summon_cast_effect.index);
+			long actor_index;
+			struct actor_datum *actor;
+
+			shadowrun_unit->cast_cooldown_ticks = magic->summon_cooldown_ticks;
 			if (ai_reference != NONE)
 			{
-				long actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
-				struct actor_datum *actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
+				actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
+			}
+			else
+			{
+				struct actor_starting_location location;
 
+				/* (the variant's starting location, made as a released rider's is:
+				coop_enemies.c; actor_place makes the actor and its unit) */
+				csmemset(&location, 0, sizeof(location));
+				location.position = target;
+				location.facing = 0.f;
+				location.cluster_index = NONE;
+				location.noncombat_sequence_id = NONE;
+				location.default_state = NONE;
+				location.initial_state = NONE;
+				location.actor_variant_index = (short)variant_index;
+				location.command_list_index = NONE;
+				actor_index = actor_place(variant_index, NONE, NONE, &location, FALSE, 0);
+			}
+			actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
+
+			/* port: an actor that could not be made spent the mana too */
+			if (!actor)
+			{
+				shadowrun_unit_cast_failed(unit_index, _shadowrun_spell_summon_elemental);
+			}
+			else
+			{
+				struct player_datum *player = player_try_and_get(unit->unit.player_index);
+				long summon_index = actor->meta.unit_index;
+				struct unit_datum *summon = unit_get(summon_index);
+				struct shadowrun_unit *shadowrun_summon = shadowrun_unit_get(summon_index);
+
+				shadowrun_unit_cast_feedback(unit_index, magic->summon_cast_damage.index, magic->summon_cast_effect.index);
 				shadowrun_unit_fire_projectile(unit_index, magic->summon_projectile.index, NULL);
 				shadowrun_unit->summon_time = game_time_get();
-				if (actor)
+				for (index = 0; index < MAXIMUM_SHADOWRUN_SUMMONS; index++)
 				{
-					struct player_datum *player = player_try_and_get(unit->unit.player_index);
-					long summon_index = actor->meta.unit_index;
-					struct unit_datum *summon = unit_get(summon_index);
-					struct shadowrun_unit *shadowrun_summon = shadowrun_unit_get(summon_index);
-
-					for (index = 0; index < MAXIMUM_SHADOWRUN_SUMMONS; index++)
+					if (shadowrun_unit->summoned_actor_indices[index] == NONE)
 					{
-						if (shadowrun_unit->summoned_actor_indices[index] == NONE)
-						{
-							shadowrun_unit->summoned_actor_indices[index] = actor_index;
-							break;
-						}
+						shadowrun_unit->summoned_actor_indices[index] = actor_index;
+						break;
 					}
-					/* (the executable marks the summon's encounter here, for its
-					own AI) */
-					if (player)
+				}
+				/* (the executable marks the summon's encounter here, for its
+				own AI) */
+				if (player)
+				{
+					real_rgb_color color;
+
+					actor->meta.team_index = (short)player->team_index;
+					summon->object.owner_team_index = (short)player->team_index;
+					if (shadowrun_summon)
 					{
-						real_rgb_color color;
-
-						actor->meta.team_index = (short)player->team_index;
-						summon->object.owner_team_index = (short)player->team_index;
-						if (shadowrun_summon)
-						{
-							shadowrun_summon->summoned = TRUE;
-							shadowrun_summon->summon_lifetime_ticks = (long)(magic->summon_lifetime * TICKS_PER_SECOND);
-							shadowrun_summon->master_player_index = unit->unit.player_index;
-							shadowrun_summon->master_unit_index = unit_index;
-						}
-						game_engine_player_get_change_color(&color, unit->unit.player_index);
-						if (shadowrun_summon && magic->summon_names.index != NONE)
-						{
-							struct string_list *names = unicode_string_list_definition_get(magic->summon_names.index);
-
-							shadowrun_summon->summon_name_index = names->strings.count > 0 ?
-								random_range(0, (short)names->strings.count) : 0;
-						}
-						for (index = 0; index < NUMBER_OF_OBJECT_CHANGE_COLORS; index++)
-						{
-							summon->object.outgoing_change_colors[index] = color;
-						}
-						object_set_position(summon_index, &target, NULL, NULL);
-						if (magic->summon_birth_damage.index != NONE)
-						{
-							struct damage_data damage;
-
-							damage_data_new(&damage, magic->summon_birth_damage.index);
-							SET_FLAG(damage.flags, _damage_from_weapon_bit, TRUE);
-							negate_vector3d(&unit->unit.aiming_vector, &damage.direction);
-							object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
-						}
-						if (magic->summon_birth_effect.index != NONE)
-						{
-							effect_new_from_object(magic->summon_birth_effect.index, summon_index, summon_index, NONE,
-								0.f, 0.f, NULL, NULL);
-						}
-					}
-					else if (shadowrun_summon)
-					{
-						/* BUG (original, preserved): an actor's summon keeps the
-						encounter's side and colour, is never marked a summon and
-						lives on */
+						shadowrun_summon->summoned = TRUE;
+						shadowrun_summon->summon_lifetime_ticks = (long)(magic->summon_lifetime * TICKS_PER_SECOND);
+						shadowrun_summon->master_player_index = unit->unit.player_index;
 						shadowrun_summon->master_unit_index = unit_index;
 					}
-					shadowrun_spell_spend(unit_index, _shadowrun_spell_summon_elemental);
+					game_engine_player_get_change_color(&color, unit->unit.player_index);
+					if (shadowrun_summon && magic->summon_names.index != NONE)
+					{
+						struct string_list *names = unicode_string_list_definition_get(magic->summon_names.index);
+
+						shadowrun_summon->summon_name_index = names->strings.count > 0 ?
+							random_range(0, (short)names->strings.count) : 0;
+					}
+					for (index = 0; index < NUMBER_OF_OBJECT_CHANGE_COLORS; index++)
+					{
+						summon->object.outgoing_change_colors[index] = color;
+					}
+					object_set_position(summon_index, &target, NULL, NULL);
+					if (magic->summon_birth_damage.index != NONE)
+					{
+						struct damage_data damage;
+
+						damage_data_new(&damage, magic->summon_birth_damage.index);
+						SET_FLAG(damage.flags, _damage_from_weapon_bit, TRUE);
+						negate_vector3d(&unit->unit.aiming_vector, &damage.direction);
+						object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
+					}
+					if (magic->summon_birth_effect.index != NONE)
+					{
+						effect_new_from_object(magic->summon_birth_effect.index, summon_index, summon_index, NONE,
+							0.f, 0.f, NULL, NULL);
+					}
 				}
+				else if (shadowrun_summon)
+				{
+					/* BUG (original, preserved): an actor's summon keeps the
+					encounter's side and colour, is never marked a summon and
+					lives on */
+					shadowrun_summon->master_unit_index = unit_index;
+				}
+				shadowrun_spell_spend(unit_index, _shadowrun_spell_summon_elemental);
 			}
 		}
 	}
