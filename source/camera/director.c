@@ -127,6 +127,7 @@ symbols in this file:
 #include "flying_camera.h"
 #include "following_camera.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_camera.c */
 #include "observer.h"
 #include "orbiting_camera.h"
 
@@ -612,6 +613,10 @@ static void director_rotate_cameras(
 	return;
 }
 
+/* port: the seat state of a Shadowrun player seen from behind
+(shadowrun_camera.c), past those of director_desired_perspective */
+#define SHADOWRUN_THIRD_PERSON_PERSPECTIVE 4
+
 static void director_choose_game_perspective(
 	short local_player_index,
 	boolean force)
@@ -631,6 +636,15 @@ static void director_choose_game_perspective(
 	when the seat's enter/exit state has not changed. */
 	if (passenger)
 		following = TRUE;
+	/* port: on the Shadowrun prototype's maps a player holding a melee
+	weapon, or in its smoke, is seen from behind (its own perspective, so
+	that a change switches the view; the deterministic camera's is
+	unchanged) */
+	if (!following && unit_index != NONE && shadowrun_unit_third_person(unit_index))
+	{
+		following = TRUE;
+		perspective = SHADOWRUN_THIRD_PERSON_PERSPECTIVE;
+	}
 	if (force || director->seat_state != perspective ||
 		passenger != passenger_views[local_player_index])
 	{

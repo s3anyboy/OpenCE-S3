@@ -80,7 +80,9 @@ enum
 	MAXIMUM_PERMUTATIONS_PER_CHANGE_COLOR = 32,
 	MAXIMUM_AMMUNITION_OBJECTS_PER_MAGAZINE = 8,
 	MAXIMUM_FIRING_EFFECTS_PER_TRIGGER = 8,
-	MAXIMUM_CAMERA_TRACKS_PER_UNIT_CAMERA = 2,
+	/* (the Shadowrun prototype's tool allowed three: its units' third is
+	for a melee weapon's holder, port/linux/game/shadowrun_camera.c) */
+	MAXIMUM_CAMERA_TRACKS_PER_UNIT_CAMERA = 3,
 	MAXIMUM_HUDS_PER_UNIT = 2,
 	MAXIMUM_SEATS_PER_UNIT = 16,
 	MAXIMUM_CONTACT_POINTS_PER_BIPED = 2,

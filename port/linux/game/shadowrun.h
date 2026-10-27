@@ -72,6 +72,19 @@ boolean shadowrun_buy_menu_input(
 	real forward,
 	real strafe);
 
+/* ---------- prototypes/SHADOWRUN_CAMERA.C */
+
+/* whether a local player's unit is seen from behind (director.c): holding
+a melee weapon, or in its smoke. The view only: aiming is as ever */
+boolean shadowrun_unit_third_person(
+	long unit_index);
+/* the unit camera track a unit is followed on, of its count
+(following_camera.c): a melee weapon's holder's third */
+short shadowrun_unit_camera_track(
+	long unit_index,
+	short track_index,
+	long track_count);
+
 /* ---------- prototypes/SHADOWRUN_HUD.C */
 
 /* the unit's magic on the HUD, the local player's view's (hud.c) */

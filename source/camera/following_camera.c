@@ -42,6 +42,7 @@ symbols in this file:
 
 #include "following_camera.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_camera.c */
 #include "cseries/errors.h" /* port: (error, for a short camera track) */
 #include "observer.h"
 
@@ -117,6 +118,7 @@ typedef char unit_camera_track_size_assert[
 static struct unit_camera const *unit_camera_get(
 	long unit_index);
 static void camera_track_splut(
+	long unit_index,
 	struct unit_camera const *camera,
 	real pitch,
 	real_vector3d *offset);
@@ -169,7 +171,7 @@ void following_camera_deterministic(
 	*forward = unit->unit.aiming_vector;
 
 	pitch = arcsine(forward->k);
-	camera_track_splut(camera, pitch, &offset);
+	camera_track_splut(unit->object.parent_object_index == NONE ? unit_index : NONE, camera, pitch, &offset);
 
 	forward_x = forward->i;
 	forward_y = forward->j;
@@ -268,7 +270,8 @@ void following_camera_update(
 			magnitude3d(&command->forward) < 1.0001f,
 			"magnitude3d(&result->forward) > 0.9999f && magnitude3d(&result->forward) < 1.0001f");
 
-		camera_track_splut(camera_info.camera, facing.pitch, &track_offset);
+		camera_track_splut(camera_info.seat_index == NONE ? camera_info.unit_index : NONE,
+			camera_info.camera, facing.pitch, &track_offset);
 		command->depth = magnitude3d(&track_offset);
 		command->offset.i =
 			(command->depth * cosine(facing.pitch) + track_offset.i) * camera->distance_scale;
@@ -368,7 +371,10 @@ static struct unit_camera const *unit_camera_get(
 	return camera;
 }
 
+/* port: unit_index, the unit followed (NONE in a seat), whose weapon the
+Shadowrun prototype's maps choose its track by (shadowrun_camera.c) */
 static void camera_track_splut(
+	long unit_index,
 	struct unit_camera const *camera,
 	real pitch,
 	real_vector3d *offset)
@@ -388,6 +394,9 @@ static void camera_track_splut(
 		long track_index;
 
 		track_index = MIN(0, camera->unit_camera_tracks.count - 1);
+		/* port: a melee weapon's holder's, on the Shadowrun prototype's maps */
+		track_index = shadowrun_unit_camera_track(unit_index, (short)track_index,
+			camera->unit_camera_tracks.count);
 		track = TAG_BLOCK_GET_ELEMENT(
 			&camera->unit_camera_tracks,
 			track_index,

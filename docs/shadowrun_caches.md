@@ -141,7 +141,6 @@ Shadowrun extended some enums that this build reads:
 | `shadowrunstuff\antimagic grenade\antimagic grenade` | grenade type | 2 | 0 (fragmentation) |
 | `shadowrunstuff\tree of life grenade\tree of life grenade` | grenade type | 2 | 0 (fragmentation) |
 | `powerups\magic bamf` | powerup type | 7 | 0 |
-| `characters\sr_player\sr_player` | unit camera tracks | 3 | the first 2 |
 | missionlet's scenario | encounter 5's squad's initial and default state | 12 | none |
 
 ### Scripts
@@ -234,6 +233,15 @@ rage only the damage from before it; the troll's keeps off all of it.
 A human's body heals itself: three seconds after it was last hurt it heals
 a little each second, as its race's regeneration has it. (The elves' race
 has regeneration too, but its threshold keeps it from ever healing.)
+
+## Camera
+
+As in the prototype, a player holding a melee weapon (the katana, the
+razorclaws: weapons with a flag of Shadowrun's) is seen from behind, on its
+unit's third camera track, closer than the first; so is a player in its
+smoke, unless it looks through a scope. Aiming is as in first person: only
+the view changes. Units keep their third camera track (this build's limit,
+the tool's, was two; the game reads only the first otherwise).
 
 ## Buy menu
 
