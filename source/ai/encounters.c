@@ -2293,12 +2293,14 @@ void encounter_create(
 /* port: the Shadowrun prototype's spells raise and summon their actors one
 at a time, from an encounter of the map named for it, and keep them
 (port/linux/game/shadowrun_magic.c): one actor of the encounter's first
-squad, placed as encounter_create places it. Returns the actor, or NONE. (Its
-executable makes the encounter's definition have one squad, and gives the
-actor no unique leader's variant: its spells' encounters are of zombies and
-elementals.) */
+squad, placed as encounter_create places it, or of the actor variant
+`variant_index` where that is not NONE (the same squad's place, its own
+variant's unit). Returns the actor, or NONE. (Its executable makes the
+encounter's definition have one squad, and gives the actor no unique
+leader's variant: its spells' encounters are of zombies and elementals.) */
 long encounter_port_create_actor(
-	long encounter_index)
+	long encounter_index,
+	long variant_index)
 {
 	long actor_index = NONE;
 
@@ -2321,7 +2323,12 @@ long encounter_port_create_actor(
 					starting_location->actor_variant_index : squad_definition->actor_palette_index;
 				struct scenario *scenario = global_scenario_get();
 
-				if (VALID_INDEX(actor_palette_index, scenario->ai_actor_palette.count))
+				if (variant_index != NONE)
+				{
+					/* (the variant asked for, placed as the squad's own would be) */
+					actor_index = actor_place(variant_index, encounter_index, 0, starting_location, FALSE, 0);
+				}
+				else if (VALID_INDEX(actor_palette_index, scenario->ai_actor_palette.count))
 				{
 					struct tag_reference *actor_palette_entry = TAG_BLOCK_GET_ELEMENT(
 						&scenario->ai_actor_palette, actor_palette_index, struct tag_reference);

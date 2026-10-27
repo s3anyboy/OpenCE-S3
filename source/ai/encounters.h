@@ -142,9 +142,13 @@ void encounter_create(
 	long encounter_index,
 	short desired_platoon_index,
 	short desired_squad_index);
-/* port: one actor of the encounter's first squad (encounters.c) */
+/* port: one actor of the encounter's first squad (encounters.c), or of the
+actor variant `variant_index`, where that is not NONE: it is placed as the
+prototype's elemental is replaced by an elite commander
+(port/linux/game/shadowrun_magic.c) */
 long encounter_port_create_actor(
-	long encounter_index);
+	long encounter_index,
+	long variant_index);
 short encounter_get_actor_starting_location(
 	long encounter_index,
 	long squad_index,

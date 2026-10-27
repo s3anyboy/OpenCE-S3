@@ -195,7 +195,7 @@ races), its head, a pool of mana and the spells of its race's magic tags
 | Tree of Life | a thrown seed grows a tree that heals those near it, and withers |
 | Resurrection | raises the dead near the caster as undead on its side |
 | Strangle | thorns grow from the surfaces where the caster aims, and hold |
-| Summon Elemental | an elemental fights for the caster for a time: the map's `elite commander energy sword.actor_variant` (the prototype's elemental is an elite), else the first actor variant whose name starts `elite commander`, if it has one; the definition's encounter (the prototype's map's) is not used |
+| Summon Elemental | the map's `elite commander energy sword.actor_variant` fights for the caster for a time, where the map has it (the prototype's elemental is an elite: else the first actor variant whose name starts `elite commander`, else the definition's encounter's actor as before), placed where the caster aimed |
 | Spirit Animal | the caster grows into its animal form while its mana lasts |
 | Smoke | the caster fades into smoke, unseen and unharmed, while its mana lasts |
 
