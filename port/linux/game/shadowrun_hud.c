@@ -73,6 +73,7 @@ static char const *shadowrun_tech_name(
 {
 	switch (tech)
 	{
+	case _shadowrun_tech_reflexes_id: return "Reflexes";
 	case _shadowrun_tech_vision_id: return "Enhanced Vision";
 	case _shadowrun_tech_smartlink_id: return "Smartlink";
 	case _shadowrun_tech_gecko_id: return "Gecko";

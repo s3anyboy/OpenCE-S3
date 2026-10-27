@@ -378,8 +378,9 @@ real shadowrun_reflexes_reload_scale(
 /* ---------- the glider ---------- */
 
 /* the map's glider scenery, looked for once a map (its 'scen': the map also
-has a 'mode' of the name) */
-static long shadowrun_glider_scenery_index;
+has a 'mode' of the name). NONE until it is: a static starts at 0, which is
+a tag's index */
+static long shadowrun_glider_scenery_index = NONE;
 
 static long shadowrun_glider_scenery(
 	void)
@@ -507,8 +508,9 @@ void shadowrun_glider_update(
 
 /* ---------- grapple ---------- */
 
-/* the map's grapple projectile, looked for once a map */
-static long shadowrun_grapple_projectile_index;
+/* the map's grapple projectile, looked for once a map (NONE until it is:
+a static starts at 0, which is a tag's index) */
+static long shadowrun_grapple_projectile_index = NONE;
 
 long shadowrun_grapple_projectile(
 	void)

@@ -366,10 +366,11 @@ void object_port_update(long object_index); /* port: objects/objects.c */
 void object_port_check_body(long object_index); /* port: objects/damage.c */
 
 /* port: the map's actor variant Summon Elemental summons, found once a map
-(shadowrun_summon_elemental_variant); none, or not found yet */
-static long shadowrun_summoned_variant;
+(shadowrun_summon_elemental_variant); none, or not found yet (NONE, not 0:
+a static starts at 0, which is a tag's index) */
+static long shadowrun_summoned_variant = NONE;
 /* ... and the Hologram tech's */
-static long shadowrun_hologram_variant_index;
+static long shadowrun_hologram_variant_index = NONE;
 
 /* ---------- public code */
 
