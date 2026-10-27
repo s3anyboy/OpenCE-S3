@@ -283,7 +283,10 @@ build scripts take from CI's `GITHUB_REPOSITORY` or the checkout's origin
 remote) and the mods it plays, a line each ("folder version", in the load
 order); the host keeps it printable and logs it once, and a dedicated
 server shows it in `/api/players` (`client`). A host without the message
-drops it as a kind it does not know.
+drops it as a kind it does not know. Then version 40 adds Firefight
+(`port/linux/game/firefight.c`) as a mode of the CTF game engine: its
+`game_variant_options` carry the whole team's shared lives
+(`firefight_team_lives`), and a game's kind is the new mode.
 
 `port/linux/network_format.txt` records the wire format of the current
 version (`tools/network_format.py`): `test_linux_port.py` fails when the
