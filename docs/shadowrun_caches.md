@@ -208,7 +208,8 @@ spell, the mana, a cell a point (what spells hold back in dark red).
 Its controls are simpler than the prototype's, whose radial menu assigned
 spells to slots on the triggers and buttons: on these maps the right bumper
 (the switch-grenade control) casts the current spell, and the d-pad's right
-goes through the known spells and then the grenades. (The d-pad's up and
+goes through the known spells and then the grenades, a step to a press: a
+held d-pad steps once, however many reads see it held. (The d-pad's up and
 down walk the buy menu, so the cycle has its right, and its left, which the
 buy menu's pages use.) The left trigger throws grenades as ever. The
 scripts' `player_set_magic` and `player_change_magic` give the players

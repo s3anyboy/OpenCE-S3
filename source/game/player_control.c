@@ -1512,10 +1512,12 @@ static void get_local_player_input_blob(
 						input->unit_control_flags,
 						_unit_control_integrated_light_bit,
 						effective_buttons[_button_switch_grenade] == TRUE);
+					/* (the d-pad's right chooses once a press, as the menus' keys
+					take a key: a repeat would run through the spells) */
 					SET_FLAG(
 						input->player_control_flags,
 						_player_control_rotate_grenades_bit,
-						(dpad & HALO_LINUX_DPAD_RIGHT) != 0);
+						halo_linux_gamepad_dpad_pressed(dpad) & HALO_LINUX_DPAD_RIGHT);
 					/* the Back control opens Shadowrun's buy menu; while it is
 					open the stick (or the d-pad) and the jump, melee and action
 					controls work it, and the player does nothing else */
@@ -1535,6 +1537,12 @@ static void get_local_player_input_blob(
 						input->throttle.i = 0.f;
 						input->throttle.j = 0.f;
 					}
+				}
+				else
+				{
+					/* the menus have the d-pad: the game's next read takes what
+					it finds held for nothing new */
+					halo_linux_gamepad_dpad_game_seen(halo_linux_gamepad_dpad(gamepad_index));
 				}
 
 				if (!TEST_FLAG(

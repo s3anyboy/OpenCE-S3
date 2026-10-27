@@ -91,6 +91,13 @@ enum halo_linux_dpad_button
 };
 
 unsigned int halo_linux_gamepad_dpad(short gamepad_index);
+/* the d-pad's buttons that have just gone down (HALO_LINUX_DPAD_*): a press
+once, however many reads it lasts (a held d-pad may come as repeats); the
+buttons held are passed back so that the next call knows them. The first
+call of the game's takes nothing: whatever was held while the menus had it
+is not a press */
+void halo_linux_gamepad_dpad_game_seen(unsigned int buttons);
+int halo_linux_gamepad_dpad_pressed(unsigned int buttons);
 /* the taps on the touchscreen outside the menus since the last call while
 that keyboard is up, and where the latest was (0 to 1 across and down the
 window) */

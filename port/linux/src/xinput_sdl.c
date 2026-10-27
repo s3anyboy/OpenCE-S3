@@ -192,6 +192,24 @@ unsigned int halo_linux_gamepad_dpad(short gamepad_index)
 	return gamepad_index == 0 ? dpad : 0;
 }
 
+/* the d-pad the game last read: while a menu is up the d-pad moves about it
+instead, and the game's next read finds it up again, which it must not take
+for a press (source/game/player_control.c) */
+static unsigned int dpad_game_seen;
+
+void halo_linux_gamepad_dpad_game_seen(unsigned int buttons)
+{
+	dpad_game_seen = buttons;
+}
+
+int halo_linux_gamepad_dpad_pressed(unsigned int buttons)
+{
+	int pressed = (int)(buttons & ~dpad_game_seen);
+
+	dpad_game_seen = buttons;
+	return pressed;
+}
+
 #if defined(HALO_ANDROID) || defined(HALO_WEB)
 /* the touch controls moved the player or the aim (halo_linux_touch_aiming) */
 static void touch_used(void)
