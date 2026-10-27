@@ -16,10 +16,12 @@ the mana for them, until they are.
 /* ---------- headers */
 
 #include "cseries.h"
+#include "errors.h"
 #include "ai/ai.h"
 #include "ai/actors.h"
 #include "ai/ai_script.h"
 #include "ai/actor_placement.h"
+#include "ai/ai_scenario_definitions.h"
 #include "ai/encounters.h"
 #include "cache/cache_files.h"
 #include "tag_files/tag_files.h"
@@ -306,6 +308,12 @@ static void shadowrun_strangle_update(
 	long unit_index);
 static void shadowrun_summons_update(
 	long unit_index);
+static long shadowrun_summon_elemental_variant(
+	void);
+static long shadowrun_summon_elemental_place(
+	long variant,
+	long unit_index,
+	real_point3d const *position);
 static void shadowrun_summons_release(
 	long unit_index,
 	boolean kill);
@@ -348,6 +356,10 @@ static real_rgb_color shadowrun_globals_undead_color(
 void biped_port_snap_facing(long biped_index); /* port: units/bipeds.c */
 void object_port_update(long object_index); /* port: objects/objects.c */
 void object_port_check_body(long object_index); /* port: objects/damage.c */
+
+/* port: the map's actor variant Summon Elemental summons, found once a map
+(shadowrun_summon_elemental_variant); none, or not found yet */
+static long shadowrun_summoned_variant;
 
 /* ---------- public code */
 
@@ -1993,8 +2005,6 @@ exact name, and a protected map's tags have no names to find it by). NONE if
 the map has neither, and the spell summons the definition's encounter's
 actor as it did. Found once a map: the first time it is asked for */
 #define SHADOWRUN_SUMMONED_VARIANT_NOT_FOUND (-2)
-
-static long shadowrun_summoned_variant;
 
 static long shadowrun_summon_elemental_variant(
 	void)
