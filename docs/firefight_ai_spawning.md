@@ -2,7 +2,9 @@
 
 ## Overview
 
-Firefight now includes **encounter-based AI wave spawning** that uses the existing Halo AI system. This document explains how to set up maps for Firefight and how the system works.
+Firefight's AI comes from the map's own encounters, placed by `encounter_create`
+at the blue team's spawn points. This document explains how to set up maps for
+Firefight and how the system works.
 
 ## How It Works
 
@@ -15,6 +17,7 @@ Firefight now includes **encounter-based AI wave spawning** that uses the existi
 5. **Defend against waves of AI enemies**
 6. **Each wave cleared triggers the next after 30 seconds**
 7. **Survive all waves or until time runs out**
+8. **Team lives (if set): each death spends one; the team respawns until none**
 
 ### For Map Authors
 
@@ -125,9 +128,9 @@ Check if it's time to spawn next wave
 ```c
 static void firefight_scan_encounters(void)
 {
-    // Scans scenario for "firefight_wave_1" through "firefight_wave_10"
-    // Stores encounter indices in firefight.wave_encounters[]
-    // Sets firefight.wave_count to number of waves found
+    // Scans the scenario for "firefight_wave_1" through "firefight_wave_10"
+    // (encounter_get_by_name), storing each index in wave_encounters[]
+    // Sets wave_count to the number of waves found
 }
 ```
 
@@ -136,10 +139,9 @@ static void firefight_scan_encounters(void)
 ```c
 static void firefight_spawn_wave(short wave_number)
 {
-    // Gets encounter index for this wave
-    // Calls ai_place() to activate the encounter
-    // Counts spawned enemies
-    // Logs wave spawn
+    // encounter_create(encounter_index, NONE, NONE) places the squads'
+    // actors at their starting locations (the blue team's CTF spawns),
+    // then the wave's enemies are counted
 }
 ```
 
@@ -161,9 +163,9 @@ void firefight_update(void)
 ```c
 static short firefight_count_wave_enemies(long encounter_index)
 {
-    // Iterates through encounter's actors
-    // Counts units that are alive
-    // Returns count
+    // Iterates through the encounter's actors (encounter_actor_iterator_new)
+    // Gets each actor's unit (actor->meta.unit_index)
+    // Counts the units that are alive (_object_dead_bit clear)
 }
 ```
 

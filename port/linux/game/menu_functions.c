@@ -6155,8 +6155,8 @@ struct gametype_option
 static struct gametype_option const gametype_options[] =
 {
 	/* OPENCE OPTIONS (OpenCE's gametypes: game_modes.c) */
-	{ "oce_mode_spinner", _option_option_byte, OPTIONS_FIELD(mode), 0, 4,
-		{ _game_mode_none, _game_mode_swat, _game_mode_infection, _game_mode_gun_game } },
+	{ "oce_mode_spinner", _option_option_byte, OPTIONS_FIELD(mode), 0, 5,
+		{ _game_mode_none, _game_mode_swat, _game_mode_infection, _game_mode_gun_game, _game_mode_firefight } },
 	{ "oce_hardcore_spinner", _option_option_byte, OPTIONS_FIELD(hardcore), 0, 2, { FALSE, TRUE } },
 	{ "inf_zombies_spinner", _option_option_byte, OPTIONS_FIELD(infection_initial_zombies), 0, 6, { 1, 2, 3, 4, 8, 16 } },
 	{ "inf_speed_spinner", _option_option_byte, OPTIONS_FIELD(infection_zombie_speed), 0, 6,
@@ -6168,6 +6168,8 @@ static struct gametype_option const gametype_options[] =
 	{ "gg_order_spinner", _option_option_byte, OPTIONS_FIELD(gun_game_order), 0, 3,
 		{ _gun_game_order_strongest_first, _gun_game_order_weakest_first, _gun_game_order_random } },
 	{ "gg_melee_spinner", _option_option_byte, OPTIONS_FIELD(gun_game_melee_demotes), 0, 2, { FALSE, TRUE } },
+	{ "ff_lives_spinner", _option_option_byte, OPTIONS_FIELD(firefight_team_lives), 0, 8,
+		{ 0, 5, 10, 15, 20, 30, 50, 100 } },
 	/* player options */
 	{ "number_of_lives_spinner", _option_long, VARIANT_FIELD(universal_variant.lives), 0, 4, { 0, 1, 3, 5 } },
 	{ "maximum_health_spinner", _option_health, 0, 0, 6, { 5, 10, 15, 20, 30, 40 } },

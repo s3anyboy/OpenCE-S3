@@ -25,10 +25,23 @@ Firefight is built on the CTF game engine specifically to leverage CTF spawn poi
 
 ### Spawn Behavior
 
-- Uses CTF red team spawn points exclusively
+- Players spawn at the red team's CTF spawn points
+- Enemies come from the map's `firefight_wave_N` encounters, whose squads
+  start at the blue team's CTF spawn points (see `firefight_ai_spawning.md`)
 - Respawn time: 5 seconds
 - No suicide penalty
-- Players spawn with full loadout
+
+### Team Lives
+
+The `firefight_team_lives` option is a pool of lives the whole team shares,
+set in Edit Gametypes' OPENCE OPTIONS (TEAM LIVES: UNLIMITED by default, else
+5, 10, 15, 20, 30, 50 or 100):
+
+- Each player death (a betrayal does not count) spends one life
+- While the pool is not empty, the dead respawn as usual
+- A player whose team has no lives left does not respawn, and `firefight.c`
+  records the round as lost to the host's log (`firefight_lives_exhausted`)
+- 0 (UNLIMITED) keeps the stock behaviour: everyone respawns without end
 
 ### Equipment & Loadout
 
@@ -69,7 +82,10 @@ This ensures CTF spawn points are used without CTF gameplay mechanics interferin
 
 - `firefight_enabled()` - Check if Firefight is active
 - `firefight_engine()` - Override CTF engine behavior
+- `firefight_update()` - Spawn the map's wave encounters and track them
 - `firefight_postspawn()` - Post-spawn equipment setup
+- `firefight_player_killed()` - Spend a shared team life
+- `firefight_can_respawn()` - Stop respawns once the lives are gone
 - `firefight_gametype()` - Built-in gametype definition
 
 ### Network Compatibility

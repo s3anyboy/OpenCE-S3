@@ -276,7 +276,9 @@ struct game_variant_options
 	kill takes the victim back a weapon */
 	byte gun_game_order;
 	boolean gun_game_melee_demotes;
-	byte reserved[6];
+	/* Firefight: shared team lives (0 = unlimited, 1-255 = limited pool) */
+	byte firefight_team_lives;
+	byte reserved[5];
 };
 
 typedef char verify_game_variant_options_size[sizeof(struct game_variant_options) == 0x2C ? 1 : -1];

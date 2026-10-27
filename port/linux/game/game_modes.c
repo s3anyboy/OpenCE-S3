@@ -246,6 +246,8 @@ void game_modes_options_default(
 	options->infection_zombie_shields = TRUE;
 	options->gun_game_order = _gun_game_order_strongest_first;
 	options->gun_game_melee_demotes = TRUE;
+	/* Firefight: team lives (0 = unlimited) */
+	options->firefight_team_lives = 0;
 	csmemset(options->reserved, 0, sizeof(options->reserved));
 }
 
@@ -279,6 +281,7 @@ void game_modes_options_sanitize(
 	if (options->gun_game_order >= NUMBER_OF_GUN_GAME_ORDERS)
 		options->gun_game_order = _gun_game_order_strongest_first;
 	options->gun_game_melee_demotes = options->gun_game_melee_demotes != FALSE;
+	/* Firefight: team lives (0 = unlimited, any byte value is valid) */
 	csmemset(options->reserved, 0, sizeof(options->reserved));
 }
 
@@ -417,6 +420,15 @@ void game_modes_postspawn(
 	}
 }
 
+boolean game_modes_player_can_respawn(
+	long player_index)
+{
+	/* port: Firefight's shared team lives (firefight.c) */
+	if (game_modes_mode() == _game_mode_firefight)
+		return firefight_can_respawn(player_index);
+	return TRUE;
+}
+
 void game_modes_player_killed(
 	long killing_player_index,
 	long dead_player_index,
@@ -424,6 +436,10 @@ void game_modes_player_killed(
 {
 	struct player_datum *killer;
 	struct unit_datum *unit;
+
+	/* port: Firefight's shared team lives (firefight.c) */
+	if (game_modes_mode() == _game_mode_firefight)
+		firefight_player_killed(killing_player_index, dead_player_index, friendly_fire);
 
 	/* Hardcore: the host restores the killer's health, and their shields
 	unless an overshield has them past full */

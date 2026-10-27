@@ -70,6 +70,8 @@ Slayer's with their own rules; SWAT's variant has no shields
 struct game_engine *game_modes_engine(struct game_engine *engine);
 /* a player's spawn, after its starting equipment (game_engine_postspawn_player_update) */
 void game_modes_postspawn(long player_index);
+/* whether a player may respawn: Firefight's shared team lives (firefight.c) */
+boolean game_modes_player_can_respawn(long player_index);
 /* a player killed (game_engine_player_killed, after the game engine's):
 Hardcore's restore of the killer */
 void game_modes_player_killed(long killing_player_index, long dead_player_index, boolean friendly_fire);

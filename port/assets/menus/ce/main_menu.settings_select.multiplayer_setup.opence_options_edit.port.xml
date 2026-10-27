@@ -22,6 +22,7 @@
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_inf_shields" x="54" y="283"/>
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_gg_order" x="54" y="313"/>
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_gg_melee" x="54" y="343"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_ff_lives" x="54" y="373"/>
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -48,6 +49,7 @@
 		<string text="SWAT"/>
 		<string text="INFECTION"/>
 		<string text="GUN GAME"/>
+		<string text="FIREFIGHT"/>
 	</strings>
 	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_oce_hardcore" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
 		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/oce_hardcore_label"/>
@@ -184,6 +186,25 @@
 		<string text="OFF"/>
 		<string text="ON"/>
 	</strings>
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/op_ff_lives" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/ff_lives_label"/>
+		<child widget="main_menu/settings_select/multiplayer_setup/opence_options_edit/ff_lives_spinner" x="286" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/ff_lives_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels" string_index="10" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	</widget>
+	<widget name="main_menu/settings_select/multiplayer_setup/opence_options_edit/ff_lives_spinner" type="spinner" top="2" width="206" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" string_list="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_ff_lives" font="ui\large_ui" color="#FF2896FF" align="center" text_y="4" list_flags="items_from_strings" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -13 19 -7" footer_bounds="7 208 19 214">
+		<on event="left_mouse" run="mouse spinner 1wide click"/>
+	</widget>
+	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/var_ff_lives">
+		<string text="UNLIMITED"/>
+		<string text="5"/>
+		<string text="10"/>
+		<string text="15"/>
+		<string text="20"/>
+		<string text="30"/>
+		<string text="50"/>
+		<string text="100"/>
+	</strings>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_labels">
 		<string text="MODE:"/>
 		<string text="HARDCORE:"/>
@@ -195,12 +216,14 @@
 		<string text="ZOMBIE SHIELDS:"/>
 		<string text="WEAPON ORDER:"/>
 		<string text="MELEE DEMOTES:"/>
+		<string text="TEAM LIVES:"/>
 	</strings>
 	<strings name="main_menu/settings_select/multiplayer_setup/opence_options_edit/cap_opence">
 		<string text="The game type's own rules."/>
 		<string text="No shields, and a shot to the head kills. Slayer only."/>
 		<string text="Humans killed join the zombies, who win when\nno human is left. Team Slayer only."/>
 		<string text="Each kill gives the next weapon; a kill with the\nlast wins. Free for all Slayer only."/>
+		<string text="Waves of enemies at the blue base, defended\nfrom the red: Team CTF only."/>
 		<string text="The motion sensor and aim assist as the game\ntype has them."/>
 		<string text="No motion sensor, no aim assist, and a kill\nrestores the killer's health and shields."/>
 		<string text="The zombies chosen when the round starts\n(a human is always left)."/>
@@ -237,6 +260,14 @@
 		<string text="In an order the host draws for each game."/>
 		<string text="A melee kill takes nothing from the victim."/>
 		<string text="A melee kill takes the victim back a weapon."/>
+		<string text="Players respawn without end."/>
+		<string text="The team shares 5 lives."/>
+		<string text="The team shares 10 lives."/>
+		<string text="The team shares 15 lives."/>
+		<string text="The team shares 20 lives."/>
+		<string text="The team shares 30 lives."/>
+		<string text="The team shares 50 lives."/>
+		<string text="The team shares 100 lives."/>
 	</strings>
 	<widget name="main_menu/settings_select/multiplayer_setup/playlist_edit/playlist_edit_opence_item" type="text" left="51" top="309" width="232" height="32" bitmap="bitmaps/list_item_bkd" text="OPENCE OPTIONS" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="5">
 		<on event="a" open="main_menu/settings_select/multiplayer_setup/opence_options_edit/opence_screen"/>

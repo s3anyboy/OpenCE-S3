@@ -9446,6 +9446,12 @@ boolean game_engine_should_spawn_player(
 		{
 			should_spawn = FALSE;
 		}
+		/* port: Firefight's shared team lives: no respawn when the pool is empty
+		(game_modes_player_can_respawn) */
+		else if (player->statistics.deaths > 0 && !game_modes_player_can_respawn(player_index))
+		{
+			should_spawn = FALSE;
+		}
 		else if (game_engine_globals.postgame_state ==
 				game_engine_mode_postgame_rasterize ||
 			game_engine_globals.postgame_state ==

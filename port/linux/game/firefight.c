@@ -1,24 +1,29 @@
 /*
 FIREFIGHT.C
 
-Firefight, a cooperative wave-based survival mode built on CTF (game_modes.c).
+Firefight is a cooperative wave-based survival mode built on CTF (game_modes.c).
 Players spawn at CTF red team spawns and defend against waves of AI enemies.
 The mode uses the CTF game engine to leverage its spawn points, but flags are
 disabled and the objective is pure survival.
 
-- Teams: Red team (players) vs Blue team (AI enemies)
-- Spawns: Players at red CTF points, AI at blue CTF points (via encounters)
-- Waves: Maps define encounters named "firefight_wave_1", "firefight_wave_2", etc.
-- Equipment: Customizable loadouts with generous ammo
-- Rules: Cooperative gameplay, shared score, time-limited rounds
+- Teams: Red team (players) vs blue (AI enemies)
+- Spawns: Players at the red CTF spawns; enemies at blue team spawns, from the
+  map's own encounters (see below)
+- Waves: The map's encounters named "firefight_wave_1", "firefight_wave_2",
+  ... spawned in order, 5 seconds before the first and 30 between them
+- Lives: An optional pool the whole team shares (firefight_team_lives), after
+  which a dead player no longer respawns
+- Equipment: generous loadouts, map weapons and vehicles
 
-Encounter-Based AI Spawning:
-Maps designed for Firefight include pre-placed encounters at blue team spawn
-points. Firefight activates these encounters in sequence as waves progress.
-Maps without Firefight encounters work as defense/survival without AI.
+The enemies come from the map's tags and its encounters, not from another
+map's: an encounter places the actors its squads name at their starting
+locations, which for Firefight are the blue team's CTF spawn points. A map
+without those encounters still plays (players defend the red base, no AI).
 
-Only the host tracks wave progression and spawns AI. The game ends when the
-time limit expires or all players are eliminated.
+Only the host scans the encounters, spawns the waves, counts the enemies and
+spends the lives; the AI and the players' units reach every machine as the
+game's own objects and actors already do (network_actors.c, network_objects.c).
+The round's time limit is the variant's.
 */
 
 #include "cseries.h"
@@ -29,7 +34,6 @@ time limit expires or all players are eliminated.
 #include "objects/objects.h"
 #include "units/units.h"
 #include "scenario/scenario.h"
-#include "ai/ai_scenario_definitions.h"
 #include "ai/encounters.h"
 #include "ai/actors.h"
 #include "game_modes.h"
@@ -46,6 +50,7 @@ enum
 	FIREFIGHT_DEFAULT_TIME_LIMIT = 15,        /* 15 minutes per round */
 	FIREFIGHT_DEFAULT_RESPAWN_TIME = 5,       /* 5 seconds */
 	FIREFIGHT_DEFAULT_STARTING_GRENADES = 4,  /* 4 grenades of each type */
+	FIREFIGHT_DEFAULT_TEAM_LIVES = 0,         /* 0 = unlimited lives */
 	FIREFIGHT_WAVE_START_DELAY = 5,           /* 5 seconds before first wave */
 	FIREFIGHT_WAVE_INTERVAL = 30,             /* 30 seconds between waves */
 	FIREFIGHT_MAXIMUM_WAVES = 10,             /* scan for up to 10 waves */
@@ -66,6 +71,13 @@ static struct
 	long next_wave_time;
 	/* whether the initial scan has been done */
 	boolean encounters_scanned;
+	/* team lives: shared pool of lives for all players */
+	short team_lives_remaining;
+	short team_lives_maximum;
+	/* whether team lives are enabled (0 = unlimited) */
+	boolean team_lives_enabled;
+	/* whether the round has ended because the lives ran out */
+	boolean lives_exhausted;
 } firefight;
 
 boolean firefight_enabled(
@@ -80,15 +92,10 @@ boolean firefight_enabled(
 static void firefight_scan_encounters(
 	void)
 {
-	struct scenario *scenario;
 	short wave;
 	char encounter_name[64];
 	
 	if (firefight.encounters_scanned)
-		return;
-	
-	scenario = global_scenario_get();
-	if (!scenario)
 		return;
 	
 	firefight.wave_count = 0;
@@ -98,7 +105,7 @@ static void firefight_scan_encounters(
 		
 		firefight.wave_encounters[wave] = NONE;
 		sprintf(encounter_name, "firefight_wave_%d", (int)(wave + 1));
-		encounter_index = scenario_get_encounter_by_name(scenario, encounter_name);
+		encounter_index = encounter_get_by_name(encounter_name);
 		
 		if (encounter_index != NONE)
 		{
@@ -124,6 +131,8 @@ static void firefight_scan_encounters(
 static void firefight_initialize(
 	void)
 {
+	struct game_variant_options const *options;
+	
 	csmemset(&firefight, 0, sizeof(firefight));
 	
 	/* CTF engine provides the base */
@@ -138,8 +147,26 @@ static void firefight_initialize(
 	/* Scan for wave encounters */
 	firefight_scan_encounters();
 	
-	/* Host-only state */
-	if (network_game_is_host())
+	/* Initialize team lives system */
+	options = game_variant_options_get();
+	if (options && options->firefight_team_lives > 0)
+	{
+		firefight.team_lives_enabled = TRUE;
+		firefight.team_lives_maximum = options->firefight_team_lives;
+		firefight.team_lives_remaining = options->firefight_team_lives;
+		platform_log("firefight: team lives enabled, %d lives shared",
+			(int)firefight.team_lives_remaining);
+	}
+	else
+	{
+		firefight.team_lives_enabled = FALSE;
+		platform_log("firefight: unlimited lives");
+	}
+	
+	firefight.lives_exhausted = FALSE;
+	
+	/* (the host's: the clients take its waves and lives as they come) */
+	if (!network_game_distributed_client())
 	{
 		firefight.wave_number = 0;  /* waves start at 1, 0 means "not started" */
 		firefight.enemies_remaining = 0;
@@ -173,7 +200,8 @@ struct game_engine *firefight_engine(
 
 /* ---- wave management (host only) */
 
-/* count living enemies in a wave's encounter */
+/* count living enemies in a wave's encounter: their units are the actors'
+ones, which an actor's unit_index may leave behind once it is deleted */
 static short firefight_count_wave_enemies(
 	long encounter_index)
 {
@@ -188,10 +216,9 @@ static short firefight_count_wave_enemies(
 	encounter_actor_iterator_new(&iterator, encounter_index);
 	while ((actor = encounter_actor_iterator_next(&iterator)) != NULL)
 	{
-		long unit_index = actor->unit_index;
-		struct unit_datum *unit = unit_try_and_get(unit_index);
+		struct unit_datum *unit = actor->meta.unit_index != NONE ?
+			unit_try_and_get(actor->meta.unit_index) : NULL;
 		
-		/* count alive units only */
 		if (unit && !TEST_FLAG(unit->object.damage_flags, _object_dead_bit))
 			count++;
 	}
@@ -199,7 +226,9 @@ static short firefight_count_wave_enemies(
 	return count;
 }
 
-/* spawn a wave by activating its encounter */
+/* spawn a wave by creating its encounter's actors: encounter_create places
+them at the squad's starting locations (the blue team's CTF spawns), as
+ai_place does for every encounter when a campaign map loads (ai.c) */
 static void firefight_spawn_wave(
 	short wave_number)
 {
@@ -215,8 +244,7 @@ static void firefight_spawn_wave(
 	if (encounter_index == NONE)
 		return;
 	
-	/* activate the encounter - AI spawns at their defined points */
-	ai_place();
+	encounter_create(encounter_index, NONE, NONE);
 	
 	firefight.enemies_remaining = firefight_count_wave_enemies(encounter_index);
 	platform_log("firefight: wave %d spawned, %d enemies",
@@ -228,7 +256,7 @@ void firefight_update(
 {
 	long current_time;
 	
-	if (!firefight_enabled() || !network_game_is_host())
+	if (!firefight_enabled() || network_game_distributed_client())
 		return;
 	
 	/* no waves if map has no encounters */
@@ -294,7 +322,40 @@ short firefight_enemies_remaining(
 	return firefight.enemies_remaining;
 }
 
+short firefight_team_lives_remaining(
+	void)
+{
+	return firefight.team_lives_enabled ? firefight.team_lives_remaining : -1;
+}
+
+boolean firefight_lives_exhausted(
+	void)
+{
+	return firefight.lives_exhausted;
+}
+
 /* ---- player spawning */
+
+/* whether a player can respawn (team lives check) */
+boolean firefight_can_respawn(
+	long player_index)
+{
+	if (!firefight_enabled())
+		return TRUE;
+	
+	/* unlimited lives: always allow respawn */
+	if (!firefight.team_lives_enabled)
+		return TRUE;
+	
+	/* lives remaining: allow respawn */
+	if (firefight.team_lives_remaining > 0)
+		return TRUE;
+	
+	/* no lives left: cannot respawn */
+	platform_log("firefight: player %ld cannot respawn, no team lives remaining",
+		player_index);
+	return FALSE;
+}
 
 void firefight_postspawn(
 	long player_index)
@@ -326,11 +387,28 @@ void firefight_player_killed(
 	long dead_player_index,
 	boolean friendly_fire)
 {
-	if (!firefight_enabled() || !network_game_is_host())
+	if (!firefight_enabled() || network_game_distributed_client())
 		return;
 	
-	/* Future: check if all players are dead, end round if so */
-	/* Track player deaths for scoring */
+	/* team lives: deduct from shared pool */
+	if (firefight.team_lives_enabled && !friendly_fire)
+	{
+		if (firefight.team_lives_remaining > 0)
+		{
+			firefight.team_lives_remaining--;
+			platform_log("firefight: player death, %d team lives remaining",
+				(int)firefight.team_lives_remaining);
+			
+			/* check if lives exhausted */
+			if (firefight.team_lives_remaining == 0)
+			{
+				platform_log("firefight: team lives exhausted, round ends");
+				firefight.lives_exhausted = TRUE;
+				firefight.round_active = FALSE;
+				/* port: could trigger game end here */
+			}
+		}
+	}
 }
 
 /* ---- built-in gametype */
@@ -369,6 +447,9 @@ void firefight_gametype(
 	/* Cooperative settings */
 	options->friendly_fire = _friendly_fire_off;
 	options->auto_team_balance = FALSE;
+	
+	/* Team lives: unlimited by default (0 = unlimited) */
+	options->firefight_team_lives = FIREFIGHT_DEFAULT_TEAM_LIVES;
 	
 	/* Equipment: generous loadout */
 	SET_FLAG(variant->universal_variant.flags, _game_variant_generic_starting_equipment_bit, TRUE);

@@ -730,11 +730,12 @@ SHIELD_EFFECTS_HELP = [
 PLAYLIST_EDIT = "main_menu/settings_select/multiplayer_setup/playlist_edit"
 OPENCE_EDIT = "main_menu/settings_select/multiplayer_setup/opence_options_edit"
 OPENCE_ROWS = [
-    ("oce_mode", "MODE:", ["NONE", "SWAT", "INFECTION", "GUN GAME"], [
+    ("oce_mode", "MODE:", ["NONE", "SWAT", "INFECTION", "GUN GAME", "FIREFIGHT"], [
         "The game type's own rules.",
         "No shields, and a shot to the head kills. Slayer only.",
         "Humans killed join the zombies, who win when\\nno human is left. Team Slayer only.",
-        "Each kill gives the next weapon; a kill with the\\nlast wins. Free for all Slayer only."]),
+        "Each kill gives the next weapon; a kill with the\\nlast wins. Free for all Slayer only.",
+        "Waves of enemies at the blue base, defended\\nfrom the red: Team CTF only."]),
     ("oce_hardcore", "HARDCORE:", ["OFF", "ON"], [
         "The motion sensor and aim assist as the game\\ntype has them.",
         "No motion sensor, no aim assist, and a kill\\nrestores the killer's health and shields."]),
@@ -757,6 +758,10 @@ OPENCE_ROWS = [
     ("gg_melee", "MELEE DEMOTES:", ["OFF", "ON"], [
         "A melee kill takes nothing from the victim.",
         "A melee kill takes the victim back a weapon."]),
+    ("ff_lives", "TEAM LIVES:", ["UNLIMITED", "5", "10", "15", "20", "30", "50", "100"],
+     ["Players respawn without end.", "The team shares 5 lives.", "The team shares 10 lives.",
+      "The team shares 15 lives.", "The team shares 20 lives.", "The team shares 30 lives.",
+      "The team shares 50 lives.", "The team shares 100 lives."]),
 ]
 OPENCE_ITEM = f"{PLAYLIST_EDIT}/playlist_edit_opence_item"
 
