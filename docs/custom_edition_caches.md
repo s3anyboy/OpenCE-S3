@@ -57,18 +57,16 @@ which.
 ### In the menus
 
 The map lists (New Game's, and the Map screen of Create Game's INTERNET and
-LAN and of split screen) have four kinds in their first row's chooser:
-SINGLEPLAYER (the campaign's levels), MULTIPLAYER (the Xbox's maps), and
-CUSTOM SINGLEPLAYER and CUSTOM MULTIPLAYER, the Custom Edition maps of the
-custom maps folders by the scenario type their files give (solo or
-multiplayer). A map is played as its kind says
-(`port/linux/game/menu_functions.c`):
+LAN and of split screen) have three kinds in their first row's chooser, the
+first chosen: SHADOWRUN (the Shadowrun prototype's maps), MULTIPLAYER (the
+Xbox's maps) and CUSTOM MULTIPLAYER, the Custom Edition multiplayer maps of
+the custom maps folders. A Shadowrun map is played as the campaign's levels
+are (`port/linux/game/menu_functions.c`):
 
-- **New Game**: a CUSTOM SINGLEPLAYER map is played as the campaign's
-  levels are, at the difficulty chosen next (alone, or with split screen
-  co-op's two players); a CUSTOM MULTIPLAYER map is walked around alone, as
-  MULTIPLAYER's are.
-- **The Map screen**: a CUSTOM SINGLEPLAYER map lists the difficulties and
+- **New Game**: chosen first, at the difficulty chosen next (alone, or with
+  split screen co-op's two players); a CUSTOM MULTIPLAYER map is walked
+  around alone, as MULTIPLAYER's are.
+- **The Map screen**: a Shadowrun map lists the difficulties and
   is hosted as a network co-op game (Server Setup, then the lobby), as the
   campaign's levels are; a CUSTOM MULTIPLAYER map goes on to the gametypes,
   as MULTIPLAYER's do. Split screen hosts only the multiplayer kinds.

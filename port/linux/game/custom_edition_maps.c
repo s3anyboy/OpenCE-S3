@@ -7,7 +7,7 @@ Whenever a map list opens, the custom_maps folder and then the Halo Custom
 Edition install's maps folder are scanned for CE caches (.map; OpenSauce
 caches are refused by the loader, so not listed). Multiplayer maps join the
 level list after the Xbox levels, and the map lists' CUSTOM MULTIPLAYER;
-campaign maps (solo scenarios) are the map lists' CUSTOM SINGLEPLAYER,
+campaign maps (solo scenarios) are the map lists' SHADOWRUN,
 played alone or as network co-op. The stock campaign levels get display
 indices here too, so the menus can show them the same way.
 
@@ -109,10 +109,15 @@ enum
 	_bitmap_format_a8r8g8b8 = 11,
 };
 
-/* (the multiplayer maps', custom campaigns' and spinner descriptions'
-display indices do not meet) */
+/* (the multiplayer maps', Shadowrun maps', custom campaigns' and spinner
+references' display indices do not meet) */
+/* the most Shadowrun maps the gap between the multiplayer maps and the campaigns
+holds */
+#define MAXIMUM_SHADOWRUN_MAPS (FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX - FIRST_SHADOWRUN_DISPLAY_INDEX)
 typedef char verify_multiplayer_display_indices[
-	FIRST_DISPLAY_INDEX + CUSTOM_EDITION_MAPS_MAXIMUM <= FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX ? 1 : -1];
+	FIRST_DISPLAY_INDEX + CUSTOM_EDITION_MAPS_MAXIMUM <= FIRST_SHADOWRUN_DISPLAY_INDEX ? 1 : -1];
+typedef char verify_shadowrun_display_indices[
+	FIRST_SHADOWRUN_DISPLAY_INDEX + MAXIMUM_SHADOWRUN_MAPS <= FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX ? 1 : -1];
 typedef char verify_campaign_display_indices[
 	FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX + MAXIMUM_CUSTOM_EDITION_CAMPAIGNS <= 0x7000 ? 1 : -1];
 
@@ -169,6 +174,9 @@ static wchar_t const default_description[] = L"Halo Custom\r\nEdition map";
 static wchar_t const shadowrun_default_description[] = L"Shadowrun\r\nprototype map";
 
 /* ---------- private code */
+
+static short shadowrun_map_count(
+	void);
 
 static void custom_edition_maps_forget(
 	void)
@@ -359,6 +367,13 @@ static void custom_edition_map_add(
 	{
 		return;
 	}
+	/* (a Shadowrun prototype's map, which the map lists have in their SHADOWRUN
+	kind: whether its header says so, or it is one shadowrun_maps_look_for found;
+	its tags are of another build of the engine, shadowrun_caches.c) */
+	if (campaign && (custom_edition_shadowrun_map_listed(name) || custom_edition_shadowrun_map_named(folder, name)))
+	{
+		return;
+	}
 	if (campaign)
 	{
 		if (globals->campaign_count == MAXIMUM_CUSTOM_EDITION_CAMPAIGNS || csstrlen(name) > MAXIMUM_MAP_NAME_LENGTH)
@@ -460,9 +475,47 @@ static void custom_edition_maps_tell_versions_apart(
 	}
 }
 
+/* the Shadowrun prototype's map with this name in a Custom Edition folder,
+whose header says so (a copy in custom_maps too, which a map download can put
+there; shadowrun\<name>.map is loaded from maps) */
+static boolean custom_edition_shadowrun_map_named(
+	char const *folder,
+	char const *name)
+{
+	char path[MAXIMUM_FILENAME_LENGTH + 1];
+	byte header[CACHE_FILE_HEADER_BYTES];
+	FILE *stream;
+	boolean shadowrun;
+
+	csprintf(path, "%s%s.map", folder, name);
+	stream = fopen(path, "rb");
+	if (!stream)
+		return FALSE;
+	shadowrun = fread(header, sizeof(header), 1, stream) == 1 &&
+		shadowrun_cache_header_campaign(header, sizeof(header));
+	fclose(stream);
+	return shadowrun;
+}
+
+/* whether a Shadowrun prototype map of that name was found (shadowrun_maps_look_for)
+*/
+static boolean custom_edition_shadowrun_map_listed(
+	char const *name)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	short index;
+
+	for (index = 0; index < shadowrun_map_count(); index++)
+	{
+		if (!csstrcasecmp(globals->campaigns[index].name, name))
+			return TRUE;
+	}
+	return FALSE;
+}
+
 /* The Shadowrun prototype's campaign maps in the game's maps folder
 (cache_files_map_directory), which its loader reads them from
-(docs/shadowrun_caches.md): CUSTOM SINGLEPLAYER, as a CE campaign map is.
+(docs/shadowrun_caches.md): SHADOWRUN, as a CE campaign map is.
 A map's level name is shadowrun\<name> (SHADOWRUN_LEVEL_NAME_PREFIX); one
 with the name of one of the game's own levels is not listed. Each map's
 header alone is read. */
@@ -541,7 +594,7 @@ static void shadowrun_maps_look_for(
 		count++;
 	} while (FindNextFileA(find, &data));
 	CloseHandle(find);
-	error(_error_silent, "shadowrun: %d prototype maps for CUSTOM SINGLEPLAYER", (int)count);
+	error(_error_silent, "shadowrun: %d prototype maps for the SHADOWRUN list", (int)count);
 
 	return;
 }
@@ -698,8 +751,17 @@ static struct custom_edition_map *custom_edition_map_get(
 	short map_index = display_index - FIRST_DISPLAY_INDEX;
 	short campaign_index = display_index - FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX;
 
-	if (campaign_index >= 0 && campaign_index < globals->campaign_count)
+	/* (the Shadowrun maps' entries are past the custom campaigns' ones, which
+	are past the stock campaign levels': the two campaign kinds are told apart
+	here) */
+	if (campaign_index >= 0 && campaign_index < shadowrun_map_count())
 		return &globals->campaigns[campaign_index];
+	if (display_index >= FIRST_SHADOWRUN_DISPLAY_INDEX)
+	{
+		short shadowrun_index = shadowrun_map_count() + display_index - FIRST_SHADOWRUN_DISPLAY_INDEX;
+
+		return shadowrun_index < globals->campaign_count ? &globals->campaigns[shadowrun_index] : NULL;
+	}
 	return map_index >= 0 && map_index < globals->map_count ? &globals->maps[map_index] : NULL;
 }
 
@@ -801,11 +863,11 @@ short custom_edition_maps_display_index(
 		{
 			custom_edition_maps_look_for();
 		}
-		for (map_index = 0; map_index < globals->campaign_count; map_index++)
+		for (map_index = 0; map_index < shadowrun_map_count(); map_index++)
 		{
-			if (globals->campaigns[map_index].shadowrun && !csstrcasecmp(globals->campaigns[map_index].name, name))
+			if (!csstrcasecmp(globals->campaigns[map_index].name, name))
 			{
-				return FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX + map_index;
+				return FIRST_SHADOWRUN_DISPLAY_INDEX + map_index;
 			}
 		}
 		return NONE;
@@ -868,8 +930,9 @@ short custom_edition_maps_display_index(
 boolean custom_edition_maps_campaign(
 	short display_index)
 {
+	/* (the Shadowrun prototype's maps are played as co-op too) */
 	return campaign_level_get(display_index) != NONE ||
-		(display_index >= FIRST_CUSTOM_CAMPAIGN_DISPLAY_INDEX && custom_edition_map_get(display_index));
+		(display_index >= FIRST_SHADOWRUN_DISPLAY_INDEX && custom_edition_map_get(display_index));
 }
 
 short custom_edition_maps_campaign_level(
@@ -895,6 +958,53 @@ short custom_edition_maps_count(
 	}
 
 	return campaign ? globals->campaign_count : globals->map_count;
+}
+
+/* the Shadowrun prototype's maps, the first of the campaign maps (their files
+are found before the Custom Edition maps', the lists sorted by name): the map
+lists have them in a kind of their own, by the display indices above */
+static short shadowrun_map_count(
+	void)
+{
+	struct custom_edition_maps_globals *globals = &custom_edition_maps_globals;
+	short count;
+
+	if (!globals->looked_for)
+	{
+		custom_edition_maps_look_for();
+	}
+	for (count = 0; count < globals->campaign_count && globals->campaigns[count].shadowrun; count++)
+	{
+	}
+	return count;
+}
+
+short custom_edition_shadowrun_count(
+	void)
+{
+	return shadowrun_map_count();
+}
+
+short custom_edition_shadowrun_display_index_of(
+	short index)
+{
+	return index < 0 || index >= shadowrun_map_count() ? NONE : (short)(FIRST_SHADOWRUN_DISPLAY_INDEX + index);
+}
+
+char const *custom_edition_shadowrun_level_name(
+	short display_index)
+{
+	struct custom_edition_map *map = custom_edition_map_get(display_index);
+
+	return map && map->shadowrun ? map->level_name : NULL;
+}
+
+wchar_t *custom_edition_shadowrun_name(
+	short display_index)
+{
+	struct custom_edition_map *map = custom_edition_map_get(display_index);
+
+	return map && map->shadowrun ? map->display_name : NULL;
 }
 
 short custom_edition_maps_display_index_of(

@@ -15,7 +15,7 @@ The maps examined are the prototype's `missionlet.map` (the level
 
 Put the map in the data root's `maps` folder, beside the game's own: the
 Xbox caches' loader reads it from there. It is listed in the map lists'
-CUSTOM SINGLEPLAYER (New Game's, and the Map screen's), with the Custom
+SHADOWRUN (New Game's, and the Map screen's), with the Custom
 Edition campaign maps, and played as they are: alone at the difficulty
 chosen next, or hosted as network co-op (not tried). As a Custom Edition
 map can, it may have beside it `<name>.bmp`, its picture, and `<name>.txt`,

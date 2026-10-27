@@ -92,8 +92,8 @@ Halo Custom Edition maps are placed in `custom_maps` folder, not in the `maps` f
 
 Halo PC Gearbox exclusive maps (Ice Fields, Death Island, Danger Canyon, Infinity, Timberland and Gephyrophobia) **are not included by default**. They would need to be copied over from your existing Halo Custom Edition install's `maps` folder into `custom_maps` folder too.
 
-Once that's setup, the maps will appear on CUSTOM SINGLEPLAYER and CUSTOM MULTIPLAYER in the map list in Campaign's New Game, and on the Map screen of Create Game (Internet or LAN). A CUSTOM SINGLEPLAYER map plays as a campaign level, alone or as
-online co-op.
+Once that's setup, the maps will appear on CUSTOM MULTIPLAYER in the map list in Campaign's New Game, and on the Map screen of Create Game (Internet or LAN). Custom Edition campaign maps are not listed in the menus: the chooser starts on SHADOWRUN, which lists the Shadowrun prototype's maps, played as
+campaign levels (alone or as online co-op).
 
 Maps that require OpenSauce are not compatible.
 
@@ -103,7 +103,7 @@ Refer to [docs/custom_edition_caches.md](docs/custom_edition_caches.md).
 
 ## Shadowrun prototype maps
 
-The maps of the Shadowrun prototype (built on Halo's Xbox engine, build 01.12.07.0132) run too: put `missionlet.map` in `maps` (not `custom_maps`), and it appears in CUSTOM SINGLEPLAYER (or load it from the console with `map_name shadowrun\missionlet`). Its tags and geometry are moved to where this build loads them, and its scripts call this build's functions by name. Shadowrun's own systems (magic, tech, the buy menu) are not there: the level plays on Halo's game code. Refer to [docs/shadowrun_caches.md](docs/shadowrun_caches.md).
+The maps of the Shadowrun prototype (built on Halo's Xbox engine, build 01.12.07.0132) run too: put `missionlet.map` in `maps` (not `custom_maps`), and it appears in SHADOWRUN (or load it from the console with `map_name shadowrun\missionlet`). Its tags and geometry are moved to where this build loads them, and its scripts call this build's functions by name. Shadowrun's own systems (magic, tech, the buy menu) are not there: the level plays on Halo's game code. Refer to [docs/shadowrun_caches.md](docs/shadowrun_caches.md).
 
 ## Mods
 

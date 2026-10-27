@@ -1333,7 +1333,7 @@ differently, then the validator checks their tags and each of their BSPs as
 it checks this build's maps, before the game converts their models, BSP
 geometry and scripts. Put them with `bitmaps.map`, `sounds.map` and
 `loc.map` in `custom_maps`, beside `maps`, or set `paths.custom_edition` to
-a Custom Edition install; the map lists show them as CUSTOM SINGLEPLAYER and
+a Custom Edition install; the map lists show them as SHADOWRUN and
 CUSTOM MULTIPLAYER, played as campaign levels (alone, or as network co-op)
 or as multiplayer maps by their scenario type, and `game.custom_edition =
 false` refuses them. `map_validate` checks them too, with the resource maps
