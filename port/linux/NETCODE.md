@@ -270,7 +270,16 @@ browser names in its gametype column ("SWAT", "HC CTF"); a browser takes a
 mode for a Slayer game only, and one it does not know as none. Then version 38
 lets the host's shield effects be `players` (SHIELD EFFECTS' PLAYERS' OWN), a
 value of distributed message 91 that tells each client to draw its own
-settings', not synced.
+settings', not synced. Then version 39 plays the Shadowrun prototype's maps
+(`docs/shadowrun_caches.md`) differently: its players cast the map's spells
+(teleport, gust, tree of life, resurrection, strangle, summon elemental,
+spirit animal, pillar of salt, smoke), with the map's own costs and waits, and
+spend mana; their races take damage, heal, move and melee at their own rates,
+and a troll rages; and the map's units and the enemy actors have their races.
+An older build cannot read those maps as these do, so it cannot join.Then version 41
+has Shadowrun's players buy from the map's buy menu (`shadowrun_buy_menu.c`):
+their purchases are the host's, which sends each player's money, the weapons
+and grenades they carry, and the spell they have chosen.
 
 `port/linux/network_format.txt` records the wire format of the current
 version (`tools/network_format.py`): `test_linux_port.py` fails when the
