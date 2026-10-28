@@ -1558,7 +1558,8 @@ static void video_rows_show(struct widget_instance *list)
 /* Network Setup's SERVER BROWSER's MASTER SERVERS (tools/port_settings.py:
 its words): how many of masters.txt's answered when the browser last asked,
 "<answered> OF <count>"; none listed, not asked yet, or off (network.listings
-is "brokers"). masters.txt is read again every few seconds */
+is "brokers"). masters.txt is read again every few seconds. (Left out of the
+menus as they are written: the row is not there, and neither is its value) */
 #define SERVER_BROWSER_WORDS \
 	"pc\\main_menu\\settings_select\\player_setup\\player_profile_edit\\network_setup\\server_browser\\words"
 enum
@@ -7475,7 +7476,6 @@ void pc_menu_game_data_function_invoke(
 	{
 		video_rows_show(widget);
 		hud_button_style_row_show(widget);
-		master_servers_show(widget);
 		settings_help(widget);
 	}
 	else if (!strcmp(name, "controls update menu"))
