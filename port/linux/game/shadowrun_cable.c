@@ -54,6 +54,11 @@ and the least the unit is moved for a snap to count (0.09 units) */
 its cable may fire (0x1088's 5) */
 #define SHADOWRUN_CABLE_FIRE_WAIT_TICKS 5
 
+/* port: how much of the tag's reel speed is used: half of it, as the tag's
+10 units a second (attach) and 8 (world) pull too fast to steer at (the
+executable's own, unchanged) */
+#define SHADOWRUN_CABLE_REEL_SCALE 0.5f
+
 /* ---------- globals */
 
 /* (each unit's, by its absolute index: a unit is a biped, whose datum this
@@ -281,8 +286,10 @@ static boolean shadowrun_cable_move(
 		unit->unit.throttle = *global_zero_vector3d;
 	}
 	/* (the cable's velocity is the unit's, as the executable sets it:
-	not added to one it had, which would carry a fall into the pull) */
-	scale_vector3d(&direction, speed / TICKS_PER_SECOND, &unit->object.translational_velocity);
+	not added to one it had, which would carry a fall into the pull; at
+	half the tag's speed, this build's) */
+	scale_vector3d(&direction, speed * SHADOWRUN_CABLE_REEL_SCALE / TICKS_PER_SECOND,
+		&unit->object.translational_velocity);
 
 	return TRUE;
 }
