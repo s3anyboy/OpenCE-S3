@@ -85,11 +85,13 @@ static long shadowrun_cable_slot(
 	return DATUM_INDEX_TO_ABSOLUTE_INDEX(unit_index);
 }
 
-/* (a unit whose slot the tables do not hold: nothing is kept for it) */
+/* (a unit whose slot the tables do not hold: nothing is kept for it. A
+unit's index is a datum's, and a large identifier makes it negative as a
+signed long: only its slot is looked at, which is the low half) */
 static boolean shadowrun_cable_slot_valid(
 	long unit_index)
 {
-	return unit_index >= 0 && shadowrun_cable_slot(unit_index) < MAXIMUM_TRACKED_OBJECTS;
+	return (unsigned long)shadowrun_cable_slot(unit_index) < (unsigned long)MAXIMUM_TRACKED_OBJECTS;
 }
 
 /* ---------- private prototypes */
