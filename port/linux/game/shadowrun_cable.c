@@ -1,4 +1,4 @@
-﻿/*
+/*
 SHADOWRUN_CABLE.C
 
 The Shadowrun prototype's cable, as the executable keeps it
@@ -71,6 +71,21 @@ static long shadowrun_cable_fired_times[MAXIMUM_TRACKED_OBJECTS];
 static long shadowrun_cable_attached_ticks[MAXIMUM_TRACKED_OBJECTS];
 /* the unit's wait before the cable may fire again (0x108C) */
 static long shadowrun_cable_fire_waits[MAXIMUM_TRACKED_OBJECTS];
+
+/* a unit's slot in the tables above: its object index is a datum's
+(identifier<<16 | slot), and the identifier is not 0 for one reused */
+static long shadowrun_cable_slot(
+	long unit_index)
+{
+	return DATUM_INDEX_TO_ABSOLUTE_INDEX(unit_index);
+}
+
+/* (a unit whose slot the tables do not hold: nothing is kept for it) */
+static boolean shadowrun_cable_slot_valid(
+	long unit_index)
+{
+	return unit_index >= 0 && shadowrun_cable_slot(unit_index) < MAXIMUM_TRACKED_OBJECTS;
+}
 
 /* ---------- private prototypes */
 
@@ -167,7 +182,7 @@ static long shadowrun_cable_effect(
 static void shadowrun_cable_remove_effect(
 	long unit_index)
 {
-	long *effect_index = &shadowrun_cable_effects[unit_index];
+	long *effect_index = &shadowrun_cable_effects[shadowrun_cable_slot(unit_index)];
 
 	if (*effect_index != NONE)
 	{
@@ -184,8 +199,8 @@ holds by the tag's, which the map's is 1.0: the same) */
 static void shadowrun_cable_stop(
 	long unit_index)
 {
-	long attached_unit_index = shadowrun_cable_attached_units[unit_index];
-	long projectile_index = shadowrun_cable_projectiles[unit_index];
+	long attached_unit_index = shadowrun_cable_attached_units[shadowrun_cable_slot(unit_index)];
+	long projectile_index = shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)];
 
 	if (attached_unit_index != NONE)
 	{
@@ -206,11 +221,11 @@ static void shadowrun_cable_stop(
 			SET_FLAG(projectile->object.flags, _object_connected_to_map_bit, FALSE);
 		}
 	}
-	shadowrun_cable_states[unit_index] = _shadowrun_cable_state_none;
-	shadowrun_cable_attached_units[unit_index] = NONE;
-	shadowrun_cable_projectiles[unit_index] = NONE;
-	shadowrun_cable_attached_ticks[unit_index] = 0;
-	shadowrun_cable_fired_times[unit_index] = game_time_get();
+	shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_none;
+	shadowrun_cable_attached_units[shadowrun_cable_slot(unit_index)] = NONE;
+	shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] = NONE;
+	shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] = 0;
+	shadowrun_cable_fired_times[shadowrun_cable_slot(unit_index)] = game_time_get();
 
 	return;
 }
@@ -269,15 +284,15 @@ void shadowrun_cable_initialize_for_new_map(
 void shadowrun_cable_new(
 	long unit_index)
 {
-	if (unit_index >= 0 && unit_index < MAXIMUM_TRACKED_OBJECTS)
+	if (shadowrun_cable_slot_valid(unit_index))
 	{
-		shadowrun_cable_states[unit_index] = _shadowrun_cable_state_none;
-		shadowrun_cable_projectiles[unit_index] = NONE;
-		shadowrun_cable_attached_units[unit_index] = NONE;
-		shadowrun_cable_effects[unit_index] = NONE;
-		shadowrun_cable_fired_times[unit_index] = 0;
-		shadowrun_cable_attached_ticks[unit_index] = 0;
-		shadowrun_cable_fire_waits[unit_index] = 0;
+		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_none;
+		shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] = NONE;
+		shadowrun_cable_attached_units[shadowrun_cable_slot(unit_index)] = NONE;
+		shadowrun_cable_effects[shadowrun_cable_slot(unit_index)] = NONE;
+		shadowrun_cable_fired_times[shadowrun_cable_slot(unit_index)] = 0;
+		shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] = 0;
+		shadowrun_cable_fire_waits[shadowrun_cable_slot(unit_index)] = 0;
 	}
 
 	return;
@@ -286,13 +301,13 @@ void shadowrun_cable_new(
 void shadowrun_cable_delete(
 	long unit_index)
 {
-	if (unit_index >= 0 && unit_index < MAXIMUM_TRACKED_OBJECTS)
+	if (shadowrun_cable_slot_valid(unit_index))
 	{
 		shadowrun_cable_remove_effect(unit_index);
-		shadowrun_cable_states[unit_index] = _shadowrun_cable_state_none;
-		shadowrun_cable_projectiles[unit_index] = NONE;
-		shadowrun_cable_attached_units[unit_index] = NONE;
-		shadowrun_cable_fire_waits[unit_index] = 0;
+		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_none;
+		shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] = NONE;
+		shadowrun_cable_attached_units[shadowrun_cable_slot(unit_index)] = NONE;
+		shadowrun_cable_fire_waits[shadowrun_cable_slot(unit_index)] = 0;
 	}
 
 	return;
@@ -305,12 +320,12 @@ void shadowrun_cable_begin(
 {
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
-	if (!shadowrun_unit || shadowrun_unit->cable_tech)
+	if (!shadowrun_unit || shadowrun_unit->cable_tech || !shadowrun_cable_slot_valid(unit_index))
 	{
 		return;
 	}
 	shadowrun_unit->cable_tech = TRUE;
-	shadowrun_cable_states[unit_index] = _shadowrun_cable_state_none;
+	shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_none;
 
 	return;
 }
@@ -320,7 +335,7 @@ void shadowrun_cable_end(
 {
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
-	if (!shadowrun_unit || !shadowrun_unit->cable_tech)
+	if (!shadowrun_unit || !shadowrun_unit->cable_tech || !shadowrun_cable_slot_valid(unit_index))
 	{
 		return;
 	}
@@ -336,6 +351,10 @@ away): the bolt and the effect go, and the unit's fall is not held */
 void shadowrun_cable_force_release(
 	long unit_index)
 {
+	if (!shadowrun_cable_slot_valid(unit_index))
+	{
+		return;
+	}
 	shadowrun_cable_remove_effect(unit_index);
 	shadowrun_cable_stop(unit_index);
 
@@ -347,8 +366,11 @@ void shadowrun_cable_force_release(
 boolean shadowrun_cable_reeling(
 	long unit_index)
 {
-	return shadowrun_cable_states[unit_index] == _shadowrun_cable_state_reeling ||
-		   (shadowrun_unit_get(unit_index) && shadowrun_unit_get(unit_index)->cable_held);
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+
+	return shadowrun_unit && (shadowrun_unit->cable_held ||
+		(shadowrun_cable_slot_valid(unit_index) &&
+			shadowrun_cable_states[shadowrun_cable_slot(unit_index)] == _shadowrun_cable_state_reeling));
 }
 
 /* FUN_0025B7D0: the cable fires: along the unit's forward, 30 m, whatever its
@@ -366,16 +388,17 @@ boolean shadowrun_cable_fire(
 	long attached_unit_index = NONE;
 	long projectile_index;
 
-	if (!shadowrun_unit || !definition || !unit || !shadowrun_unit->cable_tech)
+	if (!shadowrun_unit || !definition || !unit || !shadowrun_unit->cable_tech ||
+		!shadowrun_cable_slot_valid(unit_index))
 	{
 		return FALSE;
 	}
-	if (shadowrun_cable_states[unit_index] != _shadowrun_cable_state_none)
+	if (shadowrun_cable_states[shadowrun_cable_slot(unit_index)] != _shadowrun_cable_state_none)
 	{
 		return FALSE;
 	}
 	/* (FUN_0025B7D0's wait: 0x108C, which a unit whose weapon is out sets) */
-	if (shadowrun_cable_fire_waits[unit_index] > 0)
+	if (shadowrun_cable_fire_waits[shadowrun_cable_slot(unit_index)] > 0)
 	{
 		return FALSE;
 	}
@@ -388,20 +411,20 @@ boolean shadowrun_cable_fire(
 	/* (the bolt is the map's projectile, if it has one; the cable works
 	without it) */
 	projectile_index = shadowrun_grapple_fire(unit_index, definition->projectile.index);
-	shadowrun_cable_projectiles[unit_index] = projectile_index;
-	shadowrun_cable_fired_times[unit_index] = game_time_get();
-	shadowrun_cable_attached_ticks[unit_index] = 0;
+	shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] = projectile_index;
+	shadowrun_cable_fired_times[shadowrun_cable_slot(unit_index)] = game_time_get();
+	shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] = 0;
 	/* (FUN_0025B7D0's release: the fire effect, and the player's travel) */
 	shadowrun_cable_remove_effect(unit_index);
-	shadowrun_cable_effects[unit_index] = shadowrun_cable_effect(
+	shadowrun_cable_effects[shadowrun_cable_slot(unit_index)] = shadowrun_cable_effect(
 		definition->player_attach_effect.index, unit_index, unit_index);
 	if (attached_unit_index != NONE &&
 		object_try_and_get_and_verify_type(attached_unit_index, _object_mask_unit))
 	{
 		struct shadowrun_unit *attached = shadowrun_unit_get(attached_unit_index);
 
-		shadowrun_cable_states[unit_index] = _shadowrun_cable_state_attached_to_unit;
-		shadowrun_cable_attached_units[unit_index] = attached_unit_index;
+		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_attached_to_unit;
+		shadowrun_cable_attached_units[shadowrun_cable_slot(unit_index)] = attached_unit_index;
 		if (attached)
 		{
 			attached->cable_held = TRUE;
@@ -409,9 +432,9 @@ boolean shadowrun_cable_fire(
 	}
 	else
 	{
-		shadowrun_cable_states[unit_index] = _shadowrun_cable_state_attached_to_world;
+		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_attached_to_world;
 	}
-	shadowrun_cable_fire_waits[unit_index] = SHADOWRUN_CABLE_FIRE_WAIT_TICKS;
+	shadowrun_cable_fire_waits[shadowrun_cable_slot(unit_index)] = SHADOWRUN_CABLE_FIRE_WAIT_TICKS;
 
 	return TRUE;
 }
@@ -427,20 +450,20 @@ boolean shadowrun_cable_update(
 	long state;
 	boolean held = FALSE;
 
-	if (!shadowrun_unit || !unit)
+	if (!shadowrun_unit || !unit || !shadowrun_cable_slot_valid(unit_index))
 	{
 		return FALSE;
 	}
-	if (shadowrun_cable_fire_waits[unit_index] > 0)
+	if (shadowrun_cable_fire_waits[shadowrun_cable_slot(unit_index)] > 0)
 	{
-		shadowrun_cable_fire_waits[unit_index]--;
+		shadowrun_cable_fire_waits[shadowrun_cable_slot(unit_index)]--;
 	}
 	/* (a bolt that is gone ends the cable's hold of the world) */
-	if (shadowrun_cable_projectiles[unit_index] != NONE &&
-		!object_try_and_get_and_verify_type(shadowrun_cable_projectiles[unit_index],
+	if (shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] != NONE &&
+		!object_try_and_get_and_verify_type(shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)],
 											_object_mask_projectile))
 	{
-		shadowrun_cable_projectiles[unit_index] = NONE;
+		shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] = NONE;
 	}
 	if (!shadowrun_unit->cable_tech)
 	{
@@ -451,7 +474,7 @@ boolean shadowrun_cable_update(
 	{
 		return FALSE;
 	}
-	state = shadowrun_cable_states[unit_index];
+	state = shadowrun_cable_states[shadowrun_cable_slot(unit_index)];
 	switch (state)
 	{
 	case _shadowrun_cable_state_none:
@@ -460,21 +483,21 @@ boolean shadowrun_cable_update(
 	case _shadowrun_cable_state_attached_to_unit:
 	{
 		struct object_datum *attached = object_try_and_get_and_verify_type(
-			shadowrun_cable_attached_units[unit_index], _object_mask_unit);
+			shadowrun_cable_attached_units[shadowrun_cable_slot(unit_index)], _object_mask_unit);
 
 		if (!attached)
 		{
 			shadowrun_cable_stop(unit_index);
 			break;
 		}
-		shadowrun_cable_attached_ticks[unit_index]++;
+		shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)]++;
 		shadowrun_cable_move(unit_index, &attached->object.position,
 							 definition->attach_distance, 1.f / TICKS_PER_SECOND);
 		/* (the cable snaps when the unit is far enough, or has been
 		attached too long) */
 		if (distance3d(&unit->object.position, &attached->object.position) >
 				definition->snap_distance ||
-			shadowrun_cable_attached_ticks[unit_index] >= definition->reel_ticks)
+			shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] >= definition->reel_ticks)
 		{
 			shadowrun_cable_stop(unit_index);
 			break;
@@ -485,20 +508,20 @@ boolean shadowrun_cable_update(
 
 	case _shadowrun_cable_state_attached_to_world:
 	{
-		struct object_datum *projectile = shadowrun_cable_projectiles[unit_index] != NONE ? object_try_and_get_and_verify_type(shadowrun_cable_projectiles[unit_index],
+		struct object_datum *projectile = shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] != NONE ? object_try_and_get_and_verify_type(shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)],
 																															   _object_mask_projectile)
 																						  : NULL;
 
-		shadowrun_cable_attached_ticks[unit_index]++;
+		shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)]++;
 		if (!projectile ||
-			shadowrun_cable_attached_ticks[unit_index] >= definition->reel_ticks)
+			shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] >= definition->reel_ticks)
 		{
 			/* (the cable snapped: the release effect, and a snap for a
 			unit that was moved) */
 			if (definition->cable_snap_effect.index != NONE)
 			{
 				shadowrun_cable_remove_effect(unit_index);
-				shadowrun_cable_effects[unit_index] = shadowrun_cable_effect(
+				shadowrun_cable_effects[shadowrun_cable_slot(unit_index)] = shadowrun_cable_effect(
 					definition->cable_snap_effect.index, unit_index, unit_index);
 			}
 			shadowrun_cable_stop(unit_index);
@@ -516,7 +539,7 @@ boolean shadowrun_cable_update(
 		if (definition->player_release_effect.index != NONE)
 		{
 			shadowrun_cable_remove_effect(unit_index);
-			shadowrun_cable_effects[unit_index] = shadowrun_cable_effect(
+			shadowrun_cable_effects[shadowrun_cable_slot(unit_index)] = shadowrun_cable_effect(
 				definition->player_release_effect.index, unit_index, unit_index);
 		}
 		shadowrun_cable_stop(unit_index);
@@ -539,10 +562,10 @@ state 4) */
 void shadowrun_cable_reel(
 	long unit_index)
 {
-	if (shadowrun_cable_states[unit_index] == _shadowrun_cable_state_attached_to_unit ||
-		shadowrun_cable_states[unit_index] == _shadowrun_cable_state_attached_to_world)
+	if (shadowrun_cable_states[shadowrun_cable_slot(unit_index)] == _shadowrun_cable_state_attached_to_unit ||
+		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] == _shadowrun_cable_state_attached_to_world)
 	{
-		shadowrun_cable_states[unit_index] = _shadowrun_cable_state_reeling;
+		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_reeling;
 	}
 
 	return;
