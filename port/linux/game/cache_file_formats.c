@@ -4032,12 +4032,31 @@ int shadowrun_cache_header_campaign(
 	uint8_t const *header,
 	uint32_t header_bytes)
 {
-	return header && header_bytes >= CACHE_FILE_HEADER_BYTES &&
-		read_u32(header) == CACHE_HEADER_SIGNATURE &&
-		read_u32(header + CACHE_HEADER_FOOTER_OFFSET) == CACHE_FOOTER_SIGNATURE &&
-		read_s32(header + CACHE_HEADER_VERSION_OFFSET) == CACHE_FILE_VERSION_XBOX &&
-		!memcmp(header + CACHE_HEADER_BUILD_OFFSET, SHADOWRUN_BUILD, sizeof(SHADOWRUN_BUILD)) &&
-		read_s16(header + CACHE_HEADER_SCENARIO_TYPE_OFFSET) == 0;
+	static char const *const builds[] =
+	{
+		SHADOWRUN_BUILD,
+		SHADOWRUN_BUILD_MP_PROTOTYPE,
+		SHADOWRUN_BUILD_SP_PROTOTYPE,
+	};
+	unsigned int index;
+
+	if (!header || header_bytes < CACHE_FILE_HEADER_BYTES ||
+		read_u32(header) != CACHE_HEADER_SIGNATURE ||
+		read_u32(header + CACHE_HEADER_FOOTER_OFFSET) != CACHE_FOOTER_SIGNATURE ||
+		read_s32(header + CACHE_HEADER_VERSION_OFFSET) != CACHE_FILE_VERSION_XBOX ||
+		read_s16(header + CACHE_HEADER_SCENARIO_TYPE_OFFSET) != 0)
+	{
+		return 0;
+	}
+	for (index = 0; index < sizeof(builds) / sizeof(builds[0]); index++)
+	{
+		if (!memcmp(header + CACHE_HEADER_BUILD_OFFSET, builds[index], strlen(builds[index]) + 1))
+		{
+			return 1;
+		}
+	}
+
+	return 0;
 }
 
 int shadowrun_cache_tag_data(

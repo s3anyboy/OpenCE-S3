@@ -517,7 +517,21 @@ static void shadowrun_maps_look_for(
 			shadowrun_cache_header_campaign(header, sizeof(header));
 		fclose(stream);
 		if (!campaign)
+		{
+			/* port: a map the list leaves out says why, with the build it is
+			of: one of another build, or a multiplayer scenario. (The build is
+			at 0x40 of the header, cache_file_formats.c's) */
+			char build[0x21];
+			int index;
+
+			for (index = 0; index < 0x20; index++)
+			{
+				build[index] = (char)header[0x40 + index];
+			}
+			build[0x20] = 0;
+			error(_error_silent, "shadowrun: the map '%s' is not listed (build %s)", name, build);
 			continue;
+		}
 		for (map_index = 0; map_index < globals->campaign_count; map_index++)
 		{
 			if (globals->campaigns[map_index].shadowrun && !csstrcasecmp(globals->campaigns[map_index].name, name))

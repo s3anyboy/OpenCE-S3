@@ -571,8 +571,12 @@ near equivalent (docs/shadowrun_caches.md); the rest the tag validator
 corrects as it would any value past an enum's end. */
 
 #define SHADOWRUN_TAG_DATA_ADDRESS 0x8069E000UL
-/* the build its cache headers name */
+/* port: the builds its cache headers name, any of which the menus list and the
+loader converts: missionlet's (01.12.07.0132), the Mar 22 2004 prototype's
+(02.03.22.0274), and the Mar 15 2004 one's (02.03.15.0268, its solo maps) */
 #define SHADOWRUN_BUILD "01.12.07.0132"
+#define SHADOWRUN_BUILD_MP_PROTOTYPE "02.03.22.0274"
+#define SHADOWRUN_BUILD_SP_PROTOTYPE "02.03.15.0268"
 /* the actor types Shadowrun adds after Halo's 16 (hologram, dog, ninja,
 mook, guard, necro, dwarf, and one past the names it lists) */
 #define SHADOWRUN_FIRST_ACTOR_TYPE 16
@@ -591,10 +595,10 @@ int shadowrun_cache_tag_data(
 
 /* Whether the cache header at `header` (`header_bytes` of it, a file's
 first CACHE_FILE_HEADER_BYTES) is a Shadowrun prototype map's of a solo
-scenario: an Xbox cache (version 5) of SHADOWRUN_BUILD, by its header alone,
-for the menus' map lists (custom_edition_maps.c). The loader goes by where
-the tags are linked, so a copy whose header was edited to pass for another
-map's loads, but is not listed. */
+scenario: an Xbox cache (version 5) of one of the builds above, by its header
+alone, for the menus' map lists (custom_edition_maps.c). The loader goes by
+where the tags are linked, so a copy whose header was edited to pass for
+another map's loads, but is not listed. */
 int shadowrun_cache_header_campaign(
 	uint8_t const *header,
 	uint32_t header_bytes);

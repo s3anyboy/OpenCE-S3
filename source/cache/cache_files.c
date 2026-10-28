@@ -1130,6 +1130,7 @@ static struct
 {
 	{ "01.12.07.0132", CACHE_FILES_SHADOWRUN_REGION },
 	{ "02.03.22.0274", CACHE_FILES_SHADOWRUN_REGION },
+	{ "02.03.15.0268", CACHE_FILES_SHADOWRUN_REGION },
 };
 
 /* the region of a build's maps ("PAL", "NTSC", or the Shadowrun prototype's)
