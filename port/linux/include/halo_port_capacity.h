@@ -69,6 +69,28 @@ the Xbox's. */
 #define HALO_PORT_SOUND_CACHE_SIZE 0x1000000 /* (0x400000) */
 #endif
 
+/* ---------- the map files a map is precached into
+
+A map is copied into one of six cache files as it is precached (cache_files_windows.c,
+
+cached_map_file_get_size): two for solo scenarios, one for the main menu, three
+
+for multiplayer. The Xbox's limits are a solo map's 0x11600000 bytes and a
+
+multiplayer map's 0x02F00000; the port's Shadowrun prototype maps exceed the
+
+latter (the Mar 22 2004 beavercreek is 0x037C2000, 58 MB), so the desktop
+
+builds' is twice it. Nothing is set aside for them: the map's own bytes are
+
+taken from the texture cache as it is copied, and given back. Android's and
+the web build's windows keep the Xbox's. */
+#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
+#define HALO_PORT_MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE 0x02F00000 /* (0x02F00000) */
+#else
+#define HALO_PORT_MULTIPLAYER_CACHE_FILE_MAXIMUM_SIZE 0x05E00000 /* (0x02F00000) */
+#endif
+
 /* ---------- particles and lights a frame draws
 
 What one view draws in a frame, past which the rest is not drawn: the runs

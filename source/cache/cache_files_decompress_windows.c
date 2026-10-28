@@ -1157,6 +1157,16 @@ void CALLBACK cache_copy_FileIOCompletionRoutine(
 				decompressor_globals.message,
 				"async i/o finished with error code %d",
 				error_code));
+		/* port: the slot is freed as it is on success, and the error named: the
+		release build's assertion says nothing, and a slot left in use tripped
+		the next request's assertion (cache_copy_issue_write's) instead */
+		if (overlapped_index >= 0 && overlapped_index < NUMBER_OF_OVERLAPPED_STRUCTURES)
+		{
+			BIT_VECTOR_SET_FLAG(in_use_flags, overlapped_index, FALSE);
+			BIT_VECTOR_SET_FLAG(completed_flags, overlapped_index, TRUE);
+		}
+		error(_error_silent, "cache copy: async i/o finished with error code %d (%d bytes, slot %ld)",
+			(int)error_code, (int)bytes_transferred, overlapped_index);
 
 		if (overlapped_index >= _write_buffer_base &&
 			overlapped_index <= _write_buffer_base + NUMBER_OF_WRITE_BUFFERS - 1)
