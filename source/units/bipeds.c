@@ -824,8 +824,8 @@ static void biped_falling_damage(
 	boolean immune =
 		TEST_FLAG(biped->unit.flags, _unit_no_falling_damage_bit) ||
 		TEST_FLAG(definition->biped.flags, _biped_immune_to_falling_damage_bit) ||
-		/* port: a cable's pull holds the unit (port/linux/game/shadowrun_cable.c) */
-		shadowrun_cable_holds(biped_index);
+		/* port: a tech that spares it (the glider, and a cable's pull) */
+		shadowrun_tech_no_falling_damage(biped_index);
 	real falling_velocity = biped->object.translational_velocity.k;
 
 	if (!cheat.jetpack || biped->unit.player_index == NONE)
@@ -1876,10 +1876,9 @@ static boolean biped_jump(
 		}
 		if (cheat.super_jump && biped->unit.player_index!=NONE)
 			jump_magnitude *= 4.f;
-		/* port: the Shadowrun prototype's reflexes jump higher
-		(port/linux/game/shadowrun_tech.c). Its glider does not: it flies, and
-		its flight is its turn rates' (shadowrun_glider_update) */
-		jump_magnitude *= shadowrun_reflexes_jump_scale(biped_index);
+		/* port: the Shadowrun prototype's reflexes jump higher, and its glider
+		as well (port/linux/game/shadowrun_tech.c) */
+		jump_magnitude *= shadowrun_tech_jump_scale(biped_index);
 
 		jump_velocity = biped->object.translational_velocity;
 		{

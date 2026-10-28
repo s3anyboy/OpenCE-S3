@@ -146,7 +146,14 @@ void shadowrun_tech_update(
 		{
 			continue;
 		}
-		if (--shadowrun_unit->tech_ticks <= 0)
+		/* port: the glider stays out until the button is pressed again, as the
+		cable's toggle does (shadowrun_tech_cast): its ticks are not counted
+		down, so its 15 minutes do not take it off the unit */
+		if (shadowrun_unit->tech == _shadowrun_tech_glider_id)
+		{
+			shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_WEAR_TICKS;
+		}
+		else if (--shadowrun_unit->tech_ticks <= 0)
 		{
 			shadowrun_vision_clear(iterator.index);
 			shadowrun_gecko_end(iterator.index);
@@ -725,6 +732,23 @@ real shadowrun_reflexes_reload_scale(
 	return shadowrun_reflexes_active(unit_index) ? SHADOWRUN_REFLEXES_RELOAD_SCALE : 1.f;
 }
 
+/* port: the jump's scale, from whichever tech the unit has: reflexes' own, or
+the glider's (which jumps higher as it takes off) */
+real shadowrun_tech_jump_scale(
+	long unit_index)
+{
+	if (shadowrun_reflexes_active(unit_index))
+	{
+		return SHADOWRUN_REFLEXES_JUMP_SCALE;
+	}
+	if (shadowrun_glider_worn(unit_index))
+	{
+		return SHADOWRUN_GLIDER_JUMP_SCALE;
+	}
+
+	return 1.f;
+}
+
 /* ---------- the glider ---------- */
 
 /* the glider's scenery: the unit's t2ed's, as the executable reads it
@@ -769,6 +793,14 @@ boolean shadowrun_glider_worn(
 
 	return shadowrun_unit && shadowrun_unit->tech == _shadowrun_tech_glider_id &&
 		shadowrun_unit->tech_ticks > 0;
+}
+
+/* port: whether a tech spares the unit falling damage: the glider, which
+flies (its fall held off), and a cable's pull */
+boolean shadowrun_tech_no_falling_damage(
+	long unit_index)
+{
+	return shadowrun_glider_worn(unit_index) || shadowrun_cable_holds(unit_index);
 }
 
 /* 0x251f30: the glider's flight, which turns the biped by how fast it moves

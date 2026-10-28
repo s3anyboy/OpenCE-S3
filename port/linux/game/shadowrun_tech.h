@@ -101,6 +101,9 @@ map has a 'mode' of the name too) */
 #define SHADOWRUN_GLIDER_TURN_SCALE_MINIMUM 0.f
 /* how long it is out (ticks: 15 min, until another tech takes its place) */
 #define SHADOWRUN_GLIDER_WEAR_TICKS (30 * 60 * 15)
+/* port: the glider jumps higher (as it takes off), and it takes no falling
+damage while worn */
+#define SHADOWRUN_GLIDER_JUMP_SCALE 1.6f
 
 /* ---------- prototypes/SHADOWRUN_TECH.C */
 
@@ -163,6 +166,14 @@ real shadowrun_glider_turn_scale(
 scaled (bipeds.c), its movement (shadowrun_races.c) and its reload
 (weapons.c) */
 boolean shadowrun_reflexes_active(
+	long unit_index);
+/* port: whether a tech spares the unit falling damage (bipeds.c): the glider,
+which flies, and a cable's pull (shadowrun_cable.c) */
+boolean shadowrun_tech_no_falling_damage(
+	long unit_index);
+/* port: the jump's scale from whichever tech the unit has (bipeds.c):
+reflexes' or the glider's */
+real shadowrun_tech_jump_scale(
 	long unit_index);
 real shadowrun_reflexes_jump_scale(
 	long unit_index);

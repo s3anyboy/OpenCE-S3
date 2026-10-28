@@ -73,6 +73,10 @@ char const *cache_files_multiplayer_region(
 boolean cache_files_map_plays_multiplayer(
 	char const *map_name,
 	char build[0x20]);
+/* port: whether a map is of the same build family as the loaded one (the
+Shadowrun prototype's maps play with each other only) */
+boolean cache_files_map_plays_with_loaded(
+	char const *map_name);
 void cache_files_show_multiplayer_unavailable(
 	char const *map_name,
 	char const *build);

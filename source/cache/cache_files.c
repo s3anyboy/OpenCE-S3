@@ -1115,8 +1115,26 @@ static struct
 	{ "01.08.15.1749", "NTSC" },
 };
 
-/* the region of a build's maps ("PAL" or "NTSC") if it is listed above, else
-NULL; build is a cache file header's (which need not end it) */
+/* port: the builds of the Shadowrun prototype's maps, which play with each
+other and with none of the builds above: the engine is another build of
+Halo's, and its tag indices are not the released maps' (missionlet is build
+01.12.07.0132, docs/shadowrun_caches.md; the Mar 22 2004 prototype's maps are
+02.03.22.0274) */
+#define CACHE_FILES_SHADOWRUN_REGION "SHRN"
+
+static struct
+{
+	char const *build;
+	char const *region;
+} const cache_file_shadowrun_builds[] =
+{
+	{ "01.12.07.0132", CACHE_FILES_SHADOWRUN_REGION },
+	{ "02.03.22.0274", CACHE_FILES_SHADOWRUN_REGION },
+};
+
+/* the region of a build's maps ("PAL", "NTSC", or the Shadowrun prototype's)
+if it is listed above, else NULL; build is a cache file header's (which need
+not end it) */
 char const *cache_files_build_region(
 	char const *build)
 {
@@ -1126,6 +1144,11 @@ char const *cache_files_build_region(
 	{
 		if (!csstrncmp(build, cache_file_builds[index].build, sizeof(cache_file_globals.header.build)))
 			return cache_file_builds[index].region;
+	}
+	for (index = 0; index < NUMBEROF(cache_file_shadowrun_builds); index++)
+	{
+		if (!csstrncmp(build, cache_file_shadowrun_builds[index].build, sizeof(cache_file_globals.header.build)))
+			return cache_file_shadowrun_builds[index].region;
 	}
 
 	return NULL;
@@ -1179,6 +1202,45 @@ boolean cache_files_map_plays_multiplayer(
 			csstrncpy(build, header.build, 0x20);
 			build[0x1F] = 0;
 			result = cache_files_build_region(header.build) != NULL;
+		}
+		CloseHandle(file);
+	}
+
+	return result;
+}
+
+/* port: whether a named map is of the same build family as the map this
+machine has loaded (a server's map, against the client's): its region is
+the loaded map's. The Shadowrun prototype's maps play with each other only,
+and the released maps with each other only, as their tag indices differ. A
+map whose header cannot be read, or a Custom Edition one, is left TRUE (the
+join's precache tells of a map that is missing) */
+boolean cache_files_map_plays_with_loaded(
+	char const *map_name)
+{
+	struct cache_file_header header;
+	char path[256];
+	HANDLE file;
+	boolean result = TRUE;
+
+	if (!map_name || !map_name[0] || custom_edition_level_name(map_name))
+		return TRUE;
+	snprintf(path, sizeof(path), "%s%s.map", cache_files_map_directory(), tag_name_strip_path(map_name));
+	file = CreateFileA(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+	if (file != INVALID_HANDLE_VALUE)
+	{
+		unsigned long bytes_read;
+
+		if (ReadFile(file, &header, sizeof(header), &bytes_read, NULL) &&
+			bytes_read == sizeof(header) &&
+			cache_file_header_verify(&header, path, FALSE))
+		{
+			char const *map_region = cache_files_build_region(header.build);
+			char const *loaded_region = cache_files_build_region(cache_file_globals.header.build);
+
+			/* (either unknown: not this check's to refuse) */
+			if (map_region && loaded_region)
+				result = !csstrcmp(map_region, loaded_region);
 		}
 		CloseHandle(file);
 	}

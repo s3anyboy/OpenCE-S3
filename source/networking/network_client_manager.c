@@ -1324,6 +1324,16 @@ boolean network_game_client_game_settings_updated(
 				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
 				return FALSE;
 			}
+			/* port: and of the same family as this machine's own map (the
+			Shadowrun prototype's maps play with each other only, and the
+			released maps with each other only) */
+			if (!network_game_is_splitscreen_local() &&
+				!cache_files_map_plays_with_loaded(message_packet->map.name))
+			{
+				cache_files_show_multiplayer_unavailable(message_packet->map.name, build);
+				display_error_when_main_menu_loaded(_error_network_failed_to_join_game);
+				return FALSE;
+			}
 			network_event("precaching map '%s'...", message_packet->map.name);
 			main_set_multiplayer_map_name(message_packet->map.name);
 		}
