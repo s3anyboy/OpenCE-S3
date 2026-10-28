@@ -1314,9 +1314,18 @@ boolean dangerous_effects_near_player(
 			{
 				if (player->unit_index != NONE)
 				{
-					struct object_datum *unit = object_get(player->unit_index);
+					struct object_datum *unit;
 					long location_datum_index = effect->location_datum_indices[0];
 					struct effect_location_datum *instance;
+
+					/* port: a player may still name a unit that has gone (a dead
+					player's before its respawn, or a cable's that let go as it
+					died): there is none to keep clear of */
+					unit = object_try_and_get(player->unit_index);
+					if (!unit)
+					{
+						continue;
+					}
 
 					while ((instance = effect_location_get_next_instance(
 						effect,
@@ -1327,7 +1336,7 @@ boolean dangerous_effects_near_player(
 
 						if (instance->node_designator != NONE)
 						{
-							real_matrix4x3 *node_matrix;
+							real_matrix4x3 *node_matrix = NULL;
 
 							if (TEST_FLAG(
 								instance->node_designator,
@@ -1338,18 +1347,26 @@ boolean dangerous_effects_near_player(
 									(short)(instance->node_designator &
 										(FLAG(_effect_location_first_person_bit) - 1)));
 							}
-							else
+							else if (object_try_and_get(effect->object_index))
 							{
 								node_matrix = object_get_node_matrix(
 									effect->object_index,
 									(short)(instance->node_designator &
 										(FLAG(_effect_location_first_person_bit) - 1)));
 							}
-
-							matrix4x3_transform_point(
-								node_matrix,
-								&instance->matrix.position,
-								&position);
+							/* port: an effect whose object has gone, or has no node, has
+							none to stand at: it stays where it was made */
+							if (node_matrix)
+							{
+								matrix4x3_transform_point(
+									node_matrix,
+									&instance->matrix.position,
+									&position);
+							}
+							else
+							{
+								position = instance->matrix.position;
+							}
 						}
 						else
 						{
