@@ -203,7 +203,7 @@ static void shadowrun_cable_stop(
 
 		if (projectile)
 		{
-			CLEAR_FLAG(projectile->object.flags, _object_connected_to_map_bit);
+			SET_FLAG(projectile->object.flags, _object_connected_to_map_bit, FALSE);
 		}
 	}
 	shadowrun_cable_states[unit_index] = _shadowrun_cable_state_none;
@@ -240,7 +240,7 @@ static void shadowrun_cable_move(
 		return;
 	}
 	scale_vector3d(&direction, distance * scale, &unit->unit.throttle);
-	CLEAR_FLAG(unit->object.damage_flags, _object_dead_bit);
+	SET_FLAG(unit->object.damage_flags, _object_dead_bit, FALSE);
 
 	return;
 }
