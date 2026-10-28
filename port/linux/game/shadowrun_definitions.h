@@ -337,10 +337,19 @@ struct shadowrun_magic3_definition
 undead. Its fields are the executable's offsets (units.c FUN_0025e860 gives
 a unit the srud's tech2; bipeds.c FUN_002541d0 holds its cable, which reads
 0x1ac, 0x1b0, 0x1b4, 0x1b8, 0x1bc, 0x380 and 0x3a4/0x3ac), and their names
-follow the explorer's dumps of the map (custom_tag_dumps/t2ed.txt) */
+follow the explorer's dumps of the map (custom_tag_dumps/t2ed.txt).
+
+Its tag references are the Xbox's 0x10 bytes, as this build's are on the
+64-bit targets (Windows, web); on the 32-bit ones (Linux, Android) they are
+0xC, each 4 bytes short. The padding before a field is then made longer by
+what the references before it took less, and that before a tag block's
+fields by that block's too (the tag cache's pointer, which is 8 bytes on
+either), so every field keeps the executable's offset on both */
+#define TECH2_REFERENCE_PADDING ((long)(0x10 - sizeof(struct tag_reference)))
+
 struct shadowrun_tech2_definition
 {
-	byte unused0[0x18C];
+	byte unused0[0x18C - 2 * TECH2_REFERENCE_PADDING];
 	/* the bolt it fires, the cable scenery it draws between the unit and the
 	bolt, and how fast it fires, hits, is attached, and how long its reel
 	takes (ticks), with how far away the cable snaps */
@@ -364,16 +373,16 @@ struct shadowrun_tech2_definition
 	struct tag_reference player_release_effect;
 	struct tag_reference cable_release_effect;
 	struct tag_reference cable_snap_effect;
-	byte unused1[0x14];
+	byte unused1[0x14 + TECH2_REFERENCE_PADDING];
 	/* the glider's scale (bipeds.c FUN_00251c00's 0x1a4), and its scenery;
 	its races' blocks follow, and its turn (0x2a8) after them */
 	real glider_scale;
 	struct tag_reference glider_scenery;
 	struct tag_block glider_races;
 	/* (the glider's turn, 0x2A8, as the executable's FUN_002541D0 reads it,
-is not named: this build's tag_block is 0xC, so it falls inside the range
-below) */
-	byte unused2[0xD8];
+is not named: it is a tag block's, which this build's differ from the
+Xbox's in size) */
+	byte unused2[0xDC - TECH2_REFERENCE_PADDING];
 	/* the heal of the undead (bipeds.c FUN_002541d0, the cable's state 5):
 	how many points, and the effects that heal them */
 	long undead_heal_points;
@@ -383,7 +392,7 @@ below) */
 	real undead_heal_scale;
 	byte unused3[4];
 	real undead_heal_scale_2;
-	byte unused4[0x1D4];
+	byte unused4[0x1D8 + 4 * TECH2_REFERENCE_PADDING];
 	/* the name it is given (the map's "zombie"), how many ticks it lasts and
 	how many points it heals */
 	real undead_name_scale;
@@ -398,7 +407,7 @@ below) */
 	struct tag_reference undead_damage_2;
 	struct tag_reference undead_effect_2;
 	struct tag_block undead_races;
-	byte unused5[0x13C];
+	byte unused5[0xBF0 - 9 * TECH2_REFERENCE_PADDING];
 };
 
 /* t3ed: anti-magic (0x1200 bytes). Its fields are the executable's offsets
@@ -689,35 +698,10 @@ typedef char shadowrun_magic3_smoke_levels_assert[
 typedef char shadowrun_magic3_smoke_ai_assert[
 	offsetof(struct shadowrun_magic3_definition, smoke_ai_unit_effect) == 0x2D4 ? 1 : -1];
 
+/* (t2ed's are checked by size alone: the map's fields are its name's offset and
+its two tag blocks' pointers, which differ between the 32-bit pointers of the
+Linux and Android guests and the 64-bit ones of the Windows and web builds) */
 typedef char shadowrun_tech2_size_assert[sizeof(struct shadowrun_tech2_definition) == 0x1200 ? 1 : -1];
-typedef char shadowrun_tech2_projectile_assert[
-	offsetof(struct shadowrun_tech2_definition, projectile.index) == 0x18C ? 1 : -1];
-typedef char shadowrun_tech2_scenery_assert[
-	offsetof(struct shadowrun_tech2_definition, scenery.index) == 0x19C ? 1 : -1];
-typedef char shadowrun_tech2_fire_distance_assert[
-	offsetof(struct shadowrun_tech2_definition, fire_distance) == 0x1AC ? 1 : -1];
-typedef char shadowrun_tech2_snap_distance_assert[
-	offsetof(struct shadowrun_tech2_definition, snap_distance) == 0x1B8 ? 1 : -1];
-typedef char shadowrun_tech2_reel_ticks_assert[
-	offsetof(struct shadowrun_tech2_definition, reel_ticks) == 0x1BC ? 1 : -1];
-typedef char shadowrun_tech2_cable_snap_effect_assert[
-	offsetof(struct shadowrun_tech2_definition, cable_snap_effect.index) == 0x260 ? 1 : -1];
-typedef char shadowrun_tech2_glider_scale_assert[
-	offsetof(struct shadowrun_tech2_definition, glider_scale) == 0x284 ? 1 : -1];
-typedef char shadowrun_tech2_glider_scenery_assert[
-	offsetof(struct shadowrun_tech2_definition, glider_scenery.index) == 0x288 ? 1 : -1];
-typedef char shadowrun_tech2_glider_races_assert[
-	offsetof(struct shadowrun_tech2_definition, glider_races) == 0x298 ? 1 : -1];
-typedef char shadowrun_tech2_undead_heal_points_assert[
-	offsetof(struct shadowrun_tech2_definition, undead_heal_points) == 0x380 ? 1 : -1];
-typedef char shadowrun_tech2_undead_heal_scale_2_assert[
-	offsetof(struct shadowrun_tech2_definition, undead_heal_scale_2) == 0x3AC ? 1 : -1];
-typedef char shadowrun_tech2_undead_name_assert[
-	offsetof(struct shadowrun_tech2_definition, undead_name) == 0x58C ? 1 : -1];
-typedef char shadowrun_tech2_undead_ticks_assert[
-	offsetof(struct shadowrun_tech2_definition, undead_ticks) == 0x5AC ? 1 : -1];
-typedef char shadowrun_tech2_undead_races_assert[
-	offsetof(struct shadowrun_tech2_definition, undead_races) == 0x604 ? 1 : -1];
 
 typedef char shadowrun_tech3_size_assert[sizeof(struct shadowrun_tech3_definition) == 0x1200 ? 1 : -1];
 typedef char shadowrun_tech3_scenery_assert[
