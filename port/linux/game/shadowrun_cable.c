@@ -274,22 +274,15 @@ static boolean shadowrun_cable_move(
 	{
 		return TRUE;
 	}
-	/* (to a unit: the cable stops the unit's own movement; to the world: it
-	keeps falling, and the cable adds to what it had) */
+	/* (to a unit: the cable stops the unit's own movement; to the world it
+	keeps its own, as the executable's 0x100 flag leaves it) */
 	if (!keeps_velocity)
 	{
 		unit->unit.throttle = *global_zero_vector3d;
 	}
-	scale_vector3d(&direction, speed / TICKS_PER_SECOND, &direction);
-	if (keeps_velocity)
-	{
-		add_vectors3d(&unit->object.translational_velocity, &direction,
-			&unit->object.translational_velocity);
-	}
-	else
-	{
-		unit->object.translational_velocity = direction;
-	}
+	/* (the cable's velocity is the unit's, as the executable sets it:
+	not added to one it had, which would carry a fall into the pull) */
+	scale_vector3d(&direction, speed / TICKS_PER_SECOND, &unit->object.translational_velocity);
 
 	return TRUE;
 }
@@ -395,6 +388,19 @@ void shadowrun_cable_force_release(
 	return;
 }
 
+/* port: whether a cable holds the unit now, to the world or to a unit: it is
+not hurt by falling while one does (bipeds.c's falling damage) */
+boolean shadowrun_cable_holds(
+	long unit_index)
+{
+	if (!shadowrun_cable_slot_valid(unit_index))
+	{
+		return FALSE;
+	}
+	return shadowrun_cable_states[shadowrun_cable_slot(unit_index)] == _shadowrun_cable_state_attached_to_unit ||
+		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] == _shadowrun_cable_state_attached_to_world;
+}
+
 /* whether the unit is reeling in, or held by a cable: it is seen from behind
 (shadowrun_camera.c) */
 boolean shadowrun_cable_reeling(
@@ -461,8 +467,12 @@ a left bumper that does nothing otherwise says nothing */
 		return FALSE;
 	}
 	/* (the unit's forward, not its aim: the executable fires level) */
-	forward = unit->object.forward;
+	/* port: along where the unit aims (the camera, in first person), so a
+	grapple goes where the player looks, up a wall or down a shaft, and not
+	only ahead. The executable fired along the unit's forward (its 0x0.1,0,0
+	collision); this is a departure, as the hologram's cast is */
 	origin = unit->object.position;
+	unit_get_aiming_vector(unit_index, &forward);
 	point_from_line3d(&origin, &forward, SHADOWRUN_CABLE_ORIGIN_OFFSET, &origin);
 	/* (the tag's fire distance is how far it reaches: 15 m in missionlet,
 	which at a metre a tick is its 30 m) */

@@ -927,7 +927,9 @@ long shadowrun_grapple_fire(
 	{
 		origin = unit->object.position;
 	}
-	forward = unit->object.forward;
+	/* port: the way the unit aims (the camera, in first person), as the
+	cable's own collision is (shadowrun_cable.c) */
+	unit_get_aiming_vector(unit_index, &forward);
 	object_placement_data_new(&placement, projectile_definition_index, unit_index);
 	placement.position = origin;
 	placement.forward = forward;

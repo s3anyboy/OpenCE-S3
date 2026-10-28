@@ -277,6 +277,7 @@ symbols in this file:
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "shadowrun.h" /* port: port/linux/game/shadowrun_races.c */
 #include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
+#include "shadowrun_cable.h" /* port: port/linux/game/shadowrun_cable.c */
 
 /* port: port/linux/game/network_objects.c's (a client deletes the host's
 objects on the host's word alone) */
@@ -822,7 +823,9 @@ static void biped_falling_damage(
 		struct game_globals_falling_damage);
 	boolean immune =
 		TEST_FLAG(biped->unit.flags, _unit_no_falling_damage_bit) ||
-		TEST_FLAG(definition->biped.flags, _biped_immune_to_falling_damage_bit);
+		TEST_FLAG(definition->biped.flags, _biped_immune_to_falling_damage_bit) ||
+		/* port: a cable's pull holds the unit (port/linux/game/shadowrun_cable.c) */
+		shadowrun_cable_holds(biped_index);
 	real falling_velocity = biped->object.translational_velocity.k;
 
 	if (!cheat.jetpack || biped->unit.player_index == NONE)

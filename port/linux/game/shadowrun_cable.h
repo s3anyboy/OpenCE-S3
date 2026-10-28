@@ -65,5 +65,9 @@ void shadowrun_cable_reel(
 /* whether the unit is reeling in, or held by a cable (shadowrun_camera.c) */
 boolean shadowrun_cable_reeling(
 	long unit_index);
+/* port: whether a cable holds the unit now, to the world or to a unit: it is
+not hurt by falling while one does (bipeds.c's falling damage) */
+boolean shadowrun_cable_holds(
+	long unit_index);
 
 #endif
