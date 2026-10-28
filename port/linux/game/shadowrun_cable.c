@@ -119,8 +119,6 @@ static void shadowrun_cable_remove_effect(
 	long unit_index);
 static void shadowrun_cable_stop(
 	long unit_index);
-static void shadowrun_cable_reel(
-	long unit_index);
 static boolean shadowrun_cable_move(
 	long unit_index,
 	real speed,
@@ -460,8 +458,22 @@ a left bumper that does nothing otherwise says nothing */
 			(unsigned long)unit_index, _shadowrun_tech_grapple_id);
 		return FALSE;
 	}
+	/* port: the button again lets the cable go, as a toggle: the executable's
+	state 2 let it go after 15 ticks, this build's lasts until it is pressed
+	again (or the unit arrives) */
 	if (shadowrun_cable_states[shadowrun_cable_slot(unit_index)] != _shadowrun_cable_state_none)
 	{
+		if (shadowrun_cable_reeling(unit_index) || shadowrun_cable_holds(unit_index))
+		{
+			if (definition->player_release_effect.index != NONE)
+			{
+				shadowrun_cable_remove_effect(unit_index);
+				shadowrun_cable_effects[shadowrun_cable_slot(unit_index)] = shadowrun_cable_effect(
+					definition->player_release_effect.index, unit_index, unit_index);
+			}
+			shadowrun_cable_stop(unit_index);
+			return TRUE;
+		}
 		error(_error_silent, "shadowrun cable: unit %08lx's cable is still out (state %d)",
 			(unsigned long)unit_index, shadowrun_cable_states[shadowrun_cable_slot(unit_index)]);
 		return FALSE;
@@ -599,15 +611,10 @@ boolean shadowrun_cable_update(
 			shadowrun_cable_stop(unit_index);
 			break;
 		}
-		/* (reached, or 15 ticks in: it lets go, as the executable's state 2
-		does, its release's effect and all) */
-		if (distance_squared3d(&unit->object.position, &attached->object.position) <
-				0.1225f * 0.1225f ||
-			shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] > 0xf)
-		{
-			shadowrun_cable_reel(unit_index);
-			break;
-		}
+		/* port: the reel ends when the button is pressed again, and not on
+		arrival: a cable that ends there cannot be held, and a player who
+		presses it onto a wall stays on it (the executable's state 2 let go
+		once it arrived, or after 15 ticks) */
 		held = TRUE;
 	}
 	break;
@@ -632,11 +639,8 @@ boolean shadowrun_cable_update(
 			shadowrun_cable_stop(unit_index);
 			break;
 		}
-		if (shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] > 0xf)
-		{
-			shadowrun_cable_reel(unit_index);
-			break;
-		}
+		/* port: the reel ends when the button is pressed again, and not on
+		arrival (see the unit's case above) */
 		held = TRUE;
 	}
 	break;
@@ -663,23 +667,5 @@ boolean shadowrun_cable_update(
 	}
 
 	return held;
-}
-
-/* the cable lets go (FUN_002541D0's state 3): the next tick's update makes
-the release effect and stops it */
-static void shadowrun_cable_reel(
-	long unit_index)
-{
-	if (!shadowrun_cable_slot_valid(unit_index))
-	{
-		return;
-	}
-	if (shadowrun_cable_states[shadowrun_cable_slot(unit_index)] == _shadowrun_cable_state_attached_to_unit ||
-		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] == _shadowrun_cable_state_attached_to_world)
-	{
-		shadowrun_cable_states[shadowrun_cable_slot(unit_index)] = _shadowrun_cable_state_reeling;
-	}
-
-	return;
 }
 

@@ -59,9 +59,6 @@ boolean shadowrun_cable_fire(
 /* FUN_002541D0: each tick. TRUE when the unit is held */
 boolean shadowrun_cable_update(
 	long unit_index);
-/* the reel's end (FUN_002541D0's state 4) */
-void shadowrun_cable_reel(
-	long unit_index);
 /* whether the unit is reeling in, or held by a cable (shadowrun_camera.c) */
 boolean shadowrun_cable_reeling(
 	long unit_index);

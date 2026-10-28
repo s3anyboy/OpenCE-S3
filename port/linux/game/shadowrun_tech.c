@@ -980,30 +980,33 @@ void shadowrun_player_controls(
 	long unit_index,
 	unsigned long flags)
 {
+	/* port: the button's state last tick, so that a press is a press: the
+	cable's button lets it go as a second press, and one held would fire and
+	release every tick. (The tech is used once each a second as before, a
+	press being one a tick while held) */
+	static unsigned long tech_button;
+	boolean tech_down = UNIT_CONTROL_PORT_TECH_BIT < 32 &&
+		(flags & FLAG(UNIT_CONTROL_PORT_TECH_BIT)) && shadowrun_map_loaded();
+	boolean tech_pressed = tech_down && !(tech_button & FLAG(UNIT_CONTROL_PORT_TECH_BIT));
+
+	tech_button = tech_down ? (tech_button | FLAG(UNIT_CONTROL_PORT_TECH_BIT)) :
+		(tech_button & ~FLAG(UNIT_CONTROL_PORT_TECH_BIT));
+
 	if ((flags & FLAG(UNIT_CONTROL_PORT_SWITCH_TECH_BIT)) && shadowrun_map_loaded())
 	{
 		/* the d-pad's left: the next tech the player has bought */
 		shadowrun_players_switch_tech();
 	}
-	if (UNIT_CONTROL_PORT_TECH_BIT < 32 && (flags & FLAG(UNIT_CONTROL_PORT_TECH_BIT)) &&
-		shadowrun_map_loaded())
+	if (tech_down)
 	{
-		/* port: said, as a tech that does nothing is otherwise silent. Said
-		once each a second, a press being one a tick while held */
-		static long last_told;
-
-		if (game_time_get() != last_told)
+		/* port: said, as a tech that does nothing is otherwise silent */
+		if (tech_pressed)
 		{
 			struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
 			error(_error_silent, "shadowrun: tech %ld used%s",
 				shadowrun_unit ? shadowrun_unit->tech : -1L,
 				shadowrun_tech_cast(unit_index) ? "" : " (nothing came of it)");
-			last_told = game_time_get();
-		}
-		else
-		{
-			shadowrun_tech_cast(unit_index);
 		}
 	}
 
