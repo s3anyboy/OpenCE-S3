@@ -19,6 +19,7 @@ marked with the port's navpoints.
 #include "ai/actors.h"
 #include "cache/cache_files.h" /* port: the tag iterator (the techs' tags) */
 #include "tag_files/tag_files.h"
+#include "effects/effects.h"
 #include "items/projectile_definitions.h"
 #include "objects/damage.h"
 #include "objects/object_definitions.h"
