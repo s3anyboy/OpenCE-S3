@@ -1219,7 +1219,16 @@ static struct effect_location_datum *effect_location_get_next_instance(
 
 	if (*location_datum_index != NONE)
 	{
-		location = effect_location_get(*location_datum_index);
+		/* port: a location deleted under the effect (an effect stopped as it
+		runs) ends the list, rather than being read where it was */
+		location = (struct effect_location_datum *)datum_try_and_get(
+			effect_location_data,
+			*location_datum_index);
+		if (!location)
+		{
+			*location_datum_index = NONE;
+			return NULL;
+		}
 		*location_datum_index = location->next_instance_location_index;
 
 		if (camera_mode == _effect_camera_mode_first_person_only ||
