@@ -495,8 +495,8 @@ boolean shadowrun_cable_update(
 							 definition->attach_distance, 1.f / TICKS_PER_SECOND);
 		/* (the cable snaps when the unit is far enough, or has been
 		attached too long) */
-		if (distance3d(&unit->object.position, &attached->object.position) >
-				definition->snap_distance ||
+		if (distance_squared3d(&unit->object.position, &attached->object.position) >
+				definition->snap_distance * definition->snap_distance ||
 			shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)] >= definition->reel_ticks)
 		{
 			shadowrun_cable_stop(unit_index);
