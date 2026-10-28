@@ -2,9 +2,9 @@
 TAG_SCHEMA_SHADOWRUN.C
 
 The schemas (tag_schema.h) of the Shadowrun prototype's own groups that the
-game reads (shadowrun_definitions.h): srud, srwd, m1ed, m2ed, m3ed and buym.
-Only its maps have tags of them. The rest of its groups (srac, t1ed, t2ed,
-t3ed) nothing reads yet; they are left as they are.
+game reads (shadowrun_definitions.h): srud, srwd, m1ed, m2ed, m3ed, t2ed
+and buym. Only its maps have tags of them. The rest of its groups (srac,
+t1ed, t3ed) nothing reads yet; they are left as they are.
 */
 
 /* ---------- headers */
@@ -125,6 +125,30 @@ static struct tag_schema_field const shadowrun_magic3_fields[] =
 static struct tag_schema_definition const shadowrun_magic3_schema =
 	TAG_SCHEMA_DEFINITION(shadowrun_magic3, struct shadowrun_magic3_definition, shadowrun_magic3_fields);
 
+/* t2ed */
+
+static struct tag_schema_field const shadowrun_tech2_fields[] =
+{
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, projectile, TAG_SCHEMA_GROUPS('proj')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, scenery, TAG_SCHEMA_GROUPS('scen')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, fire_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, hit_success_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, hit_success_effect_2, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, hit_bounce_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, hit_bounce_effect_2, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, travel_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, player_travel_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, player_attach_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, player_release_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, cable_release_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, cable_snap_effect, TAG_SCHEMA_GROUPS('effe')),
+	TAG_SCHEMA_REFERENCE(struct shadowrun_tech2_definition, glider_scenery, TAG_SCHEMA_GROUPS('scen')),
+	TAG_SCHEMA_END
+};
+
+static struct tag_schema_definition const shadowrun_tech2_schema =
+	TAG_SCHEMA_DEFINITION(shadowrun_tech2, struct shadowrun_tech2_definition, shadowrun_tech2_fields);
+
 /* srud */
 
 static struct tag_schema_field const shadowrun_race_fields[] =
@@ -218,6 +242,7 @@ struct tag_schema_group const tag_schema_shadowrun_groups[] =
 	{ SHADOWRUN_MAGIC1_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic1_schema },
 	{ SHADOWRUN_MAGIC2_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic2_schema },
 	{ SHADOWRUN_MAGIC3_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic3_schema },
+	{ SHADOWRUN_TECH2_DEFINITION_TAG, { NONE, NONE }, &shadowrun_tech2_schema },
 	{ SHADOWRUN_WEAPON_DATA_TAG, { NONE, NONE }, &shadowrun_weapon_data_schema },
 	{ SHADOWRUN_BUY_MENU_DEFINITION_TAG, { NONE, NONE }, &shadowrun_buy_menu_schema },
 	{ 0 }

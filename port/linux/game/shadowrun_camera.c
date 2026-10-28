@@ -20,6 +20,7 @@ played.)
 #include "objects/objects.h"
 #include "units/units.h"
 #include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
+#include "shadowrun_cable.h" /* port: port/linux/game/shadowrun_cable.c */
 #include "shadowrun_units.h"
 
 /* ---------- constants */
@@ -58,10 +59,10 @@ boolean shadowrun_unit_third_person(
 			/* 0x115B30: the player looks through a scope */
 			boolean zoomed = unit->unit.current_zoom_level != NONE;
 
-			/* port: and one gliding or being reeled in by a grapple
-			(port/linux/game/shadowrun_tech.c) */
+			/* port: and one gliding or reeled in by a cable
+			(port/linux/game/shadowrun_tech.c, shadowrun_cable.c) */
 			boolean gliding = shadowrun_glider_worn(unit_index);
-			boolean reeling = shadowrun_unit->grapple_ticks > 0;
+			boolean reeling = shadowrun_cable_reeling(unit_index);
 
 			result = shadowrun_unit_melee_weapon(unit_index) ||
 				(shadowrun_unit->smoke_active && !zoomed) || gliding || reeling;

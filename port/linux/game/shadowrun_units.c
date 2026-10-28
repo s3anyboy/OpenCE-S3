@@ -29,6 +29,7 @@ each function names the one it is (its address in the executable).
 #include "units/units.h"
 #include "shadowrun_units.h"
 #include "shadowrun_tech.h"
+#include "shadowrun_cable.h"
 
 #include <string.h>
 
@@ -105,6 +106,8 @@ void shadowrun_initialize_for_new_map(
 		shadowrun_globals.players[player_index].chosen_tech = _shadowrun_tech_none;
 	}
 	shadowrun_magic_initialize_for_new_map();
+	/* port: the cable's, of a unit that outlives a map (shadowrun_cable.c) */
+	shadowrun_cable_initialize_for_new_map();
 	shadowrun_buy_menu_initialize_for_new_map();
 	/* port: the second grenade made the anti-magic grenade (port/linux/game/
 	shadowrun_tech.c): here, as the game globals the map's are made by then */
@@ -236,7 +239,6 @@ void shadowrun_unit_new(
 		/* port: no tech, which is not 0 (reflexes is: shadowrun_tech.h) */
 		shadowrun_unit->tech = _shadowrun_tech_none;
 		shadowrun_unit->vision_nav_index = NONE;
-		shadowrun_unit->grapple_projectile = NONE;
 		shadowrun_unit->strangle_looping_sound_index = NONE;
 		shadowrun_unit->resurrection_ball_index = NONE;
 		for (index = 0; index < MAXIMUM_SHADOWRUN_RESURRECTED_ACTORS; index++)
@@ -265,6 +267,9 @@ void shadowrun_unit_new(
 		shadowrun_unit->rage_damage_scale = 1.f;
 		shadowrun_unit->rage_movement_scale = 1.f;
 		shadowrun_unit->rage_turning_scale = 1.f;
+		/* port: the cable's state (bipeds.c's 0x10B8: the executable keeps it
+		in the biped's datum) */
+		shadowrun_cable_new(unit_index);
 	}
 
 	return;
@@ -1036,6 +1041,8 @@ void shadowrun_unit_died(
 		shadowrun_unit_delete_head(unit_index);
 		shadowrun_spirit_animal_died(unit_index);
 		shadowrun_unit_tech_died(unit_index);
+		/* port: a unit that dies lets its cable go (bipeds.c FUN_0025B650) */
+		shadowrun_cable_delete(unit_index);
 	}
 
 	return;
@@ -1050,6 +1057,9 @@ void shadowrun_unit_delete(
 	if (shadowrun_unit)
 	{
 		shadowrun_unit_tech_delete(unit_index);
+		/* port: its cable's bolt and effect go with it (bipeds.c's
+		FUN_0025B5E0) */
+		shadowrun_cable_delete(unit_index);
 		shadowrun_unit_delete_head(unit_index);
 		if (shadowrun_unit->resurrection_ball_index != NONE)
 		{

@@ -277,7 +277,7 @@ a rule of its own:
 | Reflexes (0) | port: 10 s of faster movement (×1.6), reload (×0.6) and a higher jump (×1.3). **Not the prototype's**: its `t1ed` block is read by `bipeds.c` as a timed aura that hurts units near the wearer |
 | Gecko (4) | the wearer's biped climbs anything while it runs (the engine's own climbing, on the biped definition's flag) |
 | Glider (5) | a toggle: the map's `glider.scenery` on the wearer's back, its fall held off, and its turning scaled by speed (`bipeds.c`) |
-| Grapple (6) | fires `shadowrunstuff\grapple\grapple`; where it attaches or lands, the caster is reeled to it over 15 ticks |
+| Grapple (5) | the map's t2ed cable: a collision along the unit's forward, `fire distance × 2` (30 m), whatever its pitch; the first thing it hits is attached to (a unit is held), and the unit is reeled to it over the tag's ticks (`0x1BC`), the tag's effects playing. Not the port's own projectile |
 | Hologram (12) | an actor of `characters\hologram\hologram assault rifle` at where the caster aims: it fights, deals no damage, and is erased when its 30 s are up or another is made |
 | Anti-magic (in the buy menu as a grenade) | a shrinking zone at where the anti-magic grenade lands: enemies inside are hurt and drained each second, and lose anti-magic on leaving it (`shadowrun_definitions.h`'s `t3ed`) |
 

@@ -27,15 +27,15 @@ console's shadowrun_tech).
 enum
 {
 	/* the techs, as FUN_0027d4e0 numbers them (globals.hsc's tech_vision and
-the rest). Reflexes is 0: the unit's own is _shadowrun_tech_none until
-it has one */
+the rest; the cable's tag numbers its two itself). Reflexes is 0: the
+unit's own is _shadowrun_tech_none until it has one */
 	_shadowrun_tech_reflexes_id = 0,
 	_shadowrun_tech_antimagic_id = 7,
 	_shadowrun_tech_vision_id = 1,
 	_shadowrun_tech_smartlink_id = 2,
 	_shadowrun_tech_gecko_id = 4,
-	_shadowrun_tech_glider_id = 5,
-	_shadowrun_tech_grapple_id = 6,
+	_shadowrun_tech_grapple_id = 5,
+	_shadowrun_tech_glider_id = 6,
 	_shadowrun_tech_zoom_id = 11,
 	_shadowrun_tech_hologram_id = 12,
 	_shadowrun_tech_hearing_id = 13,
@@ -66,17 +66,10 @@ definitions it keeps the flag on at once */
 	/* the holograms standing at once (all the units') */
 	MAXIMUM_SHADOWRUN_HOLOGRAMS = 8,
 
-	/* grapple: how far before the caster its aim starts, how far it reaches
-	(world units: a metre is ten: 30 m), and how long the pull lasts (ticks) */
-	SHADOWRUN_GRAPPLE_ORIGIN_OFFSET = 1,
-	SHADOWRUN_GRAPPLE_RANGE = 300,
-	SHADOWRUN_GRAPPLE_PULL_TICKS = 15,
-	/* and the wait before the next (ticks: 5 s) */
-	SHADOWRUN_GRAPPLE_COOLDOWN_TICKS = 5 * 30,
 };
 
-/* port: the map's grapple projectile (its name without the group's extension) */
-#define SHADOWRUN_GRAPPLE_PROJECTILE "shadowrunstuff\\grapple\\grapple"
+/* (the grapple's bolt, its range, its reel and its effects are the map's t2ed's:
+port/linux/game/shadowrun_cable.c) */
 
 /* port: reflexes: how long it lasts (10 s), and what it does meanwhile: the
 unit moves and reloads faster, and jumps a little higher */
@@ -98,8 +91,8 @@ player's grenades keep (units.c, FUN_0026FCA0: a global list) */
 /* port: the units a zone keeps, to know which left it (and so lost it) */
 #define MAXIMUM_SHADOWRUN_ANTIMAGIC_INSIDE 32
 
-/* port: the glider: the scenery it puts on its back (a 'scen': the map has a
-'mode' of the name too) */
+/* port: the glider's scenery, for a map whose t2ed names none (a 'scen': the
+map has a 'mode' of the name too) */
 #define SHADOWRUN_GLIDER_SCENERY "shadowrunstuff\\glider\\glider"
 /* (the scenery group's: this file's headers declare no SCENERY_DEFINITION_TAG) */
 #define SHADOWRUN_SCENERY_TAG 'scen'
@@ -153,17 +146,11 @@ boolean shadowrun_antimagic_grenade_is(
 boolean shadowrun_hologram_active(
 	long actor_index);
 
-/* port: the map's grapple projectile (shadowrunstuff\grapple\grapple), or
-NONE; grapple fires it (shadowrun_tech.c), and where it lands the caster is
-pulled to it (shadowrun_magic.c) */
-long shadowrun_grapple_projectile(
-	void);
+/* the bolt of a tag's projectile fired from the unit the way it faces
+(shadowrun_cable.c's: bipeds.c FUN_0025B7D0's). NONE if it could not be */
 long shadowrun_grapple_fire(
 	long unit_index,
 	long projectile_definition_index);
-/* whether the projectile is a grapple's */
-boolean shadowrun_grapple_projectile_is(
-	long projectile_index);
 /* port: whether the glider is out (shadowrun_tech.c), and its flight, each
 tick of a unit (bipeds.c, its turn rates) */
 boolean shadowrun_glider_worn(
@@ -184,13 +171,7 @@ real shadowrun_reflexes_movement_scale(
 real shadowrun_reflexes_reload_scale(
 	long unit_index);
 
-/* its caster, pulled to `position` over the pull's ticks, which this moves
-it through */
-void shadowrun_grapple_pull(
-	long projectile_index,
-	real_point3d const *position);
-void shadowrun_grapple_update(
-	long unit_index);
+
 
 /* the techs' place on the HUD (shadowrun_tech.c): what vision marks */
 void shadowrun_tech_initialize(

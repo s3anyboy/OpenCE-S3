@@ -104,14 +104,11 @@ definition (0x10F0) */
 	(-1 for none), the units it marked and how many (shadowrun_tech.c) */
 	long tech;
 	long tech_ticks;
-	/* grapple's pull: from where it started and to where it goes, the ticks
-	left and all it takes (shadowrun_tech.c) */
-	real_point3d grapple_origin;
-	real_point3d grapple_target;
-	/* the bolt it follows, while it flies */
-	long grapple_projectile;
-	long grapple_ticks;
-	long grapple_pull_ticks;
+	/* the cable's tech: the unit has it (0x1084's), and a cable holds it
+	(0x10EC: another unit's bolt attached to it) (shadowrun_cable.c) */
+	boolean cable_tech;
+	boolean cable_held;
+	byte pad_cable[2];
 	long vision_nav_index;
 	long vision_targets[MAXIMUM_SHADOWRUN_VISION_TARGETS];
 	short vision_target_count;

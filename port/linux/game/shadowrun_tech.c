@@ -40,6 +40,7 @@ marked with the port's navpoints.
 #include "shadowrun_definitions.h"
 #include "shadowrun_units.h"
 #include "shadowrun_tech.h"
+#include "shadowrun_cable.h"
 
 /* ---------- constants */
 
@@ -137,9 +138,9 @@ void shadowrun_tech_update(
 	{
 		struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(iterator.index);
 
-		/* (a grapple's pull moves the unit whether or not its tech's time
-		has run: the projectile was fired, and it is being reeled in) */
-		shadowrun_grapple_update(iterator.index);
+		/* (the cable runs whether or not its tech's time has run: the bolt
+		was fired, and the unit is being reeled in) */
+		shadowrun_cable_update(iterator.index);
 
 		if (!shadowrun_unit || shadowrun_unit->tech_ticks <= 0)
 		{
@@ -157,10 +158,6 @@ void shadowrun_tech_update(
 		if (shadowrun_unit->power_cooldown_ticks[_shadowrun_tech_hologram_id] > 0)
 		{
 			shadowrun_unit->power_cooldown_ticks[_shadowrun_tech_hologram_id]--;
-		}
-		if (shadowrun_unit->power_cooldown_ticks[_shadowrun_tech_grapple_id] > 0)
-		{
-			shadowrun_unit->power_cooldown_ticks[_shadowrun_tech_grapple_id]--;
 		}
 		if (shadowrun_unit->tech == _shadowrun_tech_vision_id)
 		{
@@ -182,12 +179,22 @@ void shadowrun_unit_set_tech(
 		if (shadowrun_unit->tech != tech)
 		{
 			/* (what the one before it left: its marks, its climb, its holograms,
-			its glider) */
+			its glider, its cable) */
 			shadowrun_vision_clear(unit_index);
 			shadowrun_gecko_end(unit_index);
 			shadowrun_holograms_clear(unit_index);
 			shadowrun_glider_end(unit_index);
 			shadowrun_unit->tech_ticks = 0;
+		}
+		/* (the cable's own: taken up by the grapple's tech, let go by
+		another, as FUN_0027D4E0 and FUN_0027D760 do) */
+		if (tech == _shadowrun_tech_grapple_id)
+		{
+			shadowrun_cable_begin(unit_index);
+		}
+		else
+		{
+			shadowrun_cable_end(unit_index);
 		}
 		shadowrun_unit->tech = tech;
 	}
@@ -248,6 +255,12 @@ boolean shadowrun_tech_cast(
 		shadowrun_unit->tech_ticks = SHADOWRUN_REFLEXES_TICKS;
 		return TRUE;
 
+	case _shadowrun_tech_grapple_id:
+		/* port: the cable's grapple, which fires along the unit's forward and
+		reels it in where it hits (bipeds.c FUN_0025B7D0, FUN_002541D0:
+		port/linux/game/shadowrun_cable.c) */
+		return shadowrun_cable_fire(unit_index);
+
 	case _shadowrun_tech_glider_id:
 		/* port: glider, a toggle (units.c 0x251EE0): out, the scenery is put on
 		its back and it climbs (its fall held off); pressed again, it goes */
@@ -259,44 +272,6 @@ boolean shadowrun_tech_cast(
 		shadowrun_glider_begin(unit_index);
 		shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_WEAR_TICKS;
 		return TRUE;
-
-	case _shadowrun_tech_grapple_id:
-		/* port: grapple, which shoots the map's grapple projectile where the
-		caster aims; where it lands, the caster is pulled to it
-		(shadowrun_magic.c, shadowrun_projectile_detonated) */
-		{
-			struct unit_datum *unit = unit_get(unit_index);
-			real_vector3d vector;
-			real_point3d target;
-			struct collision_result collision;
-			long projectile_definition_index = shadowrun_grapple_projectile();
-
-			/* (no grapple until the wait after the last is down) */
-			if (shadowrun_unit->power_cooldown_ticks[_shadowrun_tech_grapple_id] > 0 ||
-				projectile_definition_index == NONE)
-			{
-				return FALSE;
-			}
-			unit_get_head_position(unit_index, &target);
-			point_from_line3d(&target, &unit->unit.aiming_vector, SHADOWRUN_GRAPPLE_ORIGIN_OFFSET, &target);
-			scale_vector3d(&unit->unit.aiming_vector, SHADOWRUN_GRAPPLE_RANGE, &vector);
-			if (collision_test_vector(_collision_test_for_projectiles_flags, &target, &vector, unit_index, &collision))
-			{
-				target = collision.point;
-			}
-			else
-			{
-				add_vectors3d((real_vector3d const *)&target, &vector, (real_vector3d *)&target);
-			}
-			/* (the pull starts where the bolt holds or lands: the map's projectile's
-			attach and detonation, both of which shadowrun_magic.c hears) */
-			if (shadowrun_grapple_fire(unit_index, projectile_definition_index) == NONE)
-			{
-				return FALSE;
-			}
-			shadowrun_unit->power_cooldown_ticks[_shadowrun_tech_grapple_id] = SHADOWRUN_GRAPPLE_COOLDOWN_TICKS;
-			return TRUE;
-		}
 
 	case _shadowrun_tech_hologram_id:
 		/* port: hologram, which makes an actor of the map's hologram variant,
@@ -752,14 +727,27 @@ real shadowrun_reflexes_reload_scale(
 
 /* ---------- the glider ---------- */
 
-/* the map's glider scenery, looked for once a map (its 'scen': the map also
-has a 'mode' of the name). NONE until it is: a static starts at 0, which is
-a tag's index */
+/* the glider's scenery: the unit's t2ed's, as the executable reads it
+(bipeds.c FUN_00251C00's 0x288); the map's by name where the tag names none
+(its 'scen': the map also has a 'mode' of the name). NONE until looked for
+(a static starts at 0, which is a tag's index) */
 static long shadowrun_glider_scenery_index = NONE;
 
 static long shadowrun_glider_scenery(
-	void)
+	long unit_index)
 {
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+
+	if (definition && definition->tech2.index != NONE)
+	{
+		struct shadowrun_tech2_definition *tech2 = tag_get(SHADOWRUN_TECH2_DEFINITION_TAG,
+			definition->tech2.index);
+
+		if (tech2 && tech2->glider_scenery.index != NONE)
+		{
+			return tech2->glider_scenery.index;
+		}
+	}
 	if (shadowrun_glider_scenery_index == NONE)
 	{
 		shadowrun_glider_scenery_index = tag_loaded(SHADOWRUN_SCENERY_TAG, SHADOWRUN_GLIDER_SCENERY);
@@ -793,6 +781,7 @@ real shadowrun_glider_turn_scale(
 	struct biped_datum *biped = biped_try_and_get(unit_index);
 	struct biped_definition *definition;
 	real speed;
+	real maximum = 1.f;
 
 	if (!biped || !shadowrun_glider_worn(unit_index))
 	{
@@ -801,13 +790,13 @@ real shadowrun_glider_turn_scale(
 	definition = biped_definition_get(biped->definition_index);
 	if (!definition || definition->biped.moving_turning_speed <= 0.f)
 	{
-		return 1.f;
+		return maximum;
 	}
 	/* (a tick's worth of turning, as the executable divides it) */
 	speed = magnitude3d(&biped->object.translational_velocity) /
 		(definition->biped.moving_turning_speed / TICKS_PER_SECOND);
 
-	return PIN(speed, SHADOWRUN_GLIDER_TURN_SCALE_MINIMUM, 1.f);
+	return PIN(speed, SHADOWRUN_GLIDER_TURN_SCALE_MINIMUM, maximum);
 }
 
 /* the glider put on the unit's back: a scenery of the map's, attached to its
@@ -817,7 +806,7 @@ one, and assert) */
 static long shadowrun_glider_begin(
 	long unit_index)
 {
-	long definition_index = shadowrun_glider_scenery();
+	long definition_index = shadowrun_glider_scenery(unit_index);
 	struct object_placement_data placement;
 	long scenery_index;
 	long parent_node_index = NONE;
@@ -901,28 +890,10 @@ static void shadowrun_glider_end(
 
 
 
-/* ---------- grapple ---------- */
+/* ---------- the cable's bolt ---------- */
 
-/* the map's grapple projectile, looked for once a map (NONE until it is:
-a static starts at 0, which is a tag's index) */
-static long shadowrun_grapple_projectile_index = NONE;
-
-long shadowrun_grapple_projectile(
-	void)
-{
-	if (shadowrun_grapple_projectile_index == NONE)
-	{
-		shadowrun_grapple_projectile_index = tag_loaded(PROJECTILE_DEFINITION_TAG, SHADOWRUN_GRAPPLE_PROJECTILE);
-		if (shadowrun_grapple_projectile_index == NONE)
-		{
-			error(_error_silent, "shadowrun: the map has no %s", SHADOWRUN_GRAPPLE_PROJECTILE);
-		}
-	}
-
-	return shadowrun_grapple_projectile_index;
-}
-
-/* the projectile fired from the unit's body the way it aims */
+/* the bolt of a tag's projectile (the map's t2ed's: shadowrun_cable.c), fired
+from the unit's body the way it faces */
 long shadowrun_grapple_fire(
 	long unit_index,
 	long projectile_definition_index)
@@ -946,7 +917,7 @@ long shadowrun_grapple_fire(
 	{
 		origin = unit->object.position;
 	}
-	unit_get_aiming_vector(unit_index, &forward);
+	forward = unit->object.forward;
 	object_placement_data_new(&placement, projectile_definition_index, unit_index);
 	placement.position = origin;
 	placement.forward = forward;
@@ -988,108 +959,7 @@ boolean shadowrun_antimagic_grenade_is(
 		projectile->definition_index == shadowrun_antimagic_grenade_index;
 }
 
-/* whether the projectile is a grapple's: one of its definition, fired from a
-unit (the map's own projectiles are not) */
-boolean shadowrun_grapple_projectile_is(
-	long projectile_index)
-{
-	struct object_datum *projectile = object_try_and_get_and_verify_type(projectile_index, _object_mask_projectile);
 
-	return projectile && shadowrun_grapple_projectile_index != NONE &&
-		projectile->definition_index == shadowrun_grapple_projectile_index;
-}
-
-/* the projectile's caster pulled to where it goes, over the pull's ticks
-(shadowrun_grapple_update moves it, as a teleport's moves it). Where it goes
-is the bolt's own position each tick while the bolt flies, and where it
-landed once it is gone */
-void shadowrun_grapple_pull(
-	long projectile_index,
-	real_point3d const *position)
-{
-	struct object_datum *projectile = object_try_and_get_and_verify_type(projectile_index, _object_mask_projectile);
-	long unit_index = projectile ? projectile->object.owner_object_index : NONE;
-	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
-
-	if (shadowrun_unit && unit_try_and_get(unit_index) && biped_try_and_get(unit_index))
-	{
-		/* (a pull already running follows its own bolt: the map's projectile
-		may say it landed while this one still flies) */
-		if (shadowrun_unit->grapple_ticks > 0)
-		{
-			shadowrun_unit->grapple_target = *position;
-			return;
-		}
-		shadowrun_unit->grapple_origin = object_get(unit_index)->object.position;
-		shadowrun_unit->grapple_target = *position;
-		shadowrun_unit->grapple_projectile = projectile_index;
-		shadowrun_unit->grapple_pull_ticks = SHADOWRUN_GRAPPLE_PULL_TICKS;
-		shadowrun_unit->grapple_ticks = SHADOWRUN_GRAPPLE_PULL_TICKS;
-	}
-
-	return;
-}
-
-/* each tick of a pulled unit: it moves a part of the way to where the pull
-takes it, its share of the ticks, and is there at the last */
-void shadowrun_grapple_update(
-	long unit_index)
-{
-	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
-	struct unit_datum *unit;
-	real fraction;
-	real_point3d from;
-	real_point3d to;
-
-	if (!shadowrun_unit || shadowrun_unit->grapple_ticks <= 0)
-	{
-		return;
-	}
-	unit = unit_get(unit_index);
-	from = shadowrun_unit->grapple_origin;
-	to = shadowrun_unit->grapple_target;
-	/* (the bolt's own place, while it flies: the pull follows it) */
-	{
-		struct object_datum *bolt = shadowrun_unit->grapple_projectile != NONE ?
-			object_try_and_get_and_verify_type(shadowrun_unit->grapple_projectile, _object_mask_projectile) : NULL;
-
-		if (bolt)
-		{
-			to = shadowrun_unit->grapple_target = bolt->object.position;
-		}
-		else
-		{
-			shadowrun_unit->grapple_projectile = NONE;
-		}
-	}
-	fraction = (real)(shadowrun_unit->grapple_pull_ticks - shadowrun_unit->grapple_ticks + 1) /
-		(real)shadowrun_unit->grapple_pull_ticks;
-	if (fraction > 1.f)
-	{
-		fraction = 1.f;
-	}
-	{
-		real_vector3d vector;
-		real_point3d position;
-
-		vector_from_points3d(&from, &to, &vector);
-		scale_vector3d(&vector, fraction, &vector);
-		add_vectors3d((real_vector3d const *)&from, &vector, (real_vector3d *)&position);
-		object_set_position(unit_index, &position, NULL, NULL);
-	}
-	shadowrun_unit->grapple_ticks--;
-	if (shadowrun_unit->grapple_ticks == 0)
-	{
-		/* (at the end it is out of any wall it ended in, or back where it
-		started if it cannot be) */
-		if (!object_force_inside_bsp(unit_index, &from))
-		{
-			object_set_position(unit_index, &from, NULL, NULL);
-		}
-	}
-
-	return;
-}
 
 /* port: the controls a local player's unit was given this tick
 (players.c), which the game's own control flags cannot carry the left
@@ -1140,6 +1010,7 @@ void shadowrun_unit_tech_died(
 		shadowrun_gecko_end(unit_index);
 		shadowrun_holograms_clear(unit_index);
 		shadowrun_glider_end(unit_index);
+		shadowrun_cable_end(unit_index);
 	}
 
 	return;

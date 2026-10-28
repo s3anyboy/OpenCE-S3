@@ -142,8 +142,6 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "shadowrun.h" /* port: port/linux/game/shadowrun_magic.c */
-/* port: a grapple's bolt, where it holds (port/linux/game/shadowrun_magic.c) */
-void shadowrun_projectile_attached(long projectile_index, real_point3d const *position);
 /* port: port/linux/game/overshield_effect.c */
 boolean overshield_effect_active(long object_index);
 boolean overshield_effect_hit_effect_allowed(long effect_index);
@@ -1862,10 +1860,6 @@ static void projectile_collision(
 		object_translate(projectile_index, new_position, &collision->location);
 		if (collision->type == _collision_result_object)
 			object_attach_to_node(collision->object_index, projectile_index, collision->node_index);
-		/* port: a Shadowrun prototype grapple's bolt pulls its caster where
-		it holds, as one that detonates does where it lands
-		(port/linux/game/shadowrun_magic.c) */
-		shadowrun_projectile_attached(projectile_index, new_position);
 
 		if (TEST_FLAG(definition->projectile.flags, _projectile_detonation_max_time_if_attached_bit))
 		{

@@ -448,12 +448,6 @@ void shadowrun_projectile_detonated(
 			flags = shadowrun_spell_projectiles.flags[index];
 		}
 	}
-	/* port: a grapple's projectile pulls its caster to where it landed
-	(tech, port/linux/game/shadowrun_tech.c) */
-	if (shadowrun_grapple_projectile_is(projectile_index))
-	{
-		shadowrun_grapple_pull(projectile_index, position);
-	}
 	/* port: the anti-magic grenade's makes its zone where it lands, by its
 	definition rather than by a flag (the map's projectiles carry none of the
 	port's: units.c, FUN_0026EA00, is what the executable asks) */
@@ -587,19 +581,7 @@ void shadowrun_projectile_detonate(
 	return;
 }
 
-/* port: a projectile that attached (projectiles.c): a grapple's bolt pulls
-its caster where it holds, as one that detonates does where it lands */
-void shadowrun_projectile_attached(
-	long projectile_index,
-	real_point3d const *position)
-{
-	if (shadowrun_map_loaded() && shadowrun_grapple_projectile_is(projectile_index))
-	{
-		shadowrun_grapple_pull(projectile_index, position);
-	}
 
-	return;
-}
 
 boolean shadowrun_unit_intangible(
 	long unit_index)
