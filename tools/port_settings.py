@@ -325,12 +325,9 @@ _network["categories"] = [
      "Downloading Custom Edition maps you do not have,\nand helping send them to other players.",
      "desktop android"),
     ("MULTIPLAYER HUD:", "network_setup/multiplayer_hud",
-     "Players' names above their heads, the\nscoreboard, the text chat and the match clock."),
+     "Players' names above their heads, the\nscoreboard, and the text chat."),
     ("STREAMER MODE:", "network_setup/streamer_mode",
      "Hide offensive words in names and text from\nother players, maps and mods, as stars."),
-    ("SERVER BROWSER:", "network_setup/server_browser",
-     "What the Server Browser lists and its order: the\nsame settings as its Filters screen.",
-     "desktop android"),
 ]
 SCREENS["network_setup/map_sharing"] = {
     "screen": "map_sharing_settings_screen", "header": _network["header"], "spacing": 30,
@@ -347,7 +344,7 @@ SCREENS["network_setup/map_sharing"] = {
 }
 
 # Network Setup's multiplayer HUD: its rows, moved from Network Setup, and the
-# text chat's and the match clock's (port/linux/game/network_chat.c, the HUD's)
+# text chat's (port/linux/game/network_chat.c)
 SCREENS["network_setup/multiplayer_hud"] = {
     "screen": "multiplayer_hud_settings_screen", "header": _network["header"], "spacing": 30,
     "rows": _hud_rows + [
@@ -355,8 +352,6 @@ SCREENS["network_setup/multiplayer_hud"] = {
          "SHOW the text chat, or HIDE it: no lines, and\nits keys and D-pad Up open nothing.", None),
         ("CHAT TEXT:", "display.chat_style", [("COLORS", "colors"), ("WHITE", "white")],
          "The text chat's colors: COLORS, names in their\nteam's color; WHITE, as Custom Edition.", None),
-        ("MATCH TIMER:", "display.match_timer", ON_OFF,
-         "Draw a clock at the bottom right in multiplayer,\ncounting up from the start of the game.", None),
     ],
 }
 
@@ -378,38 +373,13 @@ SCREENS["network_setup/streamer_mode"] = {
     ],
 }
 
-# Network Setup's server browser: what the browser lists and its order, the
-# same settings as its Filters screen
-SCREENS["network_setup/server_browser"] = {
-    "screen": "server_browser_settings_screen", "header": _network["header"], "spacing": 30,
-    "rows": [
-        ("LISTS:", "network.listings", [("ALL GAMES", "both"), ("DEDICATED", "masters"), ("P2P GAMES", "brokers")],
-         "The master servers' dedicated servers, the games\nplayers host (through the brokers), or all of them.", None),
-        ("SHOW EMPTY SERVERS:", "network.browser_show_empty", [("YES", "true"), ("NO", "false")],
-         "List games no one is playing yet.", None),
-        ("SHOW FULL SERVERS:", "network.browser_show_full", [("YES", "true"), ("NO", "false")],
-         "List games with no room left.", None),
-        ("SHOW MISSING MAPS:", "network.browser_maps",
-         [("NO", "no"), ("YES", "yes"), ("IF DOWNLOADABLE", "downloadable")],
-         "List games on maps you do not have: IF\nDOWNLOADABLE, those Map Sharing can download.", None),
-        ("SORT BY:", "network.browser_sort",
-         [("DEDICATED FIRST", "servers"), ("PLAYERS", "players"), ("NAME", "name"), ("MAP", "map"),
-          ("GAME TYPE", "type"), ("LOCKED FIRST", "locked")],
-         "The list's order. Its column titles sort it too;\nchoosing one again reverses it.", None),
-    ],
-}
-
 # Network Setup in a game (the pause menu's SETTINGS: port/linux/game/
 # menu_tags.c's pause_network_patch): its pages alone, without the rows that
 # would drop the game (internet play) or are for the main menu (the router,
 # the clipboard, the updates)
 SCREENS["network_setup/in_game"] = {
     "screen": "in_game_network_settings_screen", "header": _network["header"], "spacing": 30,
-    "platform_places": True, "rows": [],
-    # (the server browser is for the main menu: a game's settings screen has no
-    # room for it)
-    "categories": [category for category in _network["categories"]
-                   if category[1] != "network_setup/server_browser"],
+    "platform_places": True, "rows": [], "categories": _network["categories"],
 }
 
 # Controls Setup: the keyboard and mouse's actions, in groups (the order of
@@ -419,8 +389,7 @@ CONTROL_ROWS = 7
 
 # the settings whose rows have the wider spinner (a device's name)
 WIDE_SETTINGS = {"audio.output_device", "audio.input_device", "streamer.slurs", "streamer.swearing",
-                 "streamer.insults", "display.subtitles_language", "network.listings", "network.browser_maps",
-                 "network.browser_sort"}
+                 "streamer.insults", "display.subtitles_language"}
 
 # Teamplay Options' rows of the port's (_teamplay_options_extras): the
 # gametype's FORCE TEAM SPAWNS, then the host's voice chat and vote kicks;
@@ -580,8 +549,8 @@ def _setting_screen(folder: str, spec: dict) -> list:
             if setting not in spec.get("same_place", ()) and key not in spec.get("same_place", ()):
                 place += 1
             rows.append((row, platform, place))
-        # (a device's name, and the server browser's longer choices, want the
-        # wider spinner Server Setup's co-op rows have: WIDE_SETTINGS)
+        # (a device's name wants the wider spinner Server Setup's co-op rows
+        # have: WIDE_SETTINGS)
         wide = setting in WIDE_SETTINGS
         extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
                                ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF"), ("platform", platform)],
