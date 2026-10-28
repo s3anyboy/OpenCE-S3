@@ -52,6 +52,11 @@ void effect_stop(
 	boolean and_delete);
 boolean dangerous_effects_near_player(
 	void);
+/* port: an object deleted (object_deleted_procs.c): the effects that stood on
+it are stopped, as the executable's object_delete_attachments does with
+those attached to it, rather than left to follow a freed object */
+void effects_object_deleted(
+	long deleted_object_index);
 long effect_new_looping(
 	long definition_index,
 	long object_index,

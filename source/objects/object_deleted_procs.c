@@ -12,6 +12,7 @@ symbols in this file:
 
 #include "cseries.h"
 #include "ai/ai.h"
+#include "effects/effects.h"
 #include "objects.h"
 #include "game/players.h"
 
@@ -25,11 +26,13 @@ symbols in this file:
 
 /* ---------- globals */
 
-object_deleted_proc object_deleted_procs[3] =
+object_deleted_proc object_deleted_procs[4] =
 {
 	objects_fix_for_deleted_object,
 	ai_handle_deleted_object,
-	players_handle_deleted_object
+	players_handle_deleted_object,
+	/* port: the effects that stood on it (effects.c) */
+	effects_object_deleted
 };
 
 /* ---------- public code */

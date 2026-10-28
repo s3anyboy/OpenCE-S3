@@ -694,6 +694,39 @@ void effect_delete(
 	return;
 }
 
+/* port: an object deleted: an effect that stood on it has no object to follow
+any more, so it is stopped and deleted here, as the executable's
+effect_delete does for one it is told to stop. Its object is cleared first:
+every path that reads it (effect_get_node_matrix, effect_generate_parts,
+dangerous_effects_near_player) then finds none, rather than the freed datum
+the index comes to name */
+void effects_object_deleted(
+	long deleted_object_index)
+{
+	long effect_index;
+
+	/* (before a map's effects are made: nothing to stop) */
+	if (!effect_data || !effect_data->valid)
+	{
+		return;
+	}
+
+	for (effect_index = data_next_index(effect_data, NONE);
+		effect_index != NONE;
+		effect_index = data_next_index(effect_data, effect_index))
+	{
+		struct effect_datum *effect = effect_try_and_get(effect_index);
+
+		if (effect && effect->object_index == deleted_object_index)
+		{
+			effect->object_index = NONE;
+			effect_delete(effect_index);
+		}
+	}
+
+	return;
+}
+
 long effect_new_attached_from_markers(
 	long definition_index,
 	long owner_object_index,
@@ -1872,18 +1905,29 @@ static void effect_generate_parts(
 					effect,
 					instance->node_designator);
 
-				matrix4x3_transform_point(
-					node_matrix,
-					&instance->matrix.position,
-					&world_point);
-				matrix4x3_transform_normal(
-					node_matrix,
-					&instance->matrix.forward,
-					&world_forward);
-				matrix4x3_transform_normal(
-					node_matrix,
-					&instance->matrix.up,
-					&world_up);
+				/* port: the effect's object has gone: it stands where it was
+				made */
+				if (node_matrix)
+				{
+					matrix4x3_transform_point(
+						node_matrix,
+						&instance->matrix.position,
+						&world_point);
+					matrix4x3_transform_normal(
+						node_matrix,
+						&instance->matrix.forward,
+						&world_forward);
+					matrix4x3_transform_normal(
+						node_matrix,
+						&instance->matrix.up,
+						&world_up);
+				}
+				else
+				{
+					world_point = instance->matrix.position;
+					world_forward = instance->matrix.forward;
+					world_up = instance->matrix.up;
+				}
 			}
 			else
 			{
@@ -2059,18 +2103,29 @@ static void effect_generate_particles(
 						effect,
 						instance->node_designator);
 
-					matrix4x3_transform_point(
-						node_matrix,
-						&data.position,
-						&world_point);
-					matrix4x3_transform_normal(
-						node_matrix,
-						&data.direction,
-						&world_direction);
-					matrix4x3_transform_vector(
-						node_matrix,
-						&data.velocity,
-						&world_velocity);
+					/* port: the effect's object has gone: it stands where it
+					was made */
+					if (node_matrix)
+					{
+						matrix4x3_transform_point(
+							node_matrix,
+							&data.position,
+							&world_point);
+						matrix4x3_transform_normal(
+							node_matrix,
+							&data.direction,
+							&world_direction);
+						matrix4x3_transform_vector(
+							node_matrix,
+							&data.velocity,
+							&world_velocity);
+					}
+					else
+					{
+						world_point = data.position;
+						world_direction = data.direction;
+						world_velocity = data.velocity;
+					}
 				}
 				else
 				{
@@ -2685,6 +2740,12 @@ static real_matrix4x3 *effect_get_node_matrix(
 		node_index = NONE;
 	else
 		node_index = (short)(node_designator & (FLAG(_effect_location_first_person_bit) - 1));
+
+	/* port: an effect whose object has gone has no nodes to stand at: the
+	executable's object_get reads the freed datum, and what it hands back is
+	no matrix (a fault) */
+	if (!object_try_and_get(effect->object_index))
+		return NULL;
 
 	return object_get_node_matrix(effect->object_index, node_index);
 }
