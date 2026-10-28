@@ -18,10 +18,12 @@ FUN_001C3720 and FUN_001C3830. The executable's tech ids are FUN_0027D4E0's:
 
 #include "cseries.h"
 #include "cseries/errors.h"
+#include "cache/cache_files.h" /* port: tag_get_group_tag (the tags it is given) */
 #include "objects/objects.h"
 #include "objects/object_types.h"
 #include "physics/collisions.h"
 #include "effects/effects.h"
+#include "effects/effect_definitions.h" /* port: EFFECT_DEFINITION_TAG */
 #include "game/game.h"
 #include "network_distributed.h" /* port: MAXIMUM_TRACKED_OBJECTS */
 #include "units/bipeds.h"
@@ -169,6 +171,13 @@ static long shadowrun_cable_effect(
 
 	if (definition_index == NONE)
 	{
+		return NONE;
+	}
+	/* port: only an effect the map loaded (a t2ed's reference that did not
+	resolve is no tag index at all) */
+	if (tag_get_group_tag(definition_index) != EFFECT_DEFINITION_TAG)
+	{
+		error(_error_silent, "shadowrun cable: %08lx is not an effect tag", (unsigned long)definition_index);
 		return NONE;
 	}
 	if (object_get_marker_by_name(unit_index, "head", &marker, 1) > 0)
@@ -475,13 +484,26 @@ a left bumper that does nothing otherwise says nothing */
 	point_from_line3d(&origin, &forward, SHADOWRUN_CABLE_ORIGIN_OFFSET, &origin);
 	/* (the tag's fire distance is how far it reaches: 15 m in missionlet,
 	which at a metre a tick is its 30 m) */
+	{
+		/* port: what the t2ed holds, said once: the cable's fields, as read */
+		static boolean said = FALSE;
+
+		if (!said)
+		{
+			said = TRUE;
+			error(_error_silent, "shadowrun cable: t2ed bolt %08lx, fire %g m, hit %g, attach %g, snap %g, %ld ticks",
+				(unsigned long)definition->projectile.index, (double)definition->fire_distance,
+				(double)definition->hit_distance, (double)definition->attach_distance,
+				(double)definition->snap_distance, definition->reel_ticks);
+		}
+	}
 	attached_unit_index = shadowrun_cable_collision(&origin, &forward,
 													definition->fire_distance, unit_index, &point);
 	/* (where it holds: the cable reels toward it from here) */
 	shadowrun_cable_points[shadowrun_cable_slot(unit_index)] = point;
 	if (attached_unit_index != NONE)
 	{
-		struct object_datum *hit = object_try_and_get_and_verify_type(attached_unit_index, NONE);
+		struct object_datum *hit = object_try_and_get(attached_unit_index);
 
 		/* (it attaches to the thing it hit, so the reel starts there) */
 		if (hit)

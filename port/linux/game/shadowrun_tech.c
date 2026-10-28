@@ -909,6 +909,16 @@ long shadowrun_grapple_fire(
 	{
 		return NONE;
 	}
+	/* port: only a projectile the map loaded (a t2ed's reference that did
+	not resolve is no tag index at all, and object_new would make an empty
+	tag's object, or none) */
+	if (projectile_definition_index == NONE ||
+		tag_get_group_tag(projectile_definition_index) != PROJECTILE_DEFINITION_TAG)
+	{
+		error(_error_silent, "shadowrun cable: %08lx is not a projectile tag (the t2ed's bolt)",
+			(unsigned long)projectile_definition_index);
+		return NONE;
+	}
 	if (object_get_marker_by_name(unit_index, "body", markers, NUMBEROF(markers)) > 0)
 	{
 		origin = markers[0].matrix.position;
