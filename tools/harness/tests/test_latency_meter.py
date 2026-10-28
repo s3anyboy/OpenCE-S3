@@ -86,4 +86,4 @@ def test_scoreboard_ping_drawn_alone_in_its_colour():
     assert "ping_colored = ping != NONE && latency_meter_shown();" in scoreboard
     assert "ping_colored ? L\"\" : ping_string);" in scoreboard
     drawn = scoreboard[scoreboard.index("if (ping_colored)\n"):]
-    assert drawn.index("latency_meter_color(ping, &ping_color);") < drawn.index("L\"\\t\\t\\t\\t%s\", ping_string")
+    assert drawn.index("latency_meter_color(ping, &ping_color);") < drawn.index("L\"\\t\\t\\t\\t%s%s\"")

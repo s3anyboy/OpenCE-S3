@@ -214,7 +214,7 @@ static const struct config_setting config_settings[] =
 		"screen's top right, with bars (the host: its slowest player's), and\n"
 		"\"Connection problem\" when the host has sent nothing for two seconds;\n"
 		"the scoreboard's pings in the same colours, as this machine times them." },
-		{ "display.subtitles", _config_boolean, "false", "HALO_SUBTITLES", _environment_value, _platform_all,
+	{ "display.subtitles", _config_boolean, "false", "HALO_SUBTITLES", _environment_value, _platform_all,
 		"Show subtitles at the bottom of the screen for the sound tags that the\n"
 		"subtitles name (built into the game, or display.subtitles_file), while they\n"
 		"play. Also Video Setup, Extra Effects in the menus." },
@@ -486,6 +486,22 @@ static const struct config_setting config_settings[] =
 		"shield's own) or a multiplayer armor color: white, black, red, blue,\n"
 		"gray, yellow, green, pink, purple, cyan, cobalt, orange, teal, sage,\n"
 		"brown, tan, maroon or salmon." },
+	{ "display.campaign_timer", _config_boolean, "false", "HALO_CAMPAIGN_TIMER", _environment_value, _platform_all,
+		"Draw a clock at the bottom right in the campaign, counting up from\n"
+		"the start of the level, and going on when a checkpoint is gone back\n"
+		"to (display.match_timer draws it in multiplayer). false: as the\n"
+		"stock game." },
+	{ "display.campaign_score", _config_boolean, "false", "HALO_CAMPAIGN_SCORE", _environment_value, _platform_all,
+		"Score each enemy a player kills in the campaign (by its actor variant\n"
+		"and the difficulty, less as the level goes on), and show the score at\n"
+		"the bottom right and on the scoreboard (campaign_score.c). In a co-op\n"
+		"game, the host's choice and network.coop_score_type count. false: as\n"
+		"the stock game." },
+	{ "display.headshot_party", _config_boolean, "false", "HALO_HEADSHOT_PARTY", _environment_value, _platform_all,
+		"A grunt that a player kills with a shot to the head pops with confetti,\n"
+		"and a sound plays (party.wav in the data folder, if it is there). In\n"
+		"the campaign, and in a co-op game where the host's choice is sent to\n"
+		"the clients. false: as the stock game." },
 
 	{ "game.unlock_all_levels", _config_boolean, "false", "HALO_UNLOCK_ALL_LEVELS", _environment_value, _platform_all,
 		"true: a profile made from now on starts with every campaign level\n"
