@@ -1187,7 +1187,7 @@ static void cache_copy_issue_read(
 {
 	HANDLE file;
 	OVERLAPPED *overlapped;
-	long error;
+	long error_code;
 	BOOL issued;
 
 	decompressor_timer_start(_decompressor_timer_read_file);
@@ -1212,11 +1212,11 @@ static void cache_copy_issue_read(
 		SleepEx(0, TRUE);
 		SetLastError(ERROR_SUCCESS);
 		issued = ReadFileEx(file, buffer, size, overlapped, cache_copy_FileIOCompletionRoutine);
-		error = GetLastError();
+		error_code = GetLastError();
 	}
 	while (!issued &&
-		(error == ERROR_INVALID_USER_BUFFER || error == ERROR_NOT_ENOUGH_MEMORY ||
-			error == ERROR_NO_SYSTEM_RESOURCES));
+		(error_code == ERROR_INVALID_USER_BUFFER || error_code == ERROR_NOT_ENOUGH_MEMORY ||
+			error_code == ERROR_NO_SYSTEM_RESOURCES));
 
 	if (!issued)
 	{
@@ -1225,6 +1225,10 @@ static void cache_copy_issue_read(
 			1369,
 			FALSE,
 			"couldn't issue an asynchronous read");
+		/* port: the slot is freed here too (see cache_copy_issue_write) */
+		BIT_VECTOR_SET_FLAG(self->overlapped_in_use_flags, overlapped_index, FALSE);
+		error(_error_silent, "cache copy: couldn't issue an asynchronous read (%d bytes at %d, error %ld)",
+			(int)size, (int)offset, error_code);
 		cache_copy_set_flag(_copy_read_failed_bit);
 	}
 
@@ -1243,7 +1247,7 @@ static void cache_copy_issue_write(
 	long overlapped_index;
 	HANDLE file;
 	OVERLAPPED *overlapped;
-	long error;
+	long error_code;
 	BOOL issued;
 
 	decompressor_timer_start(_decompressor_timer_write_file);
@@ -1269,11 +1273,11 @@ static void cache_copy_issue_write(
 		SleepEx(0, TRUE);
 		SetLastError(ERROR_SUCCESS);
 		issued = WriteFileEx(file, buffer, size, overlapped, cache_copy_FileIOCompletionRoutine);
-		error = GetLastError();
+		error_code = GetLastError();
 	}
 	while (!issued &&
-		(error == ERROR_INVALID_USER_BUFFER || error == ERROR_NOT_ENOUGH_MEMORY ||
-			error == ERROR_NO_SYSTEM_RESOURCES));
+		(error_code == ERROR_INVALID_USER_BUFFER || error_code == ERROR_NOT_ENOUGH_MEMORY ||
+			error_code == ERROR_NO_SYSTEM_RESOURCES));
 
 	if (!issued)
 	{
@@ -1282,6 +1286,12 @@ static void cache_copy_issue_write(
 			1441,
 			FALSE,
 			"couldn't issue an asynchronous write");
+		/* port: the slot is freed here too: no completion routine runs for a
+		write that was never issued, and a slot left in use tripped the next
+		write's assertion instead, hiding this error */
+		BIT_VECTOR_SET_FLAG(self->overlapped_in_use_flags, overlapped_index, FALSE);
+		error(_error_silent, "cache copy: couldn't issue an asynchronous write (%d bytes at %d, error %ld)",
+			(int)size, (int)offset, error_code);
 		cache_copy_set_flag(_copy_write_failed_bit);
 	}
 

@@ -132,6 +132,7 @@ symbols in this file:
 #include "text/text_group.h"
 #include "text/unicode.h"
 #include "units/units.h"
+#include "shadowrun.h" /* port: port/linux/game/shadowrun.c */
 
 /* ---------- constants */
 
@@ -550,9 +551,12 @@ static boolean ctf_engine_initialize_for_new_map(
 				&ctf_globals.flags[(own_team_index + 1) % 2]->position,
 				&starting_location->position);
 
-			if (assault ?
+			/* port: not on a Shadowrun prototype map, whose flags are not
+			placed for this (its spawns would be disabled, and its players left
+			without a starting location: port/linux/game/shadowrun.h) */
+			if (!shadowrun_map_loaded() && (assault ?
 				distance_to_own_flag < distance_to_enemy_flag :
-				distance_to_own_flag > distance_to_enemy_flag)
+				distance_to_own_flag > distance_to_enemy_flag))
 			{
 				error(
 					_error_silent,
