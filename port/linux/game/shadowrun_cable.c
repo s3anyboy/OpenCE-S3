@@ -118,7 +118,7 @@ static void shadowrun_cable_reel(
 	long unit_index);
 static boolean shadowrun_cable_move(
 	long unit_index,
-	real distance,
+	real speed,
 	boolean keeps_velocity);
 
 /* ---------- private code */
@@ -249,64 +249,46 @@ static void shadowrun_cable_stop(
 
 
 
-/* FUN_00284EA0's step, as bipeds.c FUN_002541D0 takes it: the point the unit
-is reeled toward (its own 0x428) moves toward the unit by the tag's speed a
-tick; a collision from where the unit is to that point decides whether it may
-go there, and it does where nothing is in the way (or the cable snaps). The
-unit's own position moves with it, so it is the collision's start next tick
-
-`velocity` is 0 for a unit attached to another (the executable stops its own
-movement), or 1 for one attached to the world (it keeps falling). TRUE when
-the step was made, FALSE when the cable snapped */
+/* FUN_002541D0's step, for a unit attached to the world: its velocity is
+set along the cable toward the point the bolt holds (the executable's
+local_b8/b4/b0, its 0x428 point less its 0x3, times the tag's speed over
+the ticks). It is set every tick, as the executable sets it, so the unit
+travels at the tag's speed until the cable lets go */
 static boolean shadowrun_cable_move(
 	long unit_index,
-	real distance,
+	real speed,
 	boolean keeps_velocity)
 {
 	struct unit_datum *unit = unit_try_and_get(unit_index);
 	long slot = shadowrun_cable_slot(unit_index);
-	real_point3d const *target = &shadowrun_cable_points[slot];
-	real_point3d next;
-	real_vector3d step;
+	real_vector3d direction;
 	real length;
-	struct collision_result collision;
 
 	if (!unit)
 	{
 		return FALSE;
 	}
-	/* (the attach point moves toward the unit by this tick's distance) */
-	vector_from_points3d(target, &unit->object.position, &step);
-	length = normalize3d(&step);
+	vector_from_points3d(&unit->object.position, &shadowrun_cable_points[slot], &direction);
+	length = normalize3d(&direction);
 	if (length <= 0.f)
 	{
 		return TRUE;
 	}
-	scale_vector3d(&step, MIN(distance / TICKS_PER_SECOND, length), &step);
-	next = *target;
-	add_vectors3d((real_vector3d const *)&next, &step, (real_vector3d *)&next);
-
-	/* (may the unit go there? the collision is from the unit to the point) */
-	if (collision_test_vector(_collision_test_for_projectiles_flags, &unit->object.position,
-			&step, unit_index, &collision))
-	{
-		/* (a wall is in the way: it goes as far as it can, or the cable snaps) */
-		real travelled = distance3d(&unit->object.position, &collision.point);
-
-		if (travelled < SHADOWRUN_CABLE_SNAP_DISTANCE)
-		{
-			return FALSE;
-		}
-		unit->object.position = collision.point;
-	}
-	else
-	{
-		unit->object.position = next;
-	}
-	shadowrun_cable_points[slot] = next;
+	/* (to a unit: the cable stops the unit's own movement; to the world: it
+	keeps falling, and the cable adds to what it had) */
 	if (!keeps_velocity)
 	{
 		unit->unit.throttle = *global_zero_vector3d;
+	}
+	scale_vector3d(&direction, speed / TICKS_PER_SECOND, &direction);
+	if (keeps_velocity)
+	{
+		add_vectors3d(&unit->object.translational_velocity, &direction,
+			&unit->object.translational_velocity);
+	}
+	else
+	{
+		unit->object.translational_velocity = direction;
 	}
 
 	return TRUE;
@@ -615,14 +597,12 @@ boolean shadowrun_cable_update(
 
 	case _shadowrun_cable_state_attached_to_world:
 	{
-		struct object_datum *projectile = shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)] != NONE ? object_try_and_get_and_verify_type(shadowrun_cable_projectiles[shadowrun_cable_slot(unit_index)],
-																															   _object_mask_projectile)
-																						  : NULL;
-
 		shadowrun_cable_attached_ticks[shadowrun_cable_slot(unit_index)]++;
 		/* (to the world: the unit is reeled toward where the bolt hit, and
-		keeps its own movement) */
-		if (!projectile || !shadowrun_cable_move(unit_index, definition->hit_distance, TRUE))
+		keeps its own movement. The bolt itself is not needed: one that hit a
+		wall detonates and is deleted as the cable holds, and the point it
+		hit is what the reel follows) */
+		if (!shadowrun_cable_move(unit_index, definition->hit_distance, TRUE))
 		{
 			/* (the cable snapped: the release effect, and a snap for a
 			unit that was moved) */
