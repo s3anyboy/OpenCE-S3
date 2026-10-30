@@ -461,13 +461,15 @@ int *_errno(void)
 
 /* ---------- printf with MSVC length modifiers */
 
-/* rewrite %I64 as %ll and drop %I32; everything else is shared with glibc */
+/* rewrite %I64 as %ll, rewrite %S as %ls and drop %I32; everything else is
+shared with glibc. %S is a wide string to MSVC and a string to glibc, and the
+font code formats player names (wide) with it */
 static const char *translate_format(const char *format, char *buffer, size_t size)
 {
 	const char *cursor;
 	size_t length = 0;
 
-	if (!strstr(format, "I64") && !strstr(format, "I32"))
+	if (!strstr(format, "I64") && !strstr(format, "I32") && !strstr(format, "S"))
 		return format;
 	for (cursor = format; *cursor && length + 3 < size; cursor++)
 	{
@@ -491,6 +493,12 @@ static const char *translate_format(const char *format, char *buffer, size_t siz
 		else if (cursor[1] == 'I' && cursor[2] == '3' && cursor[3] == '2')
 		{
 			cursor += 3;
+		}
+		else if (cursor[1] == 'S' && length + 3 < size)
+		{
+			buffer[length++] = 'l';
+			buffer[length++] = 's';
+			cursor += 1;
 		}
 	}
 	buffer[length] = '\0';

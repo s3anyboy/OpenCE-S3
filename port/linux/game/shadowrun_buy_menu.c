@@ -426,13 +426,19 @@ boolean shadowrun_buy_menu_input(
 
 			if (toggle)
 			{
+				/* port: the map's srud lookup runs before the first line is printed:
+				it borrows a line of the terminal's output buffer, which printing the
+				first line would overwrite (the line came out cut, and with the rest
+				of the format in place of the name) */
+				char const *first_name = shadowrun_unit_definition_first_name();
+				boolean has_generic_unit = shadowrun_unit_definition_matches(SHADOWRUN_GENERIC_UNIT_DEFINITION);
+
 				console_printf(FALSE, "buy menu: map_loaded %d, unit %ld, own srud %d, shopping srud %d",
 					shadowrun_map_loaded(), debug_unit_index,
 					debug_unit_index != NONE && shadowrun_unit_definition_get(debug_unit_index) != NULL,
 					debug_definition != NULL);
 				console_printf(FALSE, "buy menu: map has generic_unit %d, first srud \"%s\"",
-					shadowrun_unit_definition_matches(SHADOWRUN_GENERIC_UNIT_DEFINITION),
-					shadowrun_unit_definition_first_name());
+					has_generic_unit, first_name);
 			}
 		}
 		if (!shadowrun_shop_unit_definition(local_player_index) || cinematic_in_progress())
