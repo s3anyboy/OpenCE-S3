@@ -429,16 +429,10 @@ static byte *cache_files_tags_place(
 	uint32_t linked_address;
 	byte *tag_data;
 
-	/* port: where a map links its tags, what this build reads there must read
-	as its own tag header ("tags"): every Xbox map of this build's is linked to
-	the base, so only another build's is asked, and a map of one that is not
-	the prototype's would otherwise fail the tag header's check later */
 	if (xbox_cache_tag_data_address(tag_cache, (uint32_t)tag_data_size, (uint32_t)(unsigned long)tag_cache,
-		TAG_CACHE_SIZE, &linked_address) != _cache_file_status_ok ||
-		!shadowrun_cache_tag_header_signature((uint8_t const *)(unsigned long)linked_address))
+		TAG_CACHE_SIZE, &linked_address) != _cache_file_status_ok)
 	{
-		error(_error_silent, "the cache file '%s' is damaged: its tags are linked outside the tag cache, or are not a tag header",
-			scenario_name);
+		error(_error_silent, "the cache file '%s' is damaged: its tags are linked outside the tag cache", scenario_name);
 		return NULL;
 	}
 	tag_data = (byte *)(unsigned long)linked_address;
@@ -1519,6 +1513,19 @@ long scenario_tags_load(
 				return NONE;
 			}
 			cache_file_other_build = cache_file_tag_data != (byte *)tag_cache_base_address;
+			/* port: a map that links its tags past the tag cache's base is of
+			another build of the engine, and must have a tag header there this
+			build reads ("tags"): one that does not is refused here, rather than
+			fail the tag header's check below with no word of why. This build's
+			maps are linked to the base, where Xbox maps always were */
+			if (cache_file_other_build &&
+				!shadowrun_cache_tag_header_signature((uint8_t const *)cache_file_tag_data))
+			{
+				error(_error_silent, "the cache file '%s' is damaged: its tag header is not one this build reads", scenario_name);
+				cache_file_close();
+
+				return NONE;
+			}
 			tag_cache_base_address = cache_file_tag_data;
 			if (!cache_file_tag_header_verify(
 				tag_cache_base_address,

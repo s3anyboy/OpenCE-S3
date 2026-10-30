@@ -4012,11 +4012,9 @@ enum cache_file_status xbox_cache_structure_bsp_address(
 /* an actor definition's type (ai/actor_definitions.h) */
 #define ACTOR_DEFINITION_TYPE_OFFSET 0x14
 
-/* port: a Shadowrun prototype map's tag data is linked inside the tag cache
-(where its own build's game state ended), and there its tag header's
-signature has the byte order the map's group tags are written in: read as a
-group tag it is TAG_INDEX_SIGNATURE, or the same bytes the other way. This
-build's maps are linked to the tag cache's base, as every Xbox map was */
+/* port: whether the tag header says the signature `group_tag` (the tag
+header's signature, 'tags', read as a group tag, or the same bytes the other
+way: a map holds "sgat") */
 int shadowrun_cache_tag_data_group_tag(
 	uint8_t const *tag_header,
 	uint32_t group_tag)
@@ -4024,8 +4022,8 @@ int shadowrun_cache_tag_data_group_tag(
 	return read_u32(tag_header + XBOX_TAG_HEADER_SIGNATURE_OFFSET) == group_tag;
 }
 
-/* port: the tag header of the tags a map links there, read the way this build
-reads it, holds the signature its check of the header asserts */
+/* port: the tag header of the tags a map links there holds the signature this
+build's check of the header asserts: a map's four bytes, "sgat" */
 int shadowrun_cache_tag_header_signature(
 	uint8_t const *tag_header)
 {
@@ -4114,8 +4112,8 @@ enum cache_file_status shadowrun_cache_convert(
 	int32_t index;
 
 	memset(report, 0, sizeof(*report));
-	/* port: the signature as the map holds it: "tags", which this build
-	reads as "sgat" (SHADOWRUN_CACHE_TAG_HEADER_SIGNATURE) */
+	/* port: the signature as a map holds it, the bytes "sgat"
+	(SHADOWRUN_CACHE_TAG_HEADER_SIGNATURE): what this build's own maps hold */
 	if (!tag_data || tag_data_bytes < XBOX_CACHE_TAG_HEADER_BYTES ||
 		!shadowrun_cache_tag_header_signature(tag_data))
 	{

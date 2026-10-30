@@ -574,12 +574,17 @@ validator corrects as it would any value past an enum's end. */
 
 /* the prototype's (missionlet's and ui.map's) */
 #define SHADOWRUN_TAG_DATA_ADDRESS 0x8069E000UL
-/* the tag header's signature, "tags": this build reads it as "sgat", and a
-map's group tags are written the other way, so the tag header holds one of
-these two words there (missionlet's and recomp's hold "tags", as this build
-reads it: the other order is in a map's group tags) */
-#define SHADOWRUN_CACHE_TAG_HEADER_SIGNATURE 0x73676174UL
-#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG 0x67617473UL
+/* the tag header's signature, as a map holds it: the four bytes "sgat",
+which read as this build reads a word are 0x74616773, and are the literal
+'tags' the game compares them with (cache_files.c,
+CACHE_FILE_TAG_HEADER_SIGNATURE). missionlet, ui.map and recomp all hold
+them, as do this build's own maps, so the loader's check passes for any of
+them and tells none apart */
+#define SHADOWRUN_CACHE_TAG_HEADER_SIGNATURE 0x74616773UL
+/* and the same four bytes read the other way, which a map of another build
+of the engine might have (no map examined has: missionlet, ui.map and recomp
+all hold "sgat") */
+#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG 0x74616773UL
 #define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED 0x73676174UL
 /* port: the builds its cache headers name, any of which the menus list and the
 loader converts: missionlet's (01.12.07.0132), the Mar 22 2004 prototype's
@@ -606,8 +611,11 @@ int shadowrun_cache_tag_data_group_tag(
 	uint8_t const *tag_header,
 	uint32_t group_tag);
 /* Whether a map's tag header, `tag_header`, is one this build reads: its
-signature is CACHE_FILE_TAG_HEADER_SIGNATURE ("tags"), as the loader's check
-of it asserts */
+signature is what CACHE_FILE_TAG_HEADER_SIGNATURE ('tags') is when a map
+holds it, the bytes "sgat", as the loader's check of it asserts. Every
+Xbox map holds exactly that, this build's and the prototype's both, so this
+tells a Shadowrun map from another only where the other is not a map of
+this build's (a Shadowrun map's tags are told by where they are linked) */
 int shadowrun_cache_tag_header_signature(
 	uint8_t const *tag_header);
 /* Whether a cache's tag data, linked to `tag_data_address`, is the Shadowrun
