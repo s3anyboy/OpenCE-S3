@@ -460,6 +460,17 @@ boolean shadowrun_buy_menu_input(
 				console_printf(FALSE, "buy menu: it does not open: no srud %d, cinematic %d",
 					shadowrun_shop_unit_definition(local_player_index) == NULL, cinematic_in_progress());
 			}
+			/* port: what closed it the first time is said here too: a map whose
+			player names no srud of its own (recomp.map's) opens the menu when
+			this is the one the menu sells by, not the unit's */
+			if (toggle)
+			{
+				console_printf(FALSE, "buy menu: shop srud %d, unit srud %d",
+					shadowrun_shop_unit_definition(local_player_index) != NULL,
+					shadowrun_unit_definition_get(
+						shadowrun_shop_player(local_player_index) ?
+							shadowrun_shop_player(local_player_index)->unit_index : NONE) != NULL);
+			}
 			/* 0x0FD0C0: without a unit of its own it closes */
 			if (state->open)
 			{

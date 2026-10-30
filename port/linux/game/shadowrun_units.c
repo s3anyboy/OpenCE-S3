@@ -483,6 +483,14 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 			{
 				continue;
 			}
+			/* port: an entry that names one but has no srud's group's size of
+			data is no srud (a map's table may hold entries this build read
+			none of, as recomp's 2687 for its 2890): it is not chosen */
+			if (!instances[index].base_address)
+			{
+				console_printf(FALSE, "shadowrun: #%ld names a srud but has no data", index);
+				continue;
+			}
 			if (first == NONE)
 			{
 				first = index;
@@ -508,6 +516,14 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 				chosen, shadowrun_tag_name(instances, count, chosen), (void *)result,
 				instances[chosen].base_address);
 		}
+		else
+		{
+			console_printf(FALSE, "shadowrun: no tag of %ld is an srud (the map sells by none)", count);
+		}
+	}
+	else if (shadowrun_globals.map_loaded)
+	{
+		console_printf(FALSE, "shadowrun: no tag table to sell by");
 	}
 
 	return result;
