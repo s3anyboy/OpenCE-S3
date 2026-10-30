@@ -25,65 +25,6 @@ Tech is not played, so its items cannot be bought (nor the anti-magic
 grenade, which this build has no grenade type for).
 */
 
-/* port: the prices where the map gives the player no srud of its own (recomp.map):
-the prototype's. The prototype's srud, which it keeps for them, holds none in
-missionlet (0 is free), so these are what its menu's items are worth, in the
-srud's prices' order (the menu's items' index, and a magazine's of each
-weapon: shadowrun_shop_magazine_prices) */
-static long const shadowrun_shop_stock_prices[NUMBER_OF_SHADOWRUN_PRICES] =
-{
-	0,          /* 0:  (the srud's own, unused) */
-	0,          /* 1:  Teleport */
-	0,          /* 2:  Tree of Life */
-	0,          /* 3:  Summon Elemental */
-	0,          /* 4:  Strangle */
-	0,          /* 5:  Razorclaws */
-	0,          /* 6:  Enhanced Vision */
-	0,          /* 7:  Glider */
-	0,          /* 8 */
-	0,          /* 9:  Grenade */
-	0,          /* 10: Flechette Pistol */
-	0,          /* 11: Assault Rifle */
-	0,          /* 12: Sniper Rifle */
-	0,          /* 13: Mini Gun */
-	0,          /* 14: Rocket Launcher */
-	0,          /* 15: Shotgun */
-	0,          /* 16: Gust */
-	0,          /* 17: Smoke */
-	0,          /* 18: a Flechette Pistol's magazine */
-	0,          /* 19: an Assault Rifle's magazine */
-	0,          /* 20: a Sniper Rifle's magazine */
-	0,          /* 21: a Mini Gun's magazine */
-	0,          /* 22: a Rocket Launcher's magazine */
-	0,          /* 23: a Shotgun's magazine */
-	0,          /* 24: a Rifle's magazine */
-	0,          /* 25: Enhanced Vision's removal */
-	0,          /* 26: Glider's removal */
-	0,          /* 27 */
-	0,          /* 28: Anti-Magic Grenade */
-	0,          /* 29 */
-	0,          /* 30: Hologram */
-	0,          /* 31 */
-	0,          /* 32 */
-	0,          /* 33: Smartlink, Gecko, Reflexes */
-	0,          /* 34 */
-	0,          /* 35: Hologram's removal */
-	0,          /* 36 */
-	0,          /* 37 */
-	0,          /* 38: Smartlink's, Gecko's, Reflexes' removal */
-	0,          /* 39: Resurrection */
-	0,          /* 40: Katana */
-	0,          /* 41: Rifle */
-	0,          /* 42: a Rifle's magazine */
-	0,          /* 43 */
-	0,          /* 44 */
-	0,          /* 45 */
-	0,          /* 46: Grapple */
-	0,          /* 47: Grapple's removal */
-};
-
-
-
 /* ---------- headers */
 
 #include "cseries.h"
@@ -169,6 +110,63 @@ enum
 /* the stick past this moves the selection, and under this is centred */
 #define SHADOWRUN_SHOP_STICK_MOVE 0.5f
 #define SHADOWRUN_SHOP_STICK_CENTERED 0.25f
+
+/* port: the prices where the map gives the player no srud of its own (recomp.map):
+the prototype's. The prototype's srud, which it keeps for them, holds none in
+missionlet (0 is free), so these are what its menu's items are worth, in the
+srud's prices' order (the menu's items' index, and a magazine's of each
+weapon: shadowrun_shop_magazine_prices) */
+static long const shadowrun_shop_stock_prices[NUMBER_OF_SHADOWRUN_PRICES] =
+{
+	0,          /* 0:  (the srud's own, unused) */
+	0,          /* 1:  Teleport */
+	0,          /* 2:  Tree of Life */
+	0,          /* 3:  Summon Elemental */
+	0,          /* 4:  Strangle */
+	0,          /* 5:  Razorclaws */
+	0,          /* 6:  Enhanced Vision */
+	0,          /* 7:  Glider */
+	0,          /* 8 */
+	0,          /* 9:  Grenade */
+	0,          /* 10: Flechette Pistol */
+	0,          /* 11: Assault Rifle */
+	0,          /* 12: Sniper Rifle */
+	0,          /* 13: Mini Gun */
+	0,          /* 14: Rocket Launcher */
+	0,          /* 15: Shotgun */
+	0,          /* 16: Gust */
+	0,          /* 17: Smoke */
+	0,          /* 18: a Flechette Pistol's magazine */
+	0,          /* 19: an Assault Rifle's magazine */
+	0,          /* 20: a Sniper Rifle's magazine */
+	0,          /* 21: a Mini Gun's magazine */
+	0,          /* 22: a Rocket Launcher's magazine */
+	0,          /* 23: a Shotgun's magazine */
+	0,          /* 24: a Rifle's magazine */
+	0,          /* 25: Enhanced Vision's removal */
+	0,          /* 26: Glider's removal */
+	0,          /* 27 */
+	0,          /* 28: Anti-Magic Grenade */
+	0,          /* 29 */
+	0,          /* 30: Hologram */
+	0,          /* 31 */
+	0,          /* 32 */
+	0,          /* 33: Smartlink, Gecko, Reflexes */
+	0,          /* 34 */
+	0,          /* 35: Hologram's removal */
+	0,          /* 36 */
+	0,          /* 37 */
+	0,          /* 38: Smartlink's, Gecko's, Reflexes' removal */
+	0,          /* 39: Resurrection */
+	0,          /* 40: Katana */
+	0,          /* 41: Rifle */
+	0,          /* 42: a Rifle's magazine */
+	0,          /* 43 */
+	0,          /* 44 */
+	0,          /* 45 */
+	0,          /* 46: Grapple */
+	0,          /* 47: Grapple's removal */
+};
 
 /* the sounds' indices, in the buy menu's order */
 enum
