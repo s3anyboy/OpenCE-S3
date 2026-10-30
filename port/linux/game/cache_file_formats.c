@@ -3946,14 +3946,25 @@ enum cache_file_status xbox_cache_tag_data_address(
 	{
 		return _cache_file_status_bad_tag_data_range;
 	}
+	/* port: the first word is the address of the tag cache's tag table (the
+	instances), and the tag header itself is there too. This build's maps put
+	the table right after the header, at the tag cache's base; a map of another
+	build may put the header at the base and the table after it (recomp's tags
+	at 0x806D0000, its table at 0x806D0024), so the header is the base, or
+	where this build's would be */
 	tag_table = read_u32(tag_data);
 	if (tag_table < tag_cache_address + XBOX_CACHE_TAG_HEADER_BYTES)
 	{
 		return _cache_file_status_bad_tag_instances_range;
 	}
 	linked = tag_table - XBOX_CACHE_TAG_HEADER_BYTES;
-	if ((linked & 3) ||
-		!range_fits(linked - tag_cache_address, tag_data_bytes, tag_cache_bytes))
+	if (linked > tag_cache_address && linked - tag_cache_address <= XBOX_CACHE_TAG_HEADER_BYTES)
+	{
+		linked = tag_cache_address;
+	}
+	if ((linked & 3) || linked - tag_cache_address > tag_cache_bytes ||
+		tag_data_bytes > tag_cache_bytes - (linked - tag_cache_address) ||
+		tag_table < linked || tag_table - linked > tag_data_bytes)
 	{
 		return _cache_file_status_bad_tag_instances_range;
 	}
@@ -4119,19 +4130,35 @@ enum cache_file_status shadowrun_cache_convert(
 	{
 		return _cache_file_status_bad_tag_index_signature;
 	}
-	instances_offset = read_u32(tag_data + XBOX_TAG_HEADER_INSTANCES_OFFSET) - tag_data_address;
+	/* port: the tag table's first word is the tag cache address its instances
+	are at, and this build's maps put them at the tag cache's base, not
+	after the tag header, so an instance's place is what the address gives,
+	not an index into a table (recomp's are at 0x806D0024) */
 	tag_count = read_s32(tag_data + XBOX_TAG_HEADER_COUNT_OFFSET);
-	if (tag_count <= 0 || (uint32_t)tag_count > tag_data_bytes / TAG_INSTANCE_BYTES ||
-		!range_fits(instances_offset, (uint32_t)tag_count * TAG_INSTANCE_BYTES, tag_data_bytes))
+	if (tag_count <= 0 || (uint32_t)tag_count > XBOX_TAG_CACHE_BYTES / TAG_INSTANCE_BYTES)
 	{
 		return _cache_file_status_bad_tag_instances_range;
 	}
 	for (index = 0; index < tag_count; index++)
 	{
-		uint8_t const *instance = tag_data + instances_offset + (uint32_t)index * TAG_INSTANCE_BYTES;
+		uint32_t instance_address = read_u32(tag_data + XBOX_TAG_HEADER_INSTANCES_OFFSET) +
+			(uint32_t)index * TAG_INSTANCE_BYTES;
+		uint32_t instances_offset;
+		uint8_t const *instance;
 		uint32_t definition_offset;
 		int16_t type;
 
+		/* (an instance outside the tag data is the validator's to refuse) */
+		if (instance_address < tag_data_address)
+		{
+			continue;
+		}
+		instances_offset = instance_address - tag_data_address;
+		if (!range_fits(instances_offset, TAG_INSTANCE_BYTES, tag_data_bytes))
+		{
+			return _cache_file_status_bad_tag_instances_range;
+		}
+		instance = tag_data + instances_offset;
 		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != ACTOR_GROUP_TAG)
 		{
 			continue;

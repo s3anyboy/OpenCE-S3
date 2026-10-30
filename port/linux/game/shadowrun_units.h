@@ -275,6 +275,14 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_get(
 its player biped names no srud), or NULL (the map has none) */
 struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 	void);
+/* port: the srud a local player's unit buys by: its own, or the map's (above),
+which buys its magic and tech too; NULL where the map has none */
+struct shadowrun_unit_definition *shadowrun_unit_definition_shop(
+	long unit_index);
+/* port: the index the unit's biped names (NONE for none, or one that is not
+an srud's): what the buy menu's report prints */
+long shadowrun_unit_definition_index(
+	long unit_index);
 /* port: whether the map has an srud of this name, and the name of the first
 srud it has ("" for none): the buy menu's report of why it opens */
 boolean shadowrun_unit_definition_matches(

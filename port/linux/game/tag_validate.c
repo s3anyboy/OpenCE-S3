@@ -1097,27 +1097,53 @@ static boolean validate_tag_table(
 	struct tag_validate_instance *instances,
 	long tag_count)
 {
+	/* (which names were the map's before any of it was claimed: at most the
+	tags a header may have, UNSIGNED_SHORT_MAX) */
+	static boolean annotated_names[UNSIGNED_SHORT_MAX + 1];
+	/* port: the map's own tag indices, kept where its table's place holds its
+	datum index (recomp's 0xE1740000 and up): every reference the game reads is
+	such an index, and a tag_get by it finds its tag */
+	static unsigned short table_indices[UNSIGNED_SHORT_MAX];
 	long absolute_index;
 
+	csmemset(annotated_names, 0, sizeof(annotated_names));
 	/* the tag table: each tag's index, name, groups and root */
 	for (absolute_index = 0; absolute_index < tag_count && !validation->refused; absolute_index++)
 	{
 		struct tag_validate_instance *instance = &instances[absolute_index];
 		struct tag_schema_group const *group = schema_group_get(instance->group_tag);
 		unsigned long parent_group_tags[2];
+		boolean name_known = string_valid(validation, instance->name);
 
 		validation->tag_index = instance->tag_index;
-		if ((short)instance->tag_index != absolute_index)
+		/* port: a build that numbers its tags as datums puts its datum's
+		absolute index in the table's place, which is what is checked (recomp's
+		0xE1740000 and up); this build's maps' are the index */
+		if ((short)instance->tag_index != absolute_index &&
+			DATUM_INDEX_TO_ABSOLUTE_INDEX(instance->tag_index) != absolute_index)
 		{
 			tag_validate_refuse(validation, "has tag %08lx in the table's place %ld", instance->tag_index,
 				absolute_index);
 			break;
 		}
-		if (!string_valid(validation, instance->name))
+		/* port: such a table's place gives no index (it is 0xE1740000 and up,
+		which read as a short is 0 and up again): the index is the tag's place,
+		with this build's datum index's (its lowest of the salt's bits), so that
+		every reference finds the tag it names. This build's tables' places are
+		their own indices, and are left as they are */
+		if (instance->tag_index != absolute_index)
+		{
+			instance->tag_index = DATUM_INDEX_NEW(absolute_index);
+		}
+		table_indices[absolute_index] = (unsigned short)instance->tag_index;
+		if (!name_known)
 		{
 			instance->name = (char *)tag_validate_empty_name;
 			tag_validate_correct(validation, "has no name");
 		}
+			annotated_names[absolute_index] = name_known;
+		/* (a slicing bsp's root is filled with the scenario's tags over it) */
+		annotated_names[absolute_index] = name_known;
 		/* (a group's parents are what the game asks a tag's group by
 		(tag_get): they are the group's, not the map's) */
 		parent_group_tags[0] = group ? group->parent_group_tags[0] : NONE;
@@ -1153,6 +1179,20 @@ static boolean validate_tag_table(
 		}
 	}
 
+	/* port: a map whose table gave no indices had its references that way (a
+	name and an index of 0), and they are given their tags' index now that
+the table has them */
+	for (absolute_index = 0; absolute_index < tag_count && !validation->refused; absolute_index++)
+	{
+		struct tag_validate_instance *instance = &instances[absolute_index];
+		struct tag_schema_definition const *definition = schema_group_definition(instance->group_tag);
+
+		if (definition)
+		{
+			mapped_references_restore(validation, definition, instance->base_address);
+		}
+	}
+
 	/* every tag through its schema, then every tag's checks */
 	for (absolute_index = 0; absolute_index < tag_count && !validation->refused; absolute_index++)
 		validate_instance(validation, &instances[absolute_index], _pass_values);
@@ -1172,8 +1212,12 @@ static boolean validate_tag_table(
 		validation->tag_index = instance->tag_index;
 		validation->depth = 0;
 		validation->field_name = NULL;
+		/* port: a name is one where it lies in the tag data, as a map of another
+		build's does not among its tags (recomp's): those the first pass kept
+		are the ones a tag's data could have taken, and are checked */
 		if (!string_valid(validation, instance->name) ||
-			tag_validate_any_claimed(instance->name, (unsigned long)strlen(instance->name) + 1))
+			(annotated_names[absolute_index] &&
+				tag_validate_any_claimed(instance->name, (unsigned long)strlen(instance->name) + 1)))
 		{
 			instance->name = (char *)tag_validate_empty_name;
 			tag_validate_correct(validation, "has its name in a tag's data: none");
@@ -1248,14 +1292,23 @@ boolean tag_validate_linked_tags(
 		tag_validate_refuse(&validation, "has a damaged tag header");
 		return FALSE;
 	}
-	if (!claim(header, sizeof(*header)) ||
-		!claim(header->instances, header->tag_count * sizeof(struct tag_validate_instance)) ||
-		!validate_buffers(&validation, header->vertex_buffers, header->vertex_buffer_count,
-			header->index_buffers, header->index_buffer_count))
+	/* port: a map of another build may keep its tag table apart from its header
+	(recomp's table is 0x24 into the tag data): the table is a tag's bytes only
+	where it follows the header, as this build's maps' does */
 	{
-		if (!validation.refused)
-			tag_validate_refuse(&validation, "has a damaged tag header");
-		return FALSE;
+		boolean table_follows_header = (byte const *)header->instances ==
+			(byte const *)header + sizeof(*header);
+
+		if (!claim(header, sizeof(*header)) ||
+			(table_follows_header &&
+				!claim(header->instances, header->tag_count * sizeof(struct tag_validate_instance))) ||
+			!validate_buffers(&validation, header->vertex_buffers, header->vertex_buffer_count,
+				header->index_buffers, header->index_buffer_count))
+		{
+			if (!validation.refused)
+				tag_validate_refuse(&validation, "has a damaged tag header");
+			return FALSE;
+		}
 	}
 
 	return validate_tag_table(&validation, header->instances, header->tag_count);

@@ -139,9 +139,9 @@ void shadowrun_hud_draw(
 	short top;
 	short left;
 
-	/* port: a map that gives its player no srud (recomp.map) has no magic, no
-	tech and no buy menu to show: the menu is the srud's (shadowrun_buy_menu.c) */
-	if (!shadowrun_unit || !shadowrun_unit_definition_get(unit_index) || cinematic_in_progress() ||
+	/* port: without a unit (one spawning, or dead) there is nothing to draw,
+	nor a hand to show: not even the buy menu, which needs one to sell to */
+	if (!shadowrun_unit || cinematic_in_progress() ||
 		local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
 	{
 		return;
@@ -149,6 +149,19 @@ void shadowrun_hud_draw(
 	font_index = interface_get_tag_index(_interface_font_terminal);
 	if (font_index == NONE)
 	{
+		/* (the menu has a font of its own to be drawn with) */
+		shadowrun_buy_menu_draw(local_player_index);
+
+		return;
+	}
+	/* port: a map that gives its player no srud (recomp.map) has no magic and
+	no tech of its unit to show (it knows no spells), but the buy menu still
+	sells it by the map's (shadowrun_buy_menu.c), so that is drawn on its own:
+	the menu shows the player its money */
+	if (!shadowrun_unit_definition_get(unit_index))
+	{
+		shadowrun_buy_menu_draw(local_player_index);
+
 		return;
 	}
 	font = font_definition_get(font_index);

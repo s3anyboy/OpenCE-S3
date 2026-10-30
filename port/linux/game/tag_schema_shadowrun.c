@@ -182,6 +182,9 @@ static struct tag_schema_field const shadowrun_unit_fields[] =
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[6], TAG_SCHEMA_GROUPS('weap')),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[7], TAG_SCHEMA_GROUPS('weap')),
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, shop_weapons[8], TAG_SCHEMA_GROUPS('weap')),
+	/* port: the buym is a group with a schema, and so a parent group of the
+	sruds that name it, which the validator gives every tag's (recomp's are
+	corrected to it, else) */
 	TAG_SCHEMA_REFERENCE(struct shadowrun_unit_definition, buy_menu, TAG_SCHEMA_GROUPS(SHADOWRUN_BUY_MENU_DEFINITION_TAG)),
 	TAG_SCHEMA_END
 };
@@ -238,7 +241,8 @@ static struct tag_schema_definition const shadowrun_buy_menu_schema =
 
 struct tag_schema_group const tag_schema_shadowrun_groups[] =
 {
-	{ SHADOWRUN_UNIT_DEFINITION_TAG, { NONE, NONE }, &shadowrun_unit_schema },
+	/* (a buym is the parent group of the sruds that sell by it) */
+	{ SHADOWRUN_UNIT_DEFINITION_TAG, { SHADOWRUN_BUY_MENU_DEFINITION_TAG, NONE }, &shadowrun_unit_schema },
 	{ SHADOWRUN_MAGIC1_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic1_schema },
 	{ SHADOWRUN_MAGIC2_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic2_schema },
 	{ SHADOWRUN_MAGIC3_DEFINITION_TAG, { NONE, NONE }, &shadowrun_magic3_schema },

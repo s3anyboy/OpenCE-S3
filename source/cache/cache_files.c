@@ -475,7 +475,8 @@ static void cache_files_structure_bsps_place(
 	long tag_data_size)
 {
 	long scenario_absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(tag_header->scenario_tag_index);
-	struct scenario *scenario = tag_header->tag_instances[scenario_absolute_index].base_address;
+	/* port: the tag table is where its address says (the checked tags') */
+	struct scenario *scenario = ((struct cache_file_tag_instance *)(unsigned long)tag_header->tag_instances)[scenario_absolute_index].base_address;
 	byte *free_room = (byte *)tag_header + tag_data_size;
 	long index;
 
@@ -597,9 +598,15 @@ static boolean cache_file_tag_header_verify(
 		long scenario_absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(tag_header->scenario_tag_index);
 		long absolute_index;
 
+		/* port: the table is where its address says, and a build that numbers
+		its tags as datums names the scenario by its absolute index (recomp's) */
 		if (scenario_absolute_index >= tag_header->tag_count ||
-			tag_header->tag_instances[scenario_absolute_index].tag_index != tag_header->scenario_tag_index ||
-			tag_header->tag_instances[scenario_absolute_index].group_tag != SCENARIO_TAG)
+			(((struct cache_file_tag_instance *)(unsigned long)tag_header->tag_instances)[scenario_absolute_index].tag_index !=
+				tag_header->scenario_tag_index &&
+			DATUM_INDEX_TO_ABSOLUTE_INDEX(
+				((struct cache_file_tag_instance *)(unsigned long)tag_header->tag_instances)[scenario_absolute_index].tag_index) !=
+				scenario_absolute_index) ||
+			((struct cache_file_tag_instance *)(unsigned long)tag_header->tag_instances)[scenario_absolute_index].group_tag != SCENARIO_TAG)
 		{
 			problem = "scenario tag";
 		}
@@ -612,7 +619,8 @@ static boolean cache_file_tag_header_verify(
 			!problem && absolute_index < tag_header->tag_count;
 			absolute_index++)
 		{
-			void const *base_address = tag_header->tag_instances[absolute_index].base_address;
+			/* port: the table is where its address says (recomp's is 0x24 into it) */
+			void const *base_address = ((struct cache_file_tag_instance *)(unsigned long)tag_header->tag_instances)[absolute_index].base_address;
 
 			if (base_address &&
 				!cache_file_region_contains(tag_header, cache_file_tag_cache_room(tag_header), base_address, 1, 1))
@@ -1560,9 +1568,15 @@ long scenario_tags_load(
 				struct cache_file_tag_header *tags = tag_cache_base_address;
 				long scenario_absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(tags->scenario_tag_index);
 
+				/* port: the tag table is where its address says, not after the
+				header: a map of one build keeps it after the header (recomp's at
+				0x806D0024) */
+				struct cache_file_tag_instance *scenario_instance =
+					&((struct cache_file_tag_instance *)(unsigned long)tags->tag_instances)[scenario_absolute_index];
+
 				if (!scenario_scripts_convert_by_name(
-					tags->tag_instances[scenario_absolute_index].base_address,
-					tags->tag_instances[scenario_absolute_index].name))
+					scenario_instance->base_address,
+					scenario_instance->name))
 				{
 					cache_file_close();
 

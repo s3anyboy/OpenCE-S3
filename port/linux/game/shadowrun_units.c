@@ -283,7 +283,7 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_get(
 	struct shadowrun_unit_definition *result = NULL;
 	struct biped_datum *biped;
 
-	if (shadowrun_globals.map_loaded && (biped = biped_try_and_get(unit_index)) != NULL)
+	if (shadowrun_globals.map_loaded && unit_index != NONE && (biped = biped_try_and_get(unit_index)) != NULL)
 	{
 		struct tag_reference *reference =
 			shadowrun_biped_unit_definition_reference(biped_definition_get(biped->definition_index));
@@ -328,16 +328,25 @@ boolean shadowrun_unit_definition_matches(
 char const *shadowrun_unit_definition_first_name(
 	void)
 {
+	static char result[256];
 	struct tag_iterator iterator;
 	long tag_index;
-	char const *result = "";
+	char group_tag[5];
 
+	/* port: the name is written where it stays, and says what the walk asked
+	for: the name of the group tag as a map holds it, which is what it was
+	given (0x64757273 is "srud"). A group tag this build read the other way
+	round would be none of the map's tags, and the menu would find no srud */
+	result[0] = 0;
+	csstrncpy(group_tag, "srud", sizeof(group_tag) - 1);
+	group_tag[sizeof(group_tag) - 1] = 0;
 	if (shadowrun_globals.map_loaded)
 	{
 		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
 		if ((tag_index = tag_iterator_next(&iterator)) != NONE && tag_get_name(tag_index))
 		{
-			result = tag_get_name(tag_index);
+			snprintf(result, sizeof(result), "%s (%.4s, %ld tags)",
+				tag_get_name(tag_index), group_tag, global_tag_count);
 		}
 	}
 
@@ -383,11 +392,46 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 	return result;
 }
 
+/* port: the srud a local player's unit buys by: its own, or, where the map
+sells it none (recomp.map), the one the map sells by. A unit of one has no
+srud, so without one it would know no spells, which this gives it: its magic
+and tech are in that srud (shadowrun_spell_get and the tech read it by this) */
+struct shadowrun_unit_definition *shadowrun_unit_definition_shop(
+	long unit_index)
+{
+	struct shadowrun_unit_definition *result = unit_index != NONE ? shadowrun_unit_definition_get(unit_index) : NULL;
+
+	if (!result && shadowrun_globals.map_loaded)
+	{
+		result = shadowrun_unit_definition_for_shopping();
+	}
+
+	return result;
+}
+
+/* port: what the unit's biped names, whether or not the map has it (0x0FD0C0's,
+which observed a unit's srud by its name) */
+long shadowrun_unit_definition_index(
+	long unit_index)
+{
+	struct biped_datum *biped = unit_index != NONE ? biped_try_and_get(unit_index) : NULL;
+	long result = NONE;
+
+	if (biped)
+	{
+		result = shadowrun_biped_unit_definition_reference(biped_definition_get(biped->definition_index))->index;
+	}
+
+	return result;
+}
+
 /* 0x25E4C0 */
 struct shadowrun_race *shadowrun_unit_race_get(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	/* port: by the srud the unit buys by, not only its own: a map that gives
+	it none (recomp.map) has its race in that one */
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_shop(unit_index);
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 	struct shadowrun_race *result = NULL;
 
@@ -405,7 +449,8 @@ struct shadowrun_race *shadowrun_unit_race_get(
 struct shadowrun_magic1_definition *shadowrun_magic1_get(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	/* port: by the srud the unit buys by (shadowrun_unit_definition_shop) */
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_shop(unit_index);
 
 	return definition && definition->magic1.index != NONE ?
 		tag_get(SHADOWRUN_MAGIC1_DEFINITION_TAG, definition->magic1.index) : NULL;
@@ -415,7 +460,8 @@ struct shadowrun_magic1_definition *shadowrun_magic1_get(
 struct shadowrun_magic2_definition *shadowrun_magic2_get(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	/* port: by the srud the unit buys by (shadowrun_unit_definition_shop) */
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_shop(unit_index);
 
 	return definition && definition->magic2.index != NONE ?
 		tag_get(SHADOWRUN_MAGIC2_DEFINITION_TAG, definition->magic2.index) : NULL;
@@ -425,7 +471,8 @@ struct shadowrun_magic2_definition *shadowrun_magic2_get(
 struct shadowrun_magic3_definition *shadowrun_magic3_get(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	/* port: by the srud the unit buys by (shadowrun_unit_definition_shop) */
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_shop(unit_index);
 
 	return definition && definition->magic3.index != NONE ?
 		tag_get(SHADOWRUN_MAGIC3_DEFINITION_TAG, definition->magic3.index) : NULL;
@@ -1044,7 +1091,7 @@ boolean shadowrun_unit_learn_power(
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 	boolean result = FALSE;
 
-	if (unit && shadowrun_unit && shadowrun_unit_definition_get(unit_index) &&
+	if (unit && shadowrun_unit && shadowrun_unit_definition_shop(unit_index) &&
 		power >= 0 && power < MAXIMUM_SHADOWRUN_POWERS &&
 		shadowrun_unit->known_powers[power] != 1)
 	{

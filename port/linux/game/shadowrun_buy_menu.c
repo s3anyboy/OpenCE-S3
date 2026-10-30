@@ -433,10 +433,15 @@ boolean shadowrun_buy_menu_input(
 				char const *first_name = shadowrun_unit_definition_first_name();
 				boolean has_generic_unit = shadowrun_unit_definition_matches(SHADOWRUN_GENERIC_UNIT_DEFINITION);
 
-				console_printf(FALSE, "buy menu: map_loaded %d, unit %ld, own srud %d, shopping srud %d",
+				console_printf(FALSE, "buy menu: map_loaded %d, unit %ld, own srud %d (index %d), shopping srud %d",
 					shadowrun_map_loaded(), debug_unit_index,
 					debug_unit_index != NONE && shadowrun_unit_definition_get(debug_unit_index) != NULL,
+					debug_unit_index != NONE && biped_try_and_get(debug_unit_index) ?
+						shadowrun_unit_definition_index(debug_unit_index) : NONE,
 					debug_definition != NULL);
+				/* port: and the input this tick's other controls */
+				console_printf(FALSE, "buy menu: cinematic %d, open %d, buy %d, back %d, magazine %d",
+					cinematic_in_progress(), state->open, buy, back, magazine);
 				console_printf(FALSE, "buy menu: map has generic_unit %d, first srud \"%s\"",
 					has_generic_unit, first_name);
 			}
@@ -669,8 +674,13 @@ void shadowrun_buy_menu_draw(
 			{
 				long mana_cost = 0;
 
-				shadowrun_spell_get(player->unit_index, shadowrun_shop_spells[item->action - _shadowrun_shop_first_magic],
-					&mana_cost, NULL, NULL, NULL, NULL);
+				/* port: a spell's mana is its levels' in the unit's srud (its own, or
+				the map's where it has none), so a unit there is to have them */
+				if (player->unit_index != NONE)
+				{
+					shadowrun_spell_get(player->unit_index, shadowrun_shop_spells[item->action - _shadowrun_shop_first_magic],
+						&mana_cost, NULL, NULL, NULL, NULL);
+				}
 				cells = (short)PIN(mana_cost, 0, 20);
 			}
 			if (row != chosen)
@@ -745,14 +755,11 @@ static struct shadowrun_unit_definition *shadowrun_shop_unit_definition(
 	short local_player_index)
 {
 	struct player_datum *player = shadowrun_shop_player(local_player_index);
-	struct shadowrun_unit_definition *definition;
 
-	if (player && player->unit_index != NONE && (definition = shadowrun_unit_definition_get(player->unit_index)) != NULL)
-	{
-		return definition;
-	}
-
-	return shadowrun_unit_definition_for_shopping();
+	/* port: a player with no unit (one about to spawn, or dead) sells by no
+	srud: folding the map's in on it would price spells from a unit it has
+	not got (shadowrun_spell_get needs one) */
+	return player && player->unit_index != NONE ? shadowrun_unit_definition_shop(player->unit_index) : NULL;
 }
 
 /* port: the buy menu definitions a sound may be played from: the player's
