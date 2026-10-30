@@ -1262,10 +1262,13 @@ static boolean restore_references_in_fields(
 			{
 				byte *element_base = (byte *)block->address + element * field->size;
 
+				/* port: a block this does not reach is left as it is: a structure
+				bsp's live where the bsp loads, past the tags, and the validator
+				checks them as it loads them (tag_validate_structure_bsp) */
 				if (!region_contains(validation, element_base, field->size) ||
 					!restore_references(validation, field->definition, element_base, instances, tag_count))
 				{
-					return FALSE;
+					break;
 				}
 			}
 		}
@@ -1285,29 +1288,27 @@ static boolean restore_references(
 }
 
 /* port: every reference of every tag's schema that gives no index is given
-one, by the tag it names (restore_references); *restored says whether any
-was (a map's tags may be named alike, and its own names given back) */
-static boolean restore_reference_indices(
+one, by the tag it names (restore_references), where one can be named; one
+that cannot is left as the map has it */
+static void restore_reference_indices(
 	struct tag_validation *validation,
 	struct tag_validate_instance const *instances,
-	long tag_count,
-	boolean *restored)
+	long tag_count)
 {
 	long tag;
 
-	*restored = FALSE;
 	for (tag = 0; tag < tag_count; tag++)
 	{
 		struct tag_schema_group const *group = schema_group_get(instances[tag].group_tag);
 
-		if (group && group->definition && instances[tag].base_address &&
-			!restore_references(validation, group->definition, instances[tag].base_address, instances, tag_count))
+		if (group && group->definition && instances[tag].base_address)
 		{
-			return FALSE;
+			(void)restore_references(validation, group->definition, instances[tag].base_address, instances,
+				tag_count);
 		}
 	}
 
-	return TRUE;
+	return;
 }
 
 /* ---------- public code */
@@ -1327,7 +1328,6 @@ static boolean validate_tag_table(
 	build's holds their indices (recomp's 0xE1740000 and up), and whether any
 	reference was taken by name (a map's own tags need not have unique names) */
 	boolean mapped_indices = FALSE;
-	boolean restored_by_name = FALSE;
 	long absolute_index;
 
 	csmemset(annotated_names, 0, sizeof(annotated_names));
@@ -1404,23 +1404,12 @@ static boolean validate_tag_table(
 	/* port: a map whose table gave no indices had its references that way (a
 	name, which the tags' are, and an index of 0), and they are given their
 	tags' index now that the table has them, found by name among the map's own.
-	This build's tables' places are the indices, and its references name those */
+	This build's tables' places are the indices, and its references name those.
+	A reference left as it is says nothing: the check below does (a map of
+	another build need not be one its schema names, and the game reads it) */
 	if (mapped_indices)
 	{
-		if (!restore_reference_indices(validation, instances, tag_count, &restored_by_name))
-		{
-			tag_validate_refuse(validation, "has tags whose data does not lie in its tag cache");
-			return FALSE;
-		}
-		/* port: and a name a reference was given back by is the map's own, as
-		those of its tags are, however the game's writes lie about it */
-		if (restored_by_name)
-		{
-			for (absolute_index = 0; absolute_index < tag_count; absolute_index++)
-			{
-				annotated_names[absolute_index] = FALSE;
-			}
-		}
+		restore_reference_indices(validation, instances, tag_count);
 	}
 
 	/* every tag through its schema, then every tag's checks */
