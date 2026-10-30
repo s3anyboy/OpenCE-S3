@@ -516,7 +516,13 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 		}
 		else
 		{
-			console_printf(FALSE, "shadowrun: no tag of %ld is an srud (the map sells by none)", count);
+			/* port: what the walk had to match against: the group it asked for
+			and the words the map holds, so that a map of another packing is
+			told by its own table */
+			console_printf(FALSE, "shadowrun: no tag of %ld is an srud, asked %08lx, first %08lx %08lx %08lx",
+				count, (unsigned long)SHADOWRUN_UNIT_DEFINITION_TAG, (unsigned long)instances[0].group_tag,
+				count > 1 ? (unsigned long)instances[1].group_tag : 0UL,
+				count > 2 ? (unsigned long)instances[2].group_tag : 0UL);
 		}
 	}
 	else if (shadowrun_globals.map_loaded)
