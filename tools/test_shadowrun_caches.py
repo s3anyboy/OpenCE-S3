@@ -86,9 +86,16 @@ int main(int argc, char **argv)
 		unsigned char *bytes = slurp(argv[2], &size);
 
 		/* (the map's tag data: its tag header's signature, as the map has
-		it) */
-		result = (uint32_t)shadowrun_cache_tag_data_group_tag(bytes, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG);
-		result |= (uint32_t)shadowrun_cache_tag_data_group_tag(bytes, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED);
+		it. A map whose tags are linked to the tag cache's base is this
+		build's, as every Xbox map's before the prototype's were) */
+		unsigned long linked = strtoul(argv[3], NULL, 0);
+
+		if (linked != XBOX_TAG_CACHE_ADDRESS && linked >= XBOX_TAG_CACHE_ADDRESS &&
+			linked - XBOX_TAG_CACHE_ADDRESS < XBOX_TAG_CACHE_BYTES)
+		{
+			result = (uint32_t)shadowrun_cache_tag_data_group_tag(bytes, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG);
+			result |= (uint32_t)shadowrun_cache_tag_data_group_tag(bytes, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED);
+		}
 		free(bytes);
 		status = _cache_file_status_ok;
 	}
@@ -175,7 +182,6 @@ def driver(request, tmp_path_factory):
     def run(*arguments):
         completed = subprocess.run([str(output), *map(str, arguments)], capture_output=True, text=True)
         assert completed.returncode == 0, completed
-        print(completed.stdout.strip())
         status, value = completed.stdout.strip().rsplit(" ", 1)
         return status, int(value, 16)
 
@@ -183,12 +189,14 @@ def driver(request, tmp_path_factory):
     return run
 
 
-def tag_data(address, instances=(), tail=b""):
-    """Tag data as a cache file holds it, linked to address: the header, its
-    tag table of (group, definition address) instances, then tail (the
-    definitions, at address + TAG_HEADER_BYTES + the table's size)."""
+def tag_data(address, instances=(), tail=b"", signature=b"tags"):
+    """Tag data as a cache file holds it, linked to address: the header (its
+    signature's bytes as a map holds them: "tags", as this build reads it),
+    its tag table of (group,
+    definition address) instances, then tail (the definitions, at address +
+    TAG_HEADER_BYTES + the table's size)."""
     table = address + TAG_HEADER_BYTES
-    header = struct.pack("<IiIi", table, 0, 0, len(instances)) + b"\0" * 16 + b"sgat"
+    header = struct.pack("<IiIi", table, 0, 0, len(instances)) + b"\0" * 16 + signature
     entries = b"".join(
         struct.pack("<4sIIIIIII", group[::-1].encode("latin-1"), 0xFFFFFFFF, 0xFFFFFFFF, 0xE1740000 + index,
                     0, definition, 0, 0)
@@ -227,6 +235,13 @@ def test_a_map_linked_higher_still_is(driver):
 # ---------- which maps are Shadowrun's
 
 
+def test_a_shadowrun_map_linked_elsewhere_is_still_shadowruns(driver):
+    # (recomp's, linked to 0x806D0000: where a map links its tags is not
+    # what makes it the prototype's, its tag header's signature is)
+    path = write(driver, "recomp.bin", tag_data(RECOMP_TAG_DATA))
+    assert driver("shadowrun", path, RECOMP_TAG_DATA) == ("ok", 1)
+
+
 def test_the_prototypes_maps_are_shadowruns(driver):
     for address in (SHADOWRUN_TAG_DATA, RECOMP_TAG_DATA):
         path = write(driver, "shadowrun.bin", tag_data(address))
@@ -234,7 +249,8 @@ def test_the_prototypes_maps_are_shadowruns(driver):
 
 
 def test_this_builds_maps_are_not_shadowruns(driver):
-    # (the tag cache's base, where every Xbox map of this build's is linked)
+    # (the tag cache's base, where every Xbox map of this build's is linked:
+    # this build reads the header there, where no shadowrun map links its tags)
     path = write(driver, "retail.bin", tag_data(XBOX_TAG_CACHE))
     assert driver("shadowrun", path, XBOX_TAG_CACHE) == ("ok", 0)
 
@@ -248,12 +264,13 @@ def test_tag_data_linked_outside_the_tag_cache_is_not_shadowruns(driver):
 
 
 def test_a_tag_header_this_build_reads_has_its_signature(driver):
+    # (the maps hold "tags" where this build reads its tag header's signature)
     path = write(driver, "signed.bin", tag_data(SHADOWRUN_TAG_DATA))
     assert driver("signature", path, SHADOWRUN_TAG_DATA) == ("ok", 1)
 
 
-@pytest.mark.parametrize("signature", [b"tags", b"stga", b"\0\0\0\0", b"gat!"],
-                         ids=["swapped", "another word", "zeroes", "another near"])
+@pytest.mark.parametrize("signature", [b"sgat", b"gat!", b"\0\0\0\0", b"\x1b\0\0\0"],
+                         ids=["the group tags' order", "near", "zeroes", "a count"])
 def test_other_tag_headers_are_not_this_builds(driver, signature):
     data = bytearray(tag_data(SHADOWRUN_TAG_DATA))
     data[0x20:0x24] = signature

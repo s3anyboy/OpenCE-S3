@@ -4114,8 +4114,10 @@ enum cache_file_status shadowrun_cache_convert(
 	int32_t index;
 
 	memset(report, 0, sizeof(*report));
+	/* port: the signature as the map holds it: "tags", which this build
+	reads as "sgat" (SHADOWRUN_CACHE_TAG_HEADER_SIGNATURE) */
 	if (!tag_data || tag_data_bytes < XBOX_CACHE_TAG_HEADER_BYTES ||
-		read_u32(tag_data + XBOX_TAG_HEADER_SIGNATURE_OFFSET) != TAG_INDEX_SIGNATURE)
+		!shadowrun_cache_tag_header_signature(tag_data))
 	{
 		return _cache_file_status_bad_tag_index_signature;
 	}

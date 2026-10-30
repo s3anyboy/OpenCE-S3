@@ -574,15 +574,13 @@ validator corrects as it would any value past an enum's end. */
 
 /* the prototype's (missionlet's and ui.map's) */
 #define SHADOWRUN_TAG_DATA_ADDRESS 0x8069E000UL
-/* the tag header's signature, "tags", read as a group tag, as a map's group
-tags are written: one of these two is what a Shadowrun map's tag header holds
-(missionlet's and recomp's both hold "sgat") */
-#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG 0x74616773UL
-#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED 0x73676174UL
-/* and the same in the order this build reads them, as cache_files.c's check
-of the tag header asserts (CACHE_FILE_TAG_HEADER_SIGNATURE): a map whose tag
-data is linked inside the tag cache has its signature there to compare */
+/* the tag header's signature, "tags": this build reads it as "sgat", and a
+map's group tags are written the other way, so the tag header holds one of
+these two words there (missionlet's and recomp's hold "tags", as this build
+reads it: the other order is in a map's group tags) */
 #define SHADOWRUN_CACHE_TAG_HEADER_SIGNATURE 0x73676174UL
+#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG 0x67617473UL
+#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED 0x73676174UL
 /* port: the builds its cache headers name, any of which the menus list and the
 loader converts: missionlet's (01.12.07.0132), the Mar 22 2004 prototype's
 (02.03.22.0274), and the Mar 15 2004 one's (02.03.15.0268, its solo maps) */

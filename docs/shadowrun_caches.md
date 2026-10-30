@@ -54,8 +54,9 @@ Shadowrun's own functions (see [Scripts](#scripts) and [Magic](#magic)).
 
 `recomp.map` is another of the prototype's maps (`levels\test\hangemhigh\recomp`,
 its header naming the same build), made with a larger game state: it links
-its tags to `0x806D0000`. It loads and plays, the buy menu included, as
-missionlet does.
+its tags to `0x806D0000` instead of `0x8069E000`. Its tags are the same as
+missionlet's, `srud`, `buym` and all, so it plays as missionlet does, and its
+buy menu, opened with Back, sells as missionlet's does.
 
 ## What differs, and what is done
 
@@ -72,12 +73,13 @@ to `0x8069E000`, the later multiplayer map `recomp.map`'s to `0x806D0000`
 `0x8169C834`.
 
 A map is Shadowrun's, and converted as such, when its tags are linked inside
-the tag cache and its tag header holds the signature `tags` in the order its
-group tags are written (`sgat` read as a group tag). This build's maps, and
-every other Xbox map, are linked to `0x803A6000`, and are laid out as they
-always were. Where inside the tag cache the tags are is the map's own
-business: nothing goes by `0x8069E000` alone, so a map made with a larger
-game state, such as `recomp.map`, loads and converts as missionlet does.
+the tag cache, past its base, and its tag header holds the signature the game
+reads there. This build's maps, and every other Xbox map, are linked to
+`0x803A6000`, and are laid out as they always were. Where inside the tag
+cache the tags are is the map's own business: nothing goes by `0x8069E000`
+alone, so a map made with a larger game state, such as `recomp.map`, loads
+and converts as missionlet does (`cache_file_formats.c`,
+`shadowrun_cache_tag_data_any`).
 
 So the tags are read to the tag cache's base, as always, and then moved
 where they are linked (`cache_files.c`, `cache_files_tags_place`;
