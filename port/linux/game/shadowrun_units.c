@@ -342,11 +342,22 @@ char const *shadowrun_unit_definition_first_name(
 	group_tag[sizeof(group_tag) - 1] = 0;
 	if (shadowrun_globals.map_loaded)
 	{
+		long srud_count = 0;
+
+		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
+		while (tag_iterator_next(&iterator) != NONE)
+		{
+			srud_count++;
+		}
 		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
 		if ((tag_index = tag_iterator_next(&iterator)) != NONE && tag_get_name(tag_index))
 		{
 			snprintf(result, sizeof(result), "%s (%.4s, %ld tags)",
-				tag_get_name(tag_index), group_tag, global_tag_count);
+				tag_get_name(tag_index), group_tag, srud_count);
+		}
+		else if (srud_count == 0)
+		{
+			snprintf(result, sizeof(result), "none (%.4s walked)", group_tag);
 		}
 	}
 
