@@ -1602,6 +1602,18 @@ long scenario_tags_load(
 					's'));
 			global_tag_instances = cache_file_globals.tag_header->tag_instances;
 			global_tag_count = cache_file_globals.tag_header->tag_count;
+			/* port: what the map's header gave the loader, before anything walks
+			it: the tags' count and the first tag's group (a table of another
+			count, or one whose first group is none of this build's, is named
+			here rather than told by a lookup's failure) */
+			{
+				extern void platform_log(char const *format, ...);
+
+				platform_log("cache: header count %ld, first group %08lx, table %p",
+					(long)cache_file_globals.tag_header->tag_count,
+					(unsigned long)cache_file_globals.tag_header->tag_instances[0].group_tag,
+					(void *)cache_file_globals.tag_header->tag_instances);
+			}
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
 			cache_file_globals.tags_loaded = TRUE;
 			/* port: a Shadowrun prototype map plays its own game (port/linux/game/shadowrun_units.c) */
