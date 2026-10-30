@@ -1485,17 +1485,38 @@ long scenario_tags_load(
 		tag_cache_base_address = physical_memory_get_tag_cache_base_address();
 		if (cache_file_header_verify(&cache_file_globals.header, scenario_name, TRUE))
 		{
-			csmemset(tag_cache_base_address, 0xCD, 0x01600000);
-			cache_file_read(
-				NONE,
-				cache_file_globals.header.tag_data_offset,
-				cache_file_globals.header.tag_data_size,
-				tag_cache_base_address,
-				&read_complete,
-				TRUE);
+			/* port: read is at most to the file's end. A map whose tag data ends
+			at the end of its file (recomp.map's does) asked for a sector-rounded
+			read past it, which the file cannot give: the read is what the file
+			has, and the rest of the tag cache keeps the fill above */
+			{
+				long read_size = cache_file_globals.header.tag_data_size;
+
+				if (read_size > cache_file_globals.header.file_length - cache_file_globals.header.tag_data_offset)
+				{
+					read_size = cache_file_globals.header.file_length - cache_file_globals.header.tag_data_offset;
+				}
+				csmemset(tag_cache_base_address, 0xCD, 0x01600000);
+				cache_file_read(
+					NONE,
+					cache_file_globals.header.tag_data_offset,
+					read_size,
+					tag_cache_base_address,
+					&read_complete,
+					TRUE);
+			}
 			while (!read_complete)
 			{
 				SwitchToThread();
+			}
+			/* port: what the read gave, and what the map asked for: a map whose
+			table is short is told here rather than by a lookup's count */
+			{
+				extern void platform_log(char const *format, ...);
+
+				platform_log("cache: read %d of %ld tag data bytes at %08x (%08x long), file %08x",
+					(int)read_complete, (long)cache_file_globals.header.tag_data_size,
+					cache_file_globals.header.tag_data_offset, cache_file_globals.header.file_length);
 			}
 
 			/* port: tags that did not all read, or whose header cannot be
