@@ -123,10 +123,8 @@ void shadowrun_initialize_for_new_map(
 	{
 		shadowrun_globals.players[player_index].chosen_tech = _shadowrun_tech_none;
 	}
-	/* port: the last map's table is not this map's (shadowrun_tags_loaded
-	takes this one's) */
-	shadowrun_globals.map_instances = NULL;
-	shadowrun_globals.map_instance_count = 0;
+	/* (the map's tag table is taken as its tags load: shadowrun_tags_loaded_table.
+	It is not cleared here: this runs after a map's tags may have loaded) */
 	shadowrun_magic_initialize_for_new_map();
 	/* port: the cable's, of a unit that outlives a map (shadowrun_cable.c) */
 	shadowrun_cable_initialize_for_new_map();
