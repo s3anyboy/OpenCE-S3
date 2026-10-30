@@ -30,11 +30,10 @@ whose player biped names none (recomp.map) sells by (shadowrun_units.c,
 shadowrun_unit_definition_for_shopping) */
 #define SHADOWRUN_GENERIC_UNIT_DEFINITION "shadowrunstuff\\generic_unit"
 
-/* port: whether a map's group word is `group`'s. A map stores a group as the
-bytes of its name, which this build reads as a word of the four, one way or
-the other ('srud' is 0x64757273 from its first byte or 0x73727564 from its
-last); a map of another build need not be this build's way (recomp's holds
-'scnr' as 0x73636e72). Either is the group (shadowrun_units.c,
+/* port: whether a map's group word is `group`'s. A map holds a group as this
+build's constants are ('scnr' is 0x73636e72: tag_to_string swaps four bytes
+to print "scnr"), so the word is the group's; the other order is accepted too,
+for a map whose tool stored it otherwise (shadowrun_units.c,
 shadowrun_cache_tag_groups_normalize) */
 #define SHADOWRUN_GROUP_TAG_IS(stored, group) \
 	((unsigned long)(stored) == (unsigned long)(group) || \
