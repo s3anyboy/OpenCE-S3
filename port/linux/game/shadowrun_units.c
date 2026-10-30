@@ -139,6 +139,31 @@ void shadowrun_tags_loaded(
 		given each tag's the way round this build's are, which the group's
 		schema then names, before anything asks a tag its group by */
 		shadowrun_cache_tag_groups_normalize();
+		/* port: what the loader gave it, before anything walks it: the tags'
+		count (the header's), and the first tag's group, as this build reads
+		it and as the map holds it. A table of another count, or one whose
+		first group is none of this build's, is named here rather than told
+		by the menu's failure to find an srud */
+		{
+			/* cache_files.c's (menu_tags.c declares it as this) */
+			void *cache_files_tag_instances(long *count);
+			struct tag_instance_prefix
+			{
+				long group_tag;
+			};
+			long count = 0;
+			struct tag_instance_prefix const *first = cache_files_tag_instances(&count);
+
+			if (first && count > 0)
+			{
+				console_printf(FALSE, "shadowrun: %ld tags, the first of group %08lx",
+					count, (unsigned long)first->group_tag);
+			}
+			else
+			{
+				console_printf(FALSE, "shadowrun: no tag table to walk");
+			}
+		}
 		/* each biped's srud, in what the validator does not check */
 		tag_iterator_new(&iterator, BIPED_DEFINITION_TAG);
 		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
