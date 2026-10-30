@@ -1616,9 +1616,13 @@ long scenario_tags_load(
 			}
 			tags_header_register_vertex_and_index_buffers(cache_file_globals.tag_header);
 			cache_file_globals.tags_loaded = TRUE;
-			/* port: a Shadowrun prototype map plays its own game (port/linux/game/shadowrun_units.c) */
-			shadowrun_tags_loaded(cache_file_other_build &&
-				shadowrun_cache_tag_data_any((uint32_t)(unsigned long)cache_file_tag_data));
+			/* port: a Shadowrun prototype map plays its own game (port/linux/game/shadowrun_units.c). The
+			map's own tag table is given it here, as the menus' tags replace the
+			game's table later (menu_tags.c), and Shadowrun's tags are the map's */
+			shadowrun_tags_loaded_table(
+				cache_file_other_build && shadowrun_cache_tag_data_any((uint32_t)(unsigned long)cache_file_tag_data),
+				cache_file_globals.tag_header->tag_instances,
+				cache_file_globals.tag_header->tag_count);
 			/* port: a PAL map played as the NTSC maps are (port/linux/game/pal_tags.c) */
 			{
 				extern void pal_tags_loaded(char const *build);

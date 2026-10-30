@@ -29,6 +29,12 @@ void shadowrun_initialize_for_new_map(
 map's (cache_files.c) */
 void shadowrun_tags_loaded(
 	boolean shadowrun);
+/* port: the same, with the map's own tag table, which Shadowrun keeps (the
+menus' tags replace the game's table later: cache_files.c, menu_tags.c) */
+void shadowrun_tags_loaded_table(
+	boolean shadowrun,
+	void *tag_instances,
+	long tag_count);
 
 /* whether the map loaded is the Shadowrun prototype's */
 boolean shadowrun_map_loaded(

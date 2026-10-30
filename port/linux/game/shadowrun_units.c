@@ -138,6 +138,21 @@ void shadowrun_initialize_for_new_map(
 	return;
 }
 
+/* port: the map's tags loaded, with the map's own table (cache_files.c, which
+has just set it): kept, as the menus' tags replace the game's table later
+(menu_tags.c), and Shadowrun's tags are the map's */
+void shadowrun_tags_loaded_table(
+	boolean shadowrun,
+	void *tag_instances,
+	long tag_count)
+{
+	shadowrun_globals.map_instances = tag_instances;
+	shadowrun_globals.map_instance_count = tag_instances ? tag_count : 0;
+	shadowrun_tags_loaded(shadowrun);
+
+	return;
+}
+
 void shadowrun_tags_loaded(
 	boolean shadowrun)
 {
@@ -147,15 +162,6 @@ void shadowrun_tags_loaded(
 		struct tag_iterator iterator;
 		long tag_index;
 		long corrected = 0;
-
-		/* port: the map's tag table, which the menus' (menu_tags.c) does not
-		replace for Shadowrun: it is taken now, before they are added */
-		{
-			void *cache_files_tag_instances(long *count);
-
-			shadowrun_globals.map_instance_count = 0;
-			shadowrun_globals.map_instances = cache_files_tag_instances(&shadowrun_globals.map_instance_count);
-		}
 
 		/* port: the map's group tags as this build reads one. A map stores a
 		group as the bytes of its name ('srud' is s r u d, 0x64757273 read
