@@ -30,17 +30,22 @@ whose player biped names none (recomp.map) sells by (shadowrun_units.c,
 shadowrun_unit_definition_for_shopping) */
 #define SHADOWRUN_GENERIC_UNIT_DEFINITION "shadowrunstuff\\generic_unit"
 
-/* port: whether a map's group word is `group`'s. A map holds a group as this
-build's constants are ('scnr' is 0x73636e72: tag_to_string swaps four bytes
-to print "scnr"), so the word is the group's; the other order is accepted too,
-for a map whose tool stored it otherwise (shadowrun_units.c,
-shadowrun_cache_tag_groups_normalize) */
+/* port: a group tag word with its four bytes reversed. A map stores a group
+as the bytes of its name, which way round depends on the tool that made it
+and on how a multi-character constant is packed: recomp.map's 'scnr' is
+0x73636e72 (bytes 'rncs'), this build's 'scnr' is the other order. Every byte
+is taken out and put back in its place, so no bit is lost or doubled */
+#define SHADOWRUN_GROUP_TAG_SWAP(word) \
+	(((unsigned long)(word) & 0x000000FFUL) << 24 | \
+		((unsigned long)(word) & 0x0000FF00UL) << 8 | \
+		((unsigned long)(word) & 0x00FF0000UL) >> 8 | \
+		((unsigned long)(word) & 0xFF000000UL) >> 24)
+
+/* port: whether a map's group word is `group`'s, either way round (a map's
+tools and this build may pack a group's name in opposite orders: above) */
 #define SHADOWRUN_GROUP_TAG_IS(stored, group) \
 	((unsigned long)(stored) == (unsigned long)(group) || \
-		(unsigned long)(stored) == ((((unsigned long)(group) & 0xFF) << 24) | \
-			(((unsigned long)(group) & 0xFF00) << 8) | \
-			(((unsigned long)(group) >> 8) & 0xFF00) | \
-			(((unsigned long)(group) >> 24) & 0xFF)))
+		(unsigned long)(stored) == SHADOWRUN_GROUP_TAG_SWAP(group))
 
 enum
 {
