@@ -52,6 +52,11 @@ The level's encounters are all placed by its scripts, as the player walks
 into their trigger volumes. Its scripts give the player magic with
 Shadowrun's own functions (see [Scripts](#scripts) and [Magic](#magic)).
 
+`recomp.map` is another of the prototype's maps (`levels\test\hangemhigh\recomp`,
+its header naming the same build), made with a larger game state: it links
+its tags to `0x806D0000`. It loads and plays, the buy menu included, as
+missionlet does.
+
 ## What differs, and what is done
 
 ### Where its tags are linked
@@ -60,9 +65,19 @@ An Xbox cache's tag data is linked to the address the game reads it to: the
 first word of its tag header is the address of the tag table, which follows
 the 0x24-byte header. This build's maps link it to the base of the tag cache,
 `0x803A6000`. The prototype's game state is larger, so its tag cache starts
-higher, and its maps link their tag data to `0x8069E000`. That is still
-inside this build's tag cache (`0x803A6000` to `0x819A6000`): missionlet's
-16 MB of tag data ends at `0x8169C834`.
+higher, and its maps link their tag data higher: missionlet's and `ui.map`'s
+to `0x8069E000`, the later multiplayer map `recomp.map`'s to `0x806D0000`
+(where a larger game state ends). That is still inside this build's tag cache
+(`0x803A6000` to `0x819A6000`): missionlet's 16 MB of tag data ends at
+`0x8169C834`.
+
+A map is Shadowrun's, and converted as such, when its tags are linked inside
+the tag cache and its tag header holds the signature `tags` in the order its
+group tags are written (`sgat` read as a group tag). This build's maps, and
+every other Xbox map, are linked to `0x803A6000`, and are laid out as they
+always were. Where inside the tag cache the tags are is the map's own
+business: nothing goes by `0x8069E000` alone, so a map made with a larger
+game state, such as `recomp.map`, loads and converts as missionlet does.
 
 So the tags are read to the tag cache's base, as always, and then moved
 where they are linked (`cache_files.c`, `cache_files_tags_place`;
@@ -309,9 +324,9 @@ Measured on `missionlet.map` (compressed, as shipped, and decompressed) and
 the prototype's `ui.map`:
 
 - `tools/map_validate` (built by `ninja linux`) loads each as the game
-  loads it. Their tags are linked to `8069e000`; missionlet has 7
-  corrections and the `ui.map` 3, as listed above. Missionlet's BSP loads to
-  `8169d800` and the `ui.map`'s to `80833800`.
+  loads it. Their tags are linked to `8069e000` (recomp's to `806d0000`);
+  missionlet has 7 corrections and the `ui.map` 3, as listed above.
+  Missionlet's BSP loads to `8169d800` and the `ui.map`'s to `80833800`.
 - `map_validate --fuzz` on them: 1000 runs of the `ui.map`, 3000 of the
   decompressed missionlet and 500 of the compressed one, with no crash or
   hang, and every map let through clean when checked again.

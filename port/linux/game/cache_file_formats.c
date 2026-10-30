@@ -4012,6 +4012,30 @@ enum cache_file_status xbox_cache_structure_bsp_address(
 /* an actor definition's type (ai/actor_definitions.h) */
 #define ACTOR_DEFINITION_TYPE_OFFSET 0x14
 
+/* port: a Shadowrun prototype map's tag data is linked inside the tag cache
+(where its own build's game state ended), and there its tag header's
+signature has the byte order the map's group tags are written in: read as a
+group tag it is TAG_INDEX_SIGNATURE, or the same bytes the other way. This
+build's maps are linked to the tag cache's base, as every Xbox map was */
+int shadowrun_cache_tag_data_group_tag(
+	uint32_t tag_data_address,
+	uint32_t group_tag)
+{
+	uint32_t bytes[1];
+
+	if (tag_data_address < XBOX_TAG_CACHE_ADDRESS ||
+		tag_data_address - XBOX_TAG_CACHE_ADDRESS >= XBOX_TAG_CACHE_BYTES)
+	{
+		return 0;
+	}
+	/* (read at its address, as every unaligned field is: memcpy, never a
+	pointer to an int, which the compiler may assume is aligned) */
+	memcpy(bytes, (uint8_t const *)(unsigned long)(tag_data_address + XBOX_TAG_HEADER_SIGNATURE_OFFSET),
+		sizeof(bytes));
+
+	return read_u32((uint8_t const *)bytes) == group_tag;
+}
+
 /* this build's actor type (ai/actor_types.h) for each of Shadowrun's, by
 what its actors do: the spirit dog charges with its teeth as the flood's
 combat forms do, the ninja dodges and closes in as an elite does, and the
@@ -4062,8 +4086,17 @@ int shadowrun_cache_header_campaign(
 int shadowrun_cache_tag_data(
 	uint32_t tag_data_address)
 {
-	return tag_data_address == SHADOWRUN_TAG_DATA_ADDRESS;
+	return shadowrun_cache_tag_data_group_tag(tag_data_address, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG);
 }
+
+int shadowrun_cache_tag_data_any(
+	uint32_t tag_data_address)
+{
+	return shadowrun_cache_tag_data_group_tag(tag_data_address, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG) ||
+		shadowrun_cache_tag_data_group_tag(tag_data_address, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED);
+}
+
+
 
 enum cache_file_status shadowrun_cache_convert(
 	uint8_t *tag_data,

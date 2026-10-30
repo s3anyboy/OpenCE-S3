@@ -561,16 +561,24 @@ enum cache_file_status xbox_cache_structure_bsp_address(
 
 /* ---------- the Shadowrun prototype's caches
 
-The Shadowrun prototype's maps are Xbox caches linked to 0x8069E000 (above),
-of the engine as it was in December 2001 with Shadowrun's additions. The
-tags this build knows are laid out as its own; Shadowrun's own groups
-(magic and tech effect data, its weapons, units and actors, the buy menu)
-are left as they are, and nothing reads them. What it adds to enums this
-build reads is changed before the tags are checked, where this build has a
-near equivalent (docs/shadowrun_caches.md); the rest the tag validator
-corrects as it would any value past an enum's end. */
+The Shadowrun prototype's maps are Xbox caches of the engine as it was in
+December 2001 with Shadowrun's additions, linked inside the tag cache, each
+where the game state of the build it was made with ended: the prototype's
+missionlet and ui.map to 0x8069E000 (above), the later multiplayer map
+recomp to 0x806D0000. The tags this build knows are laid out as its own;
+Shadowrun's own groups (magic and tech effect data, its weapons, units and
+actors, the buy menu) are left as they are, and nothing reads them. What it
+adds to enums this build reads is changed before the tags are checked, where
+this build has a near equivalent (docs/shadowrun_caches.md); the rest the tag
+validator corrects as it would any value past an enum's end. */
 
+/* the prototype's (missionlet's and ui.map's) */
 #define SHADOWRUN_TAG_DATA_ADDRESS 0x8069E000UL
+/* the tag header's signature, "tags", read as a group tag, as a map's group
+tags are written: one of these two is what a Shadowrun map's tag header holds
+(both missionlet's and recomp's hold "sgat") */
+#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG 0x73676174UL
+#define SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED 0x67617473UL
 /* port: the builds its cache headers name, any of which the menus list and the
 loader converts: missionlet's (01.12.07.0132), the Mar 22 2004 prototype's
 (02.03.22.0274), and the Mar 15 2004 one's (02.03.15.0268, its solo maps) */
@@ -589,8 +597,24 @@ struct shadowrun_conversion_report
 };
 
 /* Whether a cache's tag data, linked to `tag_data_address`
-(xbox_cache_tag_data_address), is the Shadowrun prototype's. */
+(xbox_cache_tag_data_address), is a Shadowrun prototype map's: linked inside
+the tag cache, where its own build's game state ended, and holding the tag
+header's signature in the byte order `group_tag` is read in. This build's
+maps are linked to the tag cache's base, as every Xbox map was, and are not:
+they are laid out as they always were. */
+int shadowrun_cache_tag_data_group_tag(
+	uint32_t tag_data_address,
+	uint32_t group_tag);
+/* Whether a cache's tag data, linked to `tag_data_address`, is the Shadowrun
+prototype's (missionlet's or ui.map's): its tags are linked to
+SHADOWRUN_TAG_DATA_ADDRESS. A map made with a larger game state links them
+elsewhere (recomp to 0x806D0000), and is asked by
+shadowrun_cache_tag_data_any. */
 int shadowrun_cache_tag_data(
+	uint32_t tag_data_address);
+/* Whether a cache's tag data, linked to `tag_data_address`, is a Shadowrun
+prototype map's of any of its builds' */
+int shadowrun_cache_tag_data_any(
 	uint32_t tag_data_address);
 
 /* Whether the cache header at `header` (`header_bytes` of it, a file's

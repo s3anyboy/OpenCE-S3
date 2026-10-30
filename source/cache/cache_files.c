@@ -418,7 +418,8 @@ static unsigned long cache_file_tag_cache_room(
 (port/linux/game/cache_file_formats.h, xbox_cache_tag_data_address): this
 build's maps link them there; a map of a build of the engine with a larger
 game state links them higher, and they are moved there (the Shadowrun
-prototype's, to 0x8069E000, whose tags are also converted for this build:
+prototype's missionlet to 0x8069E000 and its later multiplayer map recomp to
+0x806D0000, whose tags are also converted for this build:
 shadowrun_cache_convert). NULL if they are linked outside the tag cache */
 static byte *cache_files_tags_place(
 	byte *tag_cache,
@@ -441,7 +442,11 @@ static byte *cache_files_tags_place(
 		csmemset(tag_cache, 0xCD, (long)MIN(tag_data - tag_cache, tag_data_size));
 		error(_error_silent, "'%s' is a map of another build of the engine: its tags are linked to %08lx",
 			scenario_name, (unsigned long)linked_address);
-		if (shadowrun_cache_tag_data(linked_address))
+		/* port: the Shadowrun map's, whichever of its builds' the map is: each
+		links its tags to where its own game state ends (missionlet's to
+		0x8069E000, recomp's to 0x806D0000), where the tag header's signature,
+		"tags", read as a group tag, has its bytes one way or the other */
+		if (shadowrun_cache_tag_data_any(linked_address))
 		{
 			struct shadowrun_conversion_report conversion;
 
@@ -451,8 +456,8 @@ static byte *cache_files_tags_place(
 				error(_error_silent, "the cache file '%s' is damaged: its tag header is wrong", scenario_name);
 				return NULL;
 			}
-			error(_error_silent, "'%s' is a Shadowrun prototype map: %ld of its actor definitions were given this build's actor types",
-				scenario_name, (long)conversion.actors_retyped);
+			error(_error_silent, "'%s' is a Shadowrun prototype map: its tags are linked to %08lx, and %ld of its actor definitions were given this build's actor types",
+				scenario_name, (unsigned long)linked_address, (long)conversion.actors_retyped);
 		}
 	}
 
@@ -1574,7 +1579,7 @@ long scenario_tags_load(
 			cache_file_globals.tags_loaded = TRUE;
 			/* port: a Shadowrun prototype map plays its own game (port/linux/game/shadowrun_units.c) */
 			shadowrun_tags_loaded(cache_file_other_build &&
-				shadowrun_cache_tag_data((uint32_t)(unsigned long)cache_file_tag_data));
+			shadowrun_cache_tag_data_any((uint32_t)(unsigned long)cache_file_tag_data));
 			/* port: a PAL map played as the NTSC maps are (port/linux/game/pal_tags.c) */
 			{
 				extern void pal_tags_loaded(char const *build);

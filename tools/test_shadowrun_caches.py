@@ -12,8 +12,9 @@ an undefined operation on malformed input fails the test that caused it.
 
 When the Shadowrun prototype's maps are present (HALO_SHADOWRUN_MAPS, a folder
 of them, and build/linux/map_validate built), test_real_maps checks each as
-the game loads it: its tags linked to 0x8069E000, its structure BSPs moved
-and their pointers with them, and nothing refused.
+the game loads it: its tags linked where it says (0x8069E000, or
+recomp's 0x806D0000), its structure BSPs moved and their pointers with them,
+and nothing refused.
 """
 import os
 from pathlib import Path
@@ -43,9 +44,27 @@ DRIVER = r"""
 #include "cache_file_formats.h"
 
 /* usage: driver address TAG_DATA_FILE CACHE_ADDRESS CACHE_BYTES
+          driver shadowrun TAG_DATA_FILE ADDRESS (any of Shadowrun's builds')
           driver bsp LINKED READ FREE_ADDRESS FREE_BYTES
           driver convert TAG_DATA_FILE ADDRESS (writes the converted data back)
           driver header HEADER_FILE */
+/* a copy of the size bytes at bytes, at the first address in page whose low
+16 bits are linked_address's */
+static unsigned char *aligned_page(unsigned char *page, unsigned char const *bytes, unsigned long size,
+	unsigned long linked_address)
+{
+	unsigned char *at = page + ((0x10000UL - ((unsigned long)page & 0xFFFF)) & 0xFFFF);
+
+	at += linked_address & 0xFFFF;
+	if ((unsigned long)at > 0xFFFFFFFFUL - size)
+		exit(2);
+
+	if (size < 4)
+		exit(2);
+	memcpy(at, bytes, size);
+	return at;
+}
+
 static unsigned char *slurp(char const *path, unsigned long *size)
 {
 	FILE *file = fopen(path, "rb");
@@ -75,6 +94,24 @@ int main(int argc, char **argv)
 		status = xbox_cache_tag_data_address(bytes, (uint32_t)size, (uint32_t)strtoul(argv[3], NULL, 0),
 			(uint32_t)strtoul(argv[4], NULL, 0), &result);
 		free(bytes);
+	}
+	else if (argc == 4 && !strcmp(argv[1], "shadowrun"))
+	{
+		unsigned long size;
+		unsigned long linked = strtoul(argv[3], NULL, 0);
+		unsigned char *bytes = slurp(argv[2], &size);
+		unsigned char *page = calloc(1, size + 0x20000);
+		unsigned char *at;
+
+		/* (the format module reads the tag header at the address it is given:
+		the test's data is copied where the map says it is linked) */
+		if (!page)
+			exit(2);
+		at = aligned_page(page, bytes, size, linked);
+		result = (uint32_t)shadowrun_cache_tag_data_any((uint32_t)(unsigned long)at);
+		free(page);
+		free(bytes);
+		status = _cache_file_status_ok;
 	}
 	else if (argc == 6 && !strcmp(argv[1], "bsp"))
 	{
@@ -186,6 +223,35 @@ def test_this_builds_maps_are_linked_to_the_tag_caches_base(driver):
 def test_shadowrun_maps_are_linked_higher_in_the_tag_cache(driver):
     path = write(driver, "shadowrun.bin", tag_data(SHADOWRUN_TAG_DATA))
     assert driver("address", path, XBOX_TAG_CACHE, XBOX_TAG_CACHE_BYTES) == ("ok", SHADOWRUN_TAG_DATA)
+
+
+RECOMP_TAG_DATA = 0x806D0000
+
+
+def test_a_map_linked_higher_still_is(driver):
+    # recomp.map: the same tags, linked where a larger game state ends
+    path = write(driver, "recomp.bin", tag_data(RECOMP_TAG_DATA))
+    assert driver("address", path, XBOX_TAG_CACHE, XBOX_TAG_CACHE_BYTES) == ("ok", RECOMP_TAG_DATA)
+
+
+# ---------- which maps are Shadowrun's
+
+
+def test_the_prototypes_maps_are_shadowruns(driver):
+    for address in (SHADOWRUN_TAG_DATA, RECOMP_TAG_DATA):
+        path = write(driver, "shadowrun.bin", tag_data(address))
+        assert driver("shadowrun", path, address) == ("ok", 1), hex(address)
+
+
+def test_this_builds_maps_are_not_shadowruns(driver):
+    # (the tag cache's base, where every Xbox map of this build's is linked)
+    path = write(driver, "retail.bin", tag_data(XBOX_TAG_CACHE))
+    assert driver("shadowrun", path, XBOX_TAG_CACHE) == ("ok", 0)
+
+
+def test_tag_data_linked_outside_the_tag_cache_is_not_shadowruns(driver):
+    path = write(driver, "outside.bin", tag_data(SHADOWRUN_TAG_DATA))
+    assert driver("shadowrun", path, 0x80000000) == ("ok", 0)
 
 
 @pytest.mark.parametrize("table", [
@@ -350,7 +416,10 @@ def test_real_maps(path):
         pytest.skip("build/linux/map_validate is not built (ninja linux)")
     completed = subprocess.run([str(validator), str(path)], capture_output=True, text=True)
     assert completed.returncode == 0, completed.stdout
-    assert "its tag data is linked to 8069e000" in completed.stdout
+    # (missionlet's and ui.map's to 8069e000, recomp's to 806d0000)
+    assert any(f"its tag data is linked to {address}" in completed.stdout
+               for address in ("8069e000", "806d0000")), completed.stdout
+    assert "a Shadowrun prototype map" in completed.stdout, completed.stdout
     assert "cannot be moved" not in completed.stdout
     # (what the schema names is every pointer of a bsp: what still looks
     # like one where it was linked is a number or two among its vertices)

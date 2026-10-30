@@ -290,9 +290,9 @@ static int map_check(struct cache_file_header const *header, unsigned char const
 	if (tag_data != tag_cache && !quiet)
 		printf("%s: its tag data is linked to %08lx\n", name, (unsigned long)linked_address);
 	memcpy(tag_data, bytes + header->tag_data_offset, header->tag_data_size);
-	/* (the Shadowrun prototype's, converted as the game converts them,
-	cache_files.c) */
-	if (shadowrun_cache_tag_data(linked_address))
+	/* (a Shadowrun prototype map's, whichever of its builds' the map is,
+	converted as the game converts them, cache_files.c) */
+	if (shadowrun_cache_tag_data_any(linked_address))
 	{
 		struct shadowrun_conversion_report conversion;
 
