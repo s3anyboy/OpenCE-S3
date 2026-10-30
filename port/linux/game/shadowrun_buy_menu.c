@@ -415,6 +415,13 @@ boolean shadowrun_buy_menu_input(
 		local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
 	{
 		state = &shadowrun_shop_states[local_player_index];
+		/* port: what the controls gave it this tick, before anything else: a
+		menu that never opens is told from one that never gets Back */
+		if (toggle)
+		{
+			console_printf(FALSE, "buy menu: toggle %d, buy %d, back %d, magazine %d, open %d",
+				toggle, buy, back, magazine, state->open);
+		}
 		/* port: the menu opens on the prototype's maps for a player whose unit
 		has a Shadowrun unit definition (srud), its own or, where the map gives
 		the player none (recomp.map), the one the map sells by
