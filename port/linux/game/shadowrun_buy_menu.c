@@ -436,8 +436,7 @@ boolean shadowrun_buy_menu_input(
 				console_printf(FALSE, "buy menu: map_loaded %d, unit %ld, own srud %d (index %d), shopping srud %d",
 					shadowrun_map_loaded(), debug_unit_index,
 					debug_unit_index != NONE && shadowrun_unit_definition_get(debug_unit_index) != NULL,
-					debug_unit_index != NONE && biped_try_and_get(debug_unit_index) ?
-						shadowrun_unit_definition_index(debug_unit_index) : NONE,
+					shadowrun_unit_definition_index(debug_unit_index),
 					debug_definition != NULL);
 				/* port: and the input this tick's other controls */
 				console_printf(FALSE, "buy menu: cinematic %d, open %d, buy %d, back %d, magazine %d",
