@@ -32,7 +32,7 @@ grenade, which this build has no grenade type for).
 #include "items/weapons.h"
 #include "objects/objects.h"
 #include "rasterizer/rasterizer.h"
-#include "tag_files/tag_groups.h" /* port: the map's buym tag, where its srud is not the player's */
+#include "cache/cache_files.h" /* port: the map's buym tag, where its srud is not the player's */
 #include "render/render.h"
 #include "sound/game_sound.h"
 #include "text/draw_string.h"
