@@ -75,6 +75,12 @@ static struct tag_reference *shadowrun_biped_unit_definition_reference(
 	struct biped_definition *definition);
 static void shadowrun_cache_tag_groups_normalize(
 	void);
+static struct shadowrun_tag_instance const *shadowrun_tag_instances(
+	long *count);
+static char const *shadowrun_tag_name(
+	struct shadowrun_tag_instance const *instances,
+	long count,
+	long index);
 static struct tag_reference *shadowrun_weapon_data_reference(
 	struct weapon_definition *definition);
 static void shadowrun_unit_mana_update(
@@ -339,18 +345,23 @@ shadowrun_buy_menu.c, its port: notes). "" for none */
 boolean shadowrun_unit_definition_matches(
 	char const *name)
 {
-	struct tag_iterator iterator;
-	long tag_index;
+	long count = 0;
+	struct shadowrun_tag_instance const *instances = shadowrun_tag_instances(&count);
+	long index;
 	boolean result = FALSE;
 
-	if (shadowrun_globals.map_loaded)
+	/* port: the walk is this build's own: tag_iterator_next tests a group as
+	this build packs one, and a map of another build need not (recomp's groups
+	are the other way round: shadowrun_definitions.h, SHADOWRUN_GROUP_TAG_IS) */
+	if (shadowrun_globals.map_loaded && instances)
 	{
-		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
-		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		for (index = 0; index < count; index++)
 		{
-			char const *tag_name = tag_get_name(tag_index);
-
-			if (tag_name && !csstrcmp(tag_name, name))
+			if (!SHADOWRUN_GROUP_TAG_IS(instances[index].group_tag, SHADOWRUN_UNIT_DEFINITION_TAG))
+			{
+				continue;
+			}
+			if (instances[index].name && !csstrcmp(shadowrun_tag_name(instances, count, index), name))
 			{
 				result = TRUE;
 				break;
@@ -365,68 +376,67 @@ char const *shadowrun_unit_definition_first_name(
 	void)
 {
 	static char result[256];
-	struct tag_iterator iterator;
-	long tag_index;
-	char group_tag[5];
+	long count = 0;
+	struct shadowrun_tag_instance const *instances = shadowrun_tag_instances(&count);
+	long index;
+	long srud_count = 0;
+	long first = NONE;
 
-	/* port: the name is written where it stays, and says what the walk asked
-	for: the name of the group tag as a map holds it, which is what it was
-	given (0x64757273 is "srud"). A group tag this build read the other way
-	round would be none of the map's tags, and the menu would find no srud */
+	/* port: the name is written where it stays. The walk is this build's own
+	(SHADOWRUN_GROUP_TAG_IS, for a map whose groups are the other way round) */
 	result[0] = 0;
-	csstrncpy(group_tag, "srud", sizeof(group_tag) - 1);
-	group_tag[sizeof(group_tag) - 1] = 0;
-	if (shadowrun_globals.map_loaded)
+	if (shadowrun_globals.map_loaded && instances)
 	{
-		long srud_count = 0;
-
-		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
-		while (tag_iterator_next(&iterator) != NONE)
+		for (index = 0; index < count; index++)
 		{
+			if (!SHADOWRUN_GROUP_TAG_IS(instances[index].group_tag, SHADOWRUN_UNIT_DEFINITION_TAG))
+			{
+				continue;
+			}
 			srud_count++;
-		}
-		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
-		if ((tag_index = tag_iterator_next(&iterator)) != NONE && tag_get_name(tag_index))
-		{
-			snprintf(result, sizeof(result), "%s (%.4s, %ld tags)",
-				tag_get_name(tag_index), group_tag, srud_count);
-		}
-		else if (srud_count == 0)
-		{
-			snprintf(result, sizeof(result), "none (%.4s walked)", group_tag);
-		}
-		/* port: what the walk saw, when it saw no srud: the loaded tags' table
-		and the groups of its first tags */
-		if (srud_count == 0)
-		{
-			/* port: a tag instance is a group tag, two parents, an index, a
-			name and a data address (cache_files.c's); the loaded tags' table is
-			asked for as menu_tags.c asks */
-			void *cache_files_tag_instances(long *count);
-			struct tag_instance_prefix
+			if (first == NONE)
 			{
-				long group_tag;
-				long parent_group_tags[2];
-			};
-			long total = 0;
-			struct tag_instance_prefix const *instances = cache_files_tag_instances(&total);
-
-			if (instances && total >= 4)
-			{
-				console_printf(FALSE, "buy menu: %ld tags, first groups %08lx %08lx %08lx %08lx (%s)",
-					total, (unsigned long)instances[0].group_tag, (unsigned long)instances[1].group_tag,
-					(unsigned long)instances[2].group_tag, (unsigned long)instances[3].group_tag,
-					(unsigned long)instances[0].group_tag == (unsigned long)SHADOWRUN_UNIT_DEFINITION_TAG ?
-						"the first is an srud" : "none of them is an srud");
+				first = index;
 			}
-			else
-			{
-				console_printf(FALSE, "buy menu: no tag table to walk");
-			}
+		}
+		if (first != NONE)
+		{
+			snprintf(result, sizeof(result), "%s (srud, %ld tags)",
+				shadowrun_tag_name(instances, count, first), srud_count);
+		}
+		else
+		{
+			snprintf(result, sizeof(result), "none (srud walked, %ld tags of "
+				"groups %08lx %08lx)", count, (unsigned long)instances[0].group_tag,
+				count > 1 ? (unsigned long)instances[1].group_tag : 0UL);
 		}
 	}
 
 	return result;
+}
+
+/* port: the map's tag table, as the loader gave it (cache_files.c, through
+its own accessor: a tag instance is a group tag, two parents, an index, a
+name and a data address), and its tags' count; NULL for none. The loaded
+table is the one the game walks, which this build's tag iterator cannot
+match a group of another build in (SHADOWRUN_GROUP_TAG_IS) */
+static struct shadowrun_tag_instance const *shadowrun_tag_instances(
+	long *count)
+{
+	void *cache_files_tag_instances(long *count);
+
+	*count = 0;
+	return cache_files_tag_instances(count);
+}
+
+/* port: a tag's name, out of its instance */
+static char const *shadowrun_tag_name(
+	struct shadowrun_tag_instance const *instances,
+	long count,
+	long index)
+{
+	(void)count;
+	return instances[index].name ? instances[index].name : "";
 }
 
 /* port: the srud a map sells by for a player whose unit names none (recomp.map,
@@ -437,31 +447,40 @@ it alone, or without it, gets the map's first srud. NULL when the map has none
 struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 	void)
 {
-	struct tag_iterator iterator;
-	long tag_index;
-	long first_index = NONE;
+	long count = 0;
+	struct shadowrun_tag_instance const *instances = shadowrun_tag_instances(&count);
+	long index;
+	long first = NONE;
+	long generic = NONE;
 	struct shadowrun_unit_definition *result = NULL;
 
-	if (shadowrun_globals.map_loaded)
+	if (shadowrun_globals.map_loaded && instances)
 	{
-		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
-		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		for (index = 0; index < count; index++)
 		{
-			char const *tag_name = tag_get_name(tag_index);
+			const char *tag_name;
 
-			if (first_index == NONE)
+			if (!SHADOWRUN_GROUP_TAG_IS(instances[index].group_tag, SHADOWRUN_UNIT_DEFINITION_TAG))
 			{
-				first_index = tag_index;
+				continue;
 			}
+			if (first == NONE)
+			{
+				first = index;
+			}
+			tag_name = shadowrun_tag_name(instances, count, index);
 			if (tag_name && !csstrcmp(tag_name, SHADOWRUN_GENERIC_UNIT_DEFINITION))
 			{
-				first_index = tag_index;
+				generic = index;
 				break;
 			}
 		}
-		if (first_index != NONE)
+		if (generic != NONE || first != NONE)
 		{
-			result = tag_get(SHADOWRUN_UNIT_DEFINITION_TAG, first_index);
+			/* port: the tag's data as the game would give it, by the index the
+			table gives it (this build's tag_get compares groups as it packs
+			them: a map's other way round is asked for through the tag's own) */
+			result = (struct shadowrun_unit_definition *)instances[generic != NONE ? generic : first].base_address;
 		}
 	}
 
@@ -1402,19 +1421,8 @@ everything else are left as they are */
 static void shadowrun_cache_tag_groups_normalize(
 	void)
 {
-	/* cache_files.c's (menu_tags.c declares it as this) */
-	void *cache_files_tag_instances(long *count);
-	struct cache_file_tag_instance
-	{
-		long group_tag;
-		long parent_group_tags[2];
-		long tag_index;
-		char *name;
-		void *base_address;
-		unsigned long unused[2];
-	};
 	long count = 0;
-	struct cache_file_tag_instance *instances = cache_files_tag_instances(&count);
+	struct shadowrun_tag_instance *instances = (struct shadowrun_tag_instance *)shadowrun_tag_instances(&count);
 	long index;
 
 	if (!instances)

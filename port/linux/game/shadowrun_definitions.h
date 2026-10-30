@@ -30,6 +30,19 @@ whose player biped names none (recomp.map) sells by (shadowrun_units.c,
 shadowrun_unit_definition_for_shopping) */
 #define SHADOWRUN_GENERIC_UNIT_DEFINITION "shadowrunstuff\\generic_unit"
 
+/* port: whether a map's group word is `group`'s. A map stores a group as the
+bytes of its name, which this build reads as a word of the four, one way or
+the other ('srud' is 0x64757273 from its first byte or 0x73727564 from its
+last); a map of another build need not be this build's way (recomp's holds
+'scnr' as 0x73636e72). Either is the group (shadowrun_units.c,
+shadowrun_cache_tag_groups_normalize) */
+#define SHADOWRUN_GROUP_TAG_IS(stored, group) \
+	((unsigned long)(stored) == (unsigned long)(group) || \
+		(unsigned long)(stored) == ((((unsigned long)(group) & 0xFF) << 24) | \
+			(((unsigned long)(group) & 0xFF00) << 8) | \
+			(((unsigned long)(group) >> 8) & 0xFF00) | \
+			(((unsigned long)(group) >> 24) & 0xFF)))
+
 enum
 {
 	SHADOWRUN_UNIT_DEFINITION_TAG = 'srud',
@@ -43,6 +56,9 @@ enum
 
 	/* the races a unit definition has (and the levels of each spell) */
 	MAXIMUM_SHADOWRUN_RACES = 5,
+
+	/* (a marker past any index, so that the group tags stay longs) */
+	SHADOWRUN_GROUP_TAG_LONG = 0x7FFFFFFF,
 
 	/* the spells, as the executable numbers them (its names, at 0x4865e8) */
 	_shadowrun_spell_teleport = 0,

@@ -19,6 +19,22 @@ the biped's after those, from 0x101C), a player's in the player's datum.
 #include "shadowrun.h"
 #include "shadowrun_definitions.h"
 
+/* ---------- structures */
+
+/* port: a tag of the loaded map's table, as the loader gives it
+(cache_files.c: a group tag, two parents, an index, a name and a data address).
+The Shadowrun walks go by it, as a map's groups need not be this build's word
+(SHADOWRUN_GROUP_TAG_IS) */
+struct shadowrun_tag_instance
+{
+	long group_tag;
+	long parent_group_tags[2];
+	long tag_index;
+	char *name;
+	void *base_address;
+	unsigned long unused[2];
+};
+
 /* ---------- constants */
 
 /* port: the units a vision marks at once (shadowrun_tech.c) */
