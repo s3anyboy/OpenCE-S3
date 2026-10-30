@@ -10,7 +10,12 @@ weapons it sells and its sounds are the player's srud's and its buy menu's
 The executable opened it at the start of its own multiplayer games' rounds,
 and in a campaign showed the globals' loadouts instead, with nothing to open
 it. port: here the Back control opens and closes it on the prototype's maps,
-and it is the multiplayer one wherever it is opened. While it is open the
+and it is the multiplayer one wherever it is opened. A player's srud gives
+it its prices, its weapons and its sounds; where the map gives the player
+none (recomp.map: docs/shadowrun_caches.md), what it sells is the stock
+menu's, the first srud a map of the prototype's build has, or the
+prototype's prices where the map has none at all, and its buym's sounds the
+first the map has. While it is open the
 movement stick (or the d-pad) moves through it, the jump control buys, the melee control
 goes back a page (or closes it), and the action control buys a magazine of
 the weapon in hand; the player does nothing else. What is bought is the
@@ -19,6 +24,65 @@ buying machine's: a co-op client's purchases are not sent to the host.
 Tech is not played, so its items cannot be bought (nor the anti-magic
 grenade, which this build has no grenade type for).
 */
+
+/* port: the prices where the map gives the player no srud of its own (recomp.map):
+the prototype's. The prototype's srud, which it keeps for them, holds none in
+missionlet (0 is free), so these are what its menu's items are worth, in the
+srud's prices' order (the menu's items' index, and a magazine's of each
+weapon: shadowrun_shop_magazine_prices) */
+static long const shadowrun_shop_stock_prices[NUMBER_OF_SHADOWRUN_PRICES] =
+{
+	0,          /* 0:  (the srud's own, unused) */
+	0,          /* 1:  Teleport */
+	0,          /* 2:  Tree of Life */
+	0,          /* 3:  Summon Elemental */
+	0,          /* 4:  Strangle */
+	0,          /* 5:  Razorclaws */
+	0,          /* 6:  Enhanced Vision */
+	0,          /* 7:  Glider */
+	0,          /* 8 */
+	0,          /* 9:  Grenade */
+	0,          /* 10: Flechette Pistol */
+	0,          /* 11: Assault Rifle */
+	0,          /* 12: Sniper Rifle */
+	0,          /* 13: Mini Gun */
+	0,          /* 14: Rocket Launcher */
+	0,          /* 15: Shotgun */
+	0,          /* 16: Gust */
+	0,          /* 17: Smoke */
+	0,          /* 18: a Flechette Pistol's magazine */
+	0,          /* 19: an Assault Rifle's magazine */
+	0,          /* 20: a Sniper Rifle's magazine */
+	0,          /* 21: a Mini Gun's magazine */
+	0,          /* 22: a Rocket Launcher's magazine */
+	0,          /* 23: a Shotgun's magazine */
+	0,          /* 24: a Rifle's magazine */
+	0,          /* 25: Enhanced Vision's removal */
+	0,          /* 26: Glider's removal */
+	0,          /* 27 */
+	0,          /* 28: Anti-Magic Grenade */
+	0,          /* 29 */
+	0,          /* 30: Hologram */
+	0,          /* 31 */
+	0,          /* 32 */
+	0,          /* 33: Smartlink, Gecko, Reflexes */
+	0,          /* 34 */
+	0,          /* 35: Hologram's removal */
+	0,          /* 36 */
+	0,          /* 37 */
+	0,          /* 38: Smartlink's, Gecko's, Reflexes' removal */
+	0,          /* 39: Resurrection */
+	0,          /* 40: Katana */
+	0,          /* 41: Rifle */
+	0,          /* 42: a Rifle's magazine */
+	0,          /* 43 */
+	0,          /* 44 */
+	0,          /* 45 */
+	0,          /* 46: Grapple */
+	0,          /* 47: Grapple's removal */
+};
+
+
 
 /* ---------- headers */
 
@@ -32,7 +96,7 @@ grenade, which this build has no grenade type for).
 #include "items/weapons.h"
 #include "objects/objects.h"
 #include "rasterizer/rasterizer.h"
-#include "cache/cache_files.h" /* port: the map's buym tag, where its srud is not the player's */
+
 #include "render/render.h"
 #include "sound/game_sound.h"
 #include "text/draw_string.h"
@@ -254,16 +318,20 @@ static struct shadowrun_shop_state shadowrun_shop_states[MAXIMUM_NUMBER_OF_LOCAL
 
 static struct player_datum *shadowrun_shop_player(
 	short local_player_index);
-static struct shadowrun_buy_menu_definition *shadowrun_shop_buy_menu(
-	short local_player_index);
 static struct shadowrun_unit_definition *shadowrun_shop_unit_definition(
+	short local_player_index);
+static struct shadowrun_buy_menu_definition *shadowrun_shop_buy_menu(
 	short local_player_index);
 static void shadowrun_shop_sound(
 	short local_player_index,
 	short sound);
 static long shadowrun_shop_price(
+	short local_player_index,
 	struct shadowrun_unit_definition *definition,
 	short price_index);
+static long shadowrun_shop_weapon_definition(
+	short local_player_index,
+	short weapon);
 static void shadowrun_shop_open(
 	short local_player_index);
 static void shadowrun_shop_close(
@@ -285,10 +353,12 @@ static short shadowrun_shop_list(
 	short local_player_index,
 	long *list);
 static boolean shadowrun_shop_owned(
+	short local_player_index,
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
 	short item);
 static boolean shadowrun_shop_available(
+	short local_player_index,
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
 	short item);
@@ -345,15 +415,12 @@ boolean shadowrun_buy_menu_input(
 	if (shadowrun_map_loaded() &&
 		local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
 	{
-		struct player_datum *player = shadowrun_shop_player(local_player_index);
-
 		state = &shadowrun_shop_states[local_player_index];
-		/* port: the menu opens for a player whose unit the map gives a Shadowrun
-		unit definition (srud), which is missionlet's, and for any player of a
-		Shadowrun map that has none: recomp.map has no srud at all, its player
-		biped naming one (docs/shadowrun_caches.md). Its prices are the map's
-		when there is no srud */
-		if (!player || player->unit_index == NONE || cinematic_in_progress())
+		/* port: the menu opens on the prototype's maps for a player whose unit
+		has a Shadowrun unit definition (srud), its own or, where the map gives
+		the player none (recomp.map), the first the map has (shadowrun_shop_list)
+		(docs/shadowrun_caches.md) */
+		if (!shadowrun_shop_unit_definition(local_player_index) || cinematic_in_progress())
 		{
 			/* 0x0FD0C0: without a unit of its own it closes */
 			if (state->open)
@@ -435,10 +502,8 @@ void shadowrun_buy_menu_draw(
 	definition = shadowrun_shop_unit_definition(local_player_index);
 	player = shadowrun_shop_player(local_player_index);
 	shadowrun_player = player ? shadowrun_player_get(local_player_get_player_index(local_player_index)) : NULL;
-	/* port: a map with no srud (recomp.map) draws its menu all the same: no
-	weapons are sold, and the spells and techs are */
 	font_index = interface_get_tag_index(_interface_font_terminal);
-	if (!shadowrun_player || font_index == NONE)
+	if (!definition || !shadowrun_player || font_index == NONE)
 	{
 		return;
 	}
@@ -556,13 +621,13 @@ void shadowrun_buy_menu_draw(
 		{
 			struct shadowrun_shop_item const *item = &shadowrun_shop_items[list[row]];
 
-			price = shadowrun_shop_price(definition, item->price_index);
-			owned = shadowrun_shop_owned(player->unit_index, definition, (short)list[row]);
+			price = shadowrun_shop_price(local_player_index, definition, item->price_index);
+			owned = shadowrun_shop_owned(local_player_index, player->unit_index, definition, (short)list[row]);
 			snprintf(text, sizeof(text), "%s", item->name);
 			if (owned && item->page == _shadowrun_shop_page_tech)
 			{
 				snprintf(price_text, sizeof(price_text), "%ld remove",
-					shadowrun_shop_price(definition, item->removal_price_index));
+					shadowrun_shop_price(local_player_index, definition, item->removal_price_index));
 			}
 			else
 			{
@@ -594,7 +659,7 @@ void shadowrun_buy_menu_draw(
 					color.green = 1.f;
 					color.blue = 0.f;
 				}
-				if (!shadowrun_shop_available(player->unit_index, definition, (short)list[row]))
+				if (!shadowrun_shop_available(local_player_index, player->unit_index, definition, (short)list[row]))
 				{
 					color.alpha = 0.5f;
 				}
@@ -646,32 +711,32 @@ static struct player_datum *shadowrun_shop_player(
 	return player_index != NONE ? player_try_and_get(player_index) : NULL;
 }
 
-/* the srud of the local player's unit, or NULL */
+/* port: the srud the menu sells by for the local player: the player's own,
+else the first the map has (recomp.map gives its players none), else NULL,
+and the prices are the prototype's (shadowrun_shop_price) */
 static struct shadowrun_unit_definition *shadowrun_shop_unit_definition(
 	short local_player_index)
 {
 	struct player_datum *player = shadowrun_shop_player(local_player_index);
+	struct shadowrun_unit_definition *definition;
 
-	return player && player->unit_index != NONE ? shadowrun_unit_definition_get(player->unit_index) : NULL;
+	if (player && player->unit_index != NONE && (definition = shadowrun_unit_definition_get(player->unit_index)) != NULL)
+	{
+		return definition;
+	}
+
+	return shadowrun_unit_definition_first();
 }
 
-/* the buy menu's sounds the map has: its srud's, or, for a map that gives
-its player no srud (recomp.map), the map's own buym tag */
+/* port: the buy menu definitions a sound may be played from: the player's
+owned, else the map's first, else NULL (its sounds are not played) */
 static struct shadowrun_buy_menu_definition *shadowrun_shop_buy_menu(
 	short local_player_index)
 {
 	struct shadowrun_unit_definition *definition = shadowrun_shop_unit_definition(local_player_index);
-	struct tag_iterator iterator;
-	long tag_index = NONE;
 
-	if (definition && definition->buy_menu.index != NONE)
-	{
-		return tag_get(SHADOWRUN_BUY_MENU_DEFINITION_TAG, definition->buy_menu.index);
-	}
-	tag_iterator_new(&iterator, SHADOWRUN_BUY_MENU_DEFINITION_TAG);
-	tag_index = tag_iterator_next(&iterator);
-
-	return tag_index != NONE ? tag_get(SHADOWRUN_BUY_MENU_DEFINITION_TAG, tag_index) : NULL;
+	return definition && definition->buy_menu.index != NONE ?
+		tag_get(SHADOWRUN_BUY_MENU_DEFINITION_TAG, definition->buy_menu.index) : NULL;
 }
 
 /* one of the buy menu's sounds (its index among them), on this machine */
@@ -694,15 +759,39 @@ static void shadowrun_shop_sound(
 	return;
 }
 
-/* 0x0FEAE0: an item's price, the srud's (0 for none: a map that gives the
-player no srud, recomp.map, sells at no price, and so does everything that
-would cost money) */
+/* 0x0FEAE0: an item's price, the srud's (0 for none). port: a map that gives
+the player no srud of its own (recomp.map) sells at the prototype's
+(shadowrun_shop_stock_prices) */
 static long shadowrun_shop_price(
+	short local_player_index,
 	struct shadowrun_unit_definition *definition,
 	short price_index)
 {
-	return definition && price_index >= 0 && price_index < NUMBER_OF_SHADOWRUN_PRICES ?
-		definition->prices[price_index] : 0;
+	struct player_datum *player = shadowrun_shop_player(local_player_index);
+
+	if (price_index < 0 || price_index >= NUMBER_OF_SHADOWRUN_PRICES)
+	{
+		return 0;
+	}
+	if (player && player->unit_index != NONE && definition == shadowrun_unit_definition_get(player->unit_index))
+	{
+		return definition->prices[price_index];
+	}
+
+	return shadowrun_shop_stock_prices[price_index];
+}
+
+/* port: the weapon definition the menu's weapon `weapon`
+(NUMBER_OF_SHADOWRUN_SHOP_WEAPONS' order) is: the player's srud's, else the
+one the prices come from (the map's first), else NONE */
+static long shadowrun_shop_weapon_definition(
+	short local_player_index,
+	short weapon)
+{
+	struct shadowrun_unit_definition *definition = shadowrun_shop_unit_definition(local_player_index);
+
+	return definition && weapon >= 0 && weapon < NUMBER_OF_SHADOWRUN_SHOP_WEAPONS ?
+		definition->shop_weapons[weapon].index : NONE;
 }
 
 /* 0x0FF030: the menu opens at its first page */
@@ -850,9 +939,7 @@ static void shadowrun_shop_buy(
 		shadowrun_player_get(local_player_get_player_index(local_player_index));
 	boolean waiting = game_time_get() < state->purchase_time + SHADOWRUN_SHOP_PURCHASE_WAIT;
 
-	/* port: a map with no srud (recomp.map) still sells: what needs the srud's
-	own data (its weapons, its sounds) is not sold, and prices are 0 */
-	if (!player || !shadowrun_player)
+	if (!definition || !player || !shadowrun_player)
 	{
 		return;
 	}
@@ -881,7 +968,7 @@ static void shadowrun_shop_buy(
 	else
 	{
 		struct shadowrun_shop_item const *item = &shadowrun_shop_items[state->selection];
-		long price = shadowrun_shop_price(definition, item->price_index);
+		long price = shadowrun_shop_price(local_player_index, definition, item->price_index);
 		long unit_index = player->unit_index;
 		short action = item->action;
 
@@ -948,11 +1035,11 @@ static void shadowrun_shop_buy(
 		{
 			short spell = shadowrun_shop_spells[action - _shadowrun_shop_first_magic];
 
-			if (shadowrun_shop_owned(unit_index, definition, state->selection))
+			if (shadowrun_shop_owned(local_player_index, unit_index, definition, state->selection))
 			{
 				/* port: had: the removal's price forgets it (as a tech's takes it
 				off), so the player may buy another in its place */
-				long removal_price = shadowrun_shop_price(definition,
+				long removal_price = shadowrun_shop_price(local_player_index, definition,
 					shadowrun_shop_items[state->selection].removal_price_index);
 
 				if (shadowrun_player->money < removal_price)
@@ -981,7 +1068,7 @@ static void shadowrun_shop_buy(
 			short weapon = action == _shadowrun_shop_razorclaws ? _shadowrun_shop_weapon_razorclaws :
 				action == _shadowrun_shop_katana ? _shadowrun_shop_weapon_katana :
 				shadowrun_shop_weapons[action - _shadowrun_shop_first_weapon];
-			long weapon_definition_index = definition ? definition->shop_weapons[weapon].index : NONE;
+			long weapon_definition_index = shadowrun_shop_weapon_definition(local_player_index, weapon);
 
 			if (weapon_definition_index != NONE && !shadowrun_unit_has_weapon(unit_index, weapon_definition_index))
 			{
@@ -1007,7 +1094,7 @@ static void shadowrun_shop_buy(
 				{
 					/* (had: the removal's price takes it off, as the menu says;
 					the techs it also has stay) */
-					long removal_price = shadowrun_shop_price(definition,
+					long removal_price = shadowrun_shop_price(local_player_index, definition,
 						shadowrun_shop_items[state->selection].removal_price_index);
 
 					if (shadowrun_player->money < removal_price)
@@ -1069,13 +1156,12 @@ static void shadowrun_shop_buy_magazine(
 		{
 			long definition_index = object_get(weapon_index)->definition_index;
 
-			/* port: a map with no srud (recomp.map) sells no magazines */
-			for (weapon = 0; definition && weapon < NUMBER_OF_SHADOWRUN_SHOP_WEAPONS; weapon++)
+			for (weapon = 0; weapon < NUMBER_OF_SHADOWRUN_SHOP_WEAPONS; weapon++)
 			{
-				if (definition->shop_weapons[weapon].index == definition_index &&
+				if (shadowrun_shop_weapon_definition(local_player_index, weapon) == definition_index &&
 					shadowrun_shop_magazine_prices[weapon] != NONE)
 				{
-					price = shadowrun_shop_price(definition, shadowrun_shop_magazine_prices[weapon]);
+					price = shadowrun_shop_price(local_player_index, definition, shadowrun_shop_magazine_prices[weapon]);
 					break;
 				}
 			}
@@ -1175,6 +1261,7 @@ static short shadowrun_shop_list(
 /* 0x0FF3A0: whether the player has the item: grenades of its kind, the
 spell, the weapon (port: and the tech, which it wears and may take off) */
 static boolean shadowrun_shop_owned(
+	short local_player_index,
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
 	short item)
@@ -1213,8 +1300,8 @@ static boolean shadowrun_shop_owned(
 			action == _shadowrun_shop_katana ? _shadowrun_shop_weapon_katana :
 			shadowrun_shop_weapons[action - _shadowrun_shop_first_weapon];
 
-		result = definition && definition->shop_weapons[weapon].index != NONE &&
-			shadowrun_unit_has_weapon(unit_index, definition->shop_weapons[weapon].index);
+		result = shadowrun_shop_weapon_definition(local_player_index, weapon) != NONE &&
+			shadowrun_unit_has_weapon(unit_index, shadowrun_shop_weapon_definition(local_player_index, weapon));
 	}
 
 	return result;
@@ -1234,6 +1321,7 @@ static short shadowrun_shop_tech_id(
 of its kind, a spell it does not know, a weapon it does not have (port: and
 not tech, nor an anti-magic grenade) */
 static boolean shadowrun_shop_available(
+	short local_player_index,
 	long unit_index,
 	struct shadowrun_unit_definition *definition,
 	short item)
@@ -1259,14 +1347,14 @@ static boolean shadowrun_shop_available(
 			shadowrun_player_get(player_index_from_unit_index(unit_index));
 
 		result = shadowrun_shop_tech_id((short)item) != NONE &&
-			!shadowrun_shop_owned(unit_index, definition, item) && shadowrun_player &&
+			!shadowrun_shop_owned(local_player_index, unit_index, definition, item) && shadowrun_player &&
 			shadowrun_player->known_tech_count < MAXIMUM_SHADOWRUN_PLAYER_TECHS;
 	}
 	else if (action >= _shadowrun_shop_first_magic && action <= _shadowrun_shop_last_magic)
 	{
 		/* port: a spell it does not know, while the player has fewer than its
 		two */
-		result = !shadowrun_shop_owned(unit_index, definition, item) &&
+		result = !shadowrun_shop_owned(local_player_index, unit_index, definition, item) &&
 			shadowrun_player_known_spell_count(
 				shadowrun_player_get(player_index_from_unit_index(unit_index))) < MAXIMUM_SHADOWRUN_PLAYER_SPELLS;
 	}
@@ -1276,7 +1364,7 @@ static boolean shadowrun_shop_available(
 	}
 	else
 	{
-		result = !shadowrun_shop_owned(unit_index, definition, item);
+		result = !shadowrun_shop_owned(local_player_index, unit_index, definition, item);
 	}
 
 	return result;

@@ -296,6 +296,28 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_get(
 	return result;
 }
 
+/* port: the map's first srud (a map of the prototype's that gives its
+players none, such as recomp.map, has only its own actors'): the first of
+the tags, or NULL (not the prototype's map, or none in it) */
+struct shadowrun_unit_definition *shadowrun_unit_definition_first(
+	void)
+{
+	struct tag_iterator iterator;
+	long tag_index;
+	struct shadowrun_unit_definition *result = NULL;
+
+	if (shadowrun_globals.map_loaded)
+	{
+		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
+		if ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		{
+			result = tag_get(SHADOWRUN_UNIT_DEFINITION_TAG, tag_index);
+		}
+	}
+
+	return result;
+}
+
 /* 0x25E4C0 */
 struct shadowrun_race *shadowrun_unit_race_get(
 	long unit_index)

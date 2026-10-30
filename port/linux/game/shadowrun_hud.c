@@ -139,10 +139,9 @@ void shadowrun_hud_draw(
 	short top;
 	short left;
 
-	/* port: the buy menu is drawn here, after the magic and the tech, and a
-	map that gives its player no srud (recomp.map) has neither of those to
-	show, but its menu to draw (shadowrun_buy_menu.c) */
-	if (!shadowrun_unit || cinematic_in_progress() ||
+	/* port: a map that gives its player no srud (recomp.map) has no magic, no
+	tech and no buy menu to show: the menu is the srud's (shadowrun_buy_menu.c) */
+	if (!shadowrun_unit || !shadowrun_unit_definition_get(unit_index) || cinematic_in_progress() ||
 		local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
 	{
 		return;
