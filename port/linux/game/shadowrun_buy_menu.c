@@ -111,61 +111,61 @@ enum
 #define SHADOWRUN_SHOP_STICK_MOVE 0.5f
 #define SHADOWRUN_SHOP_STICK_CENTERED 0.25f
 
-/* port: the prices where the map gives the player no srud of its own (recomp.map):
-the prototype's. The prototype's srud, which it keeps for them, holds none in
-missionlet (0 is free), so these are what its menu's items are worth, in the
-srud's prices' order (the menu's items' index, and a magazine's of each
-weapon: shadowrun_shop_magazine_prices) */
+/* port: the prices where the map gives the player no srud of its own
+(recomp.map, whose `characters\sr_player\sr_player` names none): its
+`shadowrunstuff\generic_unit` srud's, which is the one the prototype's
+multiplayer players bought by (read from recomp.map; 99999 is that srud's
+'never', a price past any money a player has) */
 static long const shadowrun_shop_stock_prices[NUMBER_OF_SHADOWRUN_PRICES] =
 {
-	0,          /* 0:  (the srud's own, unused) */
-	0,          /* 1:  Teleport */
-	0,          /* 2:  Tree of Life */
-	0,          /* 3:  Summon Elemental */
-	0,          /* 4:  Strangle */
-	0,          /* 5:  Razorclaws */
-	0,          /* 6:  Enhanced Vision */
-	0,          /* 7:  Glider */
-	0,          /* 8 */
-	0,          /* 9:  Grenade */
-	0,          /* 10: Flechette Pistol */
-	0,          /* 11: Assault Rifle */
-	0,          /* 12: Sniper Rifle */
-	0,          /* 13: Mini Gun */
-	0,          /* 14: Rocket Launcher */
-	0,          /* 15: Shotgun */
-	0,          /* 16: Gust */
-	0,          /* 17: Smoke */
-	0,          /* 18: a Flechette Pistol's magazine */
-	0,          /* 19: an Assault Rifle's magazine */
-	0,          /* 20: a Sniper Rifle's magazine */
-	0,          /* 21: a Mini Gun's magazine */
-	0,          /* 22: a Rocket Launcher's magazine */
-	0,          /* 23: a Shotgun's magazine */
-	0,          /* 24: a Rifle's magazine */
-	0,          /* 25: Enhanced Vision's removal */
-	0,          /* 26: Glider's removal */
-	0,          /* 27 */
-	0,          /* 28: Anti-Magic Grenade */
-	0,          /* 29 */
-	0,          /* 30: Hologram */
-	0,          /* 31 */
-	0,          /* 32 */
-	0,          /* 33: Smartlink, Gecko, Reflexes */
-	0,          /* 34 */
-	0,          /* 35: Hologram's removal */
-	0,          /* 36 */
-	0,          /* 37 */
-	0,          /* 38: Smartlink's, Gecko's, Reflexes' removal */
-	0,          /* 39: Resurrection */
-	0,          /* 40: Katana */
-	0,          /* 41: Rifle */
-	0,          /* 42: a Rifle's magazine */
-	0,          /* 43 */
-	0,          /* 44 */
-	0,          /* 45 */
-	0,          /* 46: Grapple */
-	0,          /* 47: Grapple's removal */
+	2250,   /* 0:  (the srud's own, unused) */
+	2000,   /* 1:  Teleport */
+	9999,   /* 2:  Tree of Life */
+	2000,   /* 3:  Summon Elemental */
+	99999,  /* 4:  Strangle */
+	2000,   /* 5:  Razorclaws */
+	2000,   /* 6:  Enhanced Vision */
+	99999,  /* 7:  Glider */
+	300,    /* 8 */
+	200,    /* 9:  Grenade */
+	500,    /* 10: Flechette Pistol */
+	2500,   /* 11: Assault Rifle */
+	1250,   /* 12: Sniper Rifle */
+	3250,   /* 13: Mini Gun */
+	750,    /* 14: Rocket Launcher */
+	2000,   /* 15: Shotgun */
+	2000,   /* 16: Gust */
+	50,     /* 17: Smoke */
+	100,    /* 18: a Flechette Pistol's magazine */
+	200,    /* 19: an Assault Rifle's magazine */
+	200,    /* 20: a Sniper Rifle's magazine */
+	1000,   /* 21: a Mini Gun's magazine */
+	200,    /* 22: a Rocket Launcher's magazine */
+	0,      /* 23: a Shotgun's magazine (not sold) */
+	1000,   /* 24: a Rifle's magazine */
+	1000,   /* 25: Enhanced Vision's removal */
+	99999,  /* 26: Glider's removal */
+	99999,  /* 27 */
+	99999,  /* 28: Anti-Magic Grenade */
+	99999,  /* 29 */
+	2000,   /* 30: Hologram */
+	1000,   /* 31 */
+	1000,   /* 32 */
+	1000,   /* 33: Smartlink, Gecko, Reflexes */
+	1000,   /* 34 */
+	1000,   /* 35: Hologram's removal */
+	2000,   /* 36 */
+	1250,   /* 37 */
+	750,    /* 38: those removals' */
+	50,     /* 39: Resurrection */
+	99999,  /* 40: Katana */
+	99999,  /* 41: Rifle */
+	99999,  /* 42: a Rifle's magazine */
+	99999,  /* 43 */
+	1000,   /* 44 */
+	0,      /* 45 */
+	0,      /* 46: Grapple */
+	0,      /* 47: Grapple's removal */
 };
 
 /* the sounds' indices, in the buy menu's order */
@@ -723,7 +723,7 @@ static struct shadowrun_unit_definition *shadowrun_shop_unit_definition(
 		return definition;
 	}
 
-	return shadowrun_unit_definition_first();
+	return shadowrun_unit_definition_for_shopping();
 }
 
 /* port: the buy menu definitions a sound may be played from: the player's

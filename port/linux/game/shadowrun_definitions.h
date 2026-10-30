@@ -25,6 +25,11 @@ while it lasts and how long it waits before it can be cast again.
 
 /* ---------- constants */
 
+/* port: the srud the prototype's multiplayer players bought by, which a map
+whose player biped names none (recomp.map) sells by (shadowrun_units.c,
+shadowrun_unit_definition_for_shopping) */
+#define SHADOWRUN_GENERIC_UNIT_DEFINITION "shadowrunstuff\\generic_unit"
+
 enum
 {
 	SHADOWRUN_UNIT_DEFINITION_TAG = 'srud',

@@ -24,6 +24,7 @@ each function names the one it is (its address in the executable).
 #include "saved games/game_state.h"
 #include "sound/game_sound.h"
 #include "tag_files/tag_groups.h"
+#include "tag_files/tag_files.h"
 #include "units/bipeds.h"
 #include "units/biped_definitions.h"
 #include "units/units.h"
@@ -296,22 +297,37 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_get(
 	return result;
 }
 
-/* port: the map's first srud (a map of the prototype's that gives its
-players none, such as recomp.map, has only its own actors'): the first of
-the tags, or NULL (not the prototype's map, or none in it) */
-struct shadowrun_unit_definition *shadowrun_unit_definition_first(
+/* port: the srud a map sells by for a player whose unit names none (recomp.map,
+whose `characters\sr_player\sr_player` names none: docs/shadowrun_caches.md).
+The prototype's multiplayer one is `shadowrunstuff\generic_unit`; a map with
+it alone, or without it, gets the map's first srud. NULL when the map has none
+(not the prototype's map, or one whose tags carry no srud at all) */
+struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 	void)
 {
 	struct tag_iterator iterator;
 	long tag_index;
+	long first_index = NONE;
 	struct shadowrun_unit_definition *result = NULL;
 
 	if (shadowrun_globals.map_loaded)
 	{
 		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
-		if ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 		{
-			result = tag_get(SHADOWRUN_UNIT_DEFINITION_TAG, tag_index);
+			if (first_index == NONE)
+			{
+				first_index = tag_index;
+			}
+			if (!csstrcmp(tag_get_name(tag_index), SHADOWRUN_GENERIC_UNIT_DEFINITION))
+			{
+				first_index = tag_index;
+				break;
+			}
+		}
+		if (first_index != NONE)
+		{
+			result = tag_get(SHADOWRUN_UNIT_DEFINITION_TAG, first_index);
 		}
 	}
 

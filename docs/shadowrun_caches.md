@@ -54,21 +54,21 @@ Shadowrun's own functions (see [Scripts](#scripts) and [Magic](#magic)).
 
 `recomp.map` is another of the prototype's maps (`levels\test\hangemhigh\recomp`,
 its header naming the same build), made with a larger game state: it links
-its tags to `0x806D0000` instead of `0x8069E000`. It is a multiplayer map,
-and carries only what that needed: **no `srud` (unit definitions), `srac`
-(races), `srwd` (weapon data), `m1ed`/`m2ed`/`m3ed` (magic) or
-`t1ed`/`t2ed`/`t3ed` (tech) tags at all** (missionlet has 4, 10, 23, 6 and 3),
-and its player biped, `characters\sr_player\sr_player`, names no srud. Its
-`buym` (the buy menu's sounds) it does have.
+its tags to `0x806D0000` instead of `0x8069E000`. It is a multiplayer map, and
+carries four `srud` (unit definitions), among them `shadowrunstuff\marine` and
+`shadowrunstuff\generic_unit`, each with its `buym` (the buy menu's sounds) and
+its prices; it has no `srac` (races), `srwd` (weapon data),
+`m1ed`/`m2ed`/`m3ed` (magic) or `t1ed`/`t2ed`/`t3ed` (tech) tags of its own.
 
-So the map has no prices, weapons or spells of its own for the buy menu to
-sell, and its player's srud is none. port: a map that gives the player no
-srud has its menu served by the first srud the map has (recomp's actors') for
-its prices and weapons where there is one, else the prototype's prices by the
-stock table and the menu's own weapon list (`shadowrun_buy_menu.c`,
-`shadowrun_shop_unit_definition` and `shadowrun_shop_price`), so the menu
-opens on `recomp.map` as it does on missionlet. missionlet's and `ui.map`'s
-menus are unaffected.
+Its player biped, `characters\sr_player\sr_player`, names no srud, so the
+player's unit has none of its own to sell by. port: a player whose unit names
+no srud buys by the map's `shadowrunstuff\generic_unit` srud if it has one,
+else by the map's first, and the menu opens on `recomp.map` as it does on
+missionlet (`shadowrun_buy_menu.c`, `shadowrun_shop_unit_definition`;
+`shadowrun_units.c`, `shadowrun_unit_definition_for_shopping`). Where a map
+has no srud at all, the menu sells at the prototype's prices
+(`shadowrun_shop_stock_prices`, read from `generic_unit`). missionlet's and
+`ui.map`'s menus are unaffected.
 
 ## What differs, and what is done
 
@@ -289,10 +289,10 @@ gift of $250 to a teammate, at the prices of the player's `srud`. The stick
 or the d-pad moves through it, the jump control buys, the melee control goes
 back a page or closes it, and the action control buys a magazine for the
 weapon in hand; while it is open the player does nothing else. A co-op client's
-purchases are its own: they are not sent to the host. A map that gives its
-player no `srud` of its own, such as `recomp.map`, sells by the first srud the
-map has, or else at the prototype's prices (`shadowrun_shop_stock_prices`), so
-the menu opens there too.
+purchases are its own: they are not sent to the host. A map whose player srud
+names no `srud` of its own, such as `recomp.map`, sells by the map's
+`shadowrunstuff\generic_unit` srud, or else at the prototype's prices
+(`shadowrun_shop_stock_prices`), so the menu opens there too.
 
 ## Tech
 

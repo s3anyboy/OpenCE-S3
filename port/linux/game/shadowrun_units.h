@@ -271,9 +271,9 @@ struct shadowrun_player *shadowrun_player_get(
 and what that names */
 struct shadowrun_unit_definition *shadowrun_unit_definition_get(
 	long unit_index);
-/* port: the map's first srud, or NULL (a map of the prototype's, which gives
-its players none, such as recomp.map: its buy menu sells by it) */
-struct shadowrun_unit_definition *shadowrun_unit_definition_first(
+/* port: the srud a map sells by for a player whose unit names none (recomp.map:
+its player biped names no srud), or NULL (the map has none) */
+struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 	void);
 struct shadowrun_race *shadowrun_unit_race_get(
 	long unit_index);
