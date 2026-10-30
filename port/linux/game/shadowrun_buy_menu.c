@@ -443,6 +443,12 @@ boolean shadowrun_buy_menu_input(
 		}
 		if (!shadowrun_shop_unit_definition(local_player_index) || cinematic_in_progress())
 		{
+			if (toggle)
+			{
+				/* port: why it did not open (the lines above are the lookup's) */
+				console_printf(FALSE, "buy menu: it does not open: no srud %d, cinematic %d",
+					shadowrun_shop_unit_definition(local_player_index) == NULL, cinematic_in_progress());
+			}
 			/* 0x0FD0C0: without a unit of its own it closes */
 			if (state->open)
 			{
