@@ -4020,6 +4020,12 @@ enum cache_file_status xbox_cache_structure_bsp_address(
 #define XBOX_TAG_HEADER_COUNT_OFFSET 0x0C
 #define XBOX_TAG_HEADER_SIGNATURE_OFFSET 0x20
 #define ACTOR_GROUP_TAG 'actr'
+/* port: the same, as a map's tag instances hold them: a map stores a group
+'actr' as a little-endian word, 0x72746361, and this build reads one as
+'actr' (0x61637472), so neither way alone is every map's (a table's places
+add up differently: recomp's first is 'scnr' one way and its second the
+other) */
+#define ACTOR_GROUP_TAG_BYTES 0x72746361UL
 /* an actor definition's type (ai/actor_definitions.h) */
 #define ACTOR_DEFINITION_TYPE_OFFSET 0x14
 
@@ -4159,7 +4165,8 @@ enum cache_file_status shadowrun_cache_convert(
 			return _cache_file_status_bad_tag_instances_range;
 		}
 		instance = tag_data + instances_offset;
-		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != ACTOR_GROUP_TAG)
+		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != ACTOR_GROUP_TAG &&
+			read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != ACTOR_GROUP_TAG_BYTES)
 		{
 			continue;
 		}

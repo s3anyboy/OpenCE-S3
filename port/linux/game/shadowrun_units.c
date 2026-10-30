@@ -25,6 +25,7 @@ each function names the one it is (its address in the executable).
 #include "sound/game_sound.h"
 #include "tag_files/tag_groups.h"
 #include "main/console.h" /* port: the buy menu's report */
+#include "tag_schema.h" /* port: every group tag this build names */
 #include "tag_files/tag_files.h"
 #include "units/bipeds.h"
 #include "units/biped_definitions.h"
@@ -72,6 +73,8 @@ static struct
 
 static struct tag_reference *shadowrun_biped_unit_definition_reference(
 	struct biped_definition *definition);
+static void shadowrun_cache_tag_groups_normalize(
+	void);
 static struct tag_reference *shadowrun_weapon_data_reference(
 	struct weapon_definition *definition);
 static void shadowrun_unit_mana_update(
@@ -128,7 +131,14 @@ void shadowrun_tags_loaded(
 		long tag_index;
 		long corrected = 0;
 
-		shadowrun_projectiles_loaded();
+		/* port: the map's group tags as this build reads one. A map stores a
+		group as the bytes of its name ('srud' is s r u d, 0x64757273 read
+		from its first byte), and this build reads the four as a number of
+		their own (0x64757273 is 'srud' only one way round). A map whose
+		groups read the other way (recomp's are 0x73636e72 for 'scnr') is
+		given each tag's the way round this build's are, which the group's
+		schema then names, before anything asks a tag its group by */
+		shadowrun_cache_tag_groups_normalize();
 		/* each biped's srud, in what the validator does not check */
 		tag_iterator_new(&iterator, BIPED_DEFINITION_TAG);
 		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
@@ -1358,6 +1368,67 @@ void shadowrun_game_set_assignment_scheme(
 }
 
 /* ---------- private code */
+
+/* port: a map's tag groups, each the way round this build's schema names it.
+A group is the bytes of its name, which this build reads as a word of the
+four ('srud' one way, 'durs' the other); a word that is no group of this build's,
+and whose bytes the other way are, is that group's. The instance's index and
+everything else are left as they are */
+static void shadowrun_cache_tag_groups_normalize(
+	void)
+{
+	/* cache_files.c's (menu_tags.c declares it as this) */
+	void *cache_files_tag_instances(long *count);
+	struct cache_file_tag_instance
+	{
+		long group_tag;
+		long parent_group_tags[2];
+		long tag_index;
+		char *name;
+		void *base_address;
+		unsigned long unused[2];
+	};
+	long count = 0;
+	struct cache_file_tag_instance *instances = cache_files_tag_instances(&count);
+	long index;
+
+	if (!instances)
+	{
+		return;
+	}
+	for (index = 0; index < count; index++)
+	{
+		struct tag_schema_group const *const *list;
+		unsigned long group_tag = (unsigned long)instances[index].group_tag;
+		unsigned long swapped = ((group_tag & 0xFF) << 24) | ((group_tag & 0xFF00) << 8) |
+			((group_tag >> 8) & 0xFF00) | ((group_tag >> 24) & 0xFF);
+		boolean known = FALSE;
+		boolean known_swapped = FALSE;
+
+		for (list = tag_schema_group_lists; *list; list++)
+		{
+			struct tag_schema_group const *group;
+
+			for (group = *list; group->group_tag; group++)
+			{
+				if (group->group_tag == group_tag)
+				{
+					known = TRUE;
+				}
+				else if (group->group_tag == swapped)
+				{
+					known_swapped = TRUE;
+				}
+			}
+		}
+		if (known_swapped && !known)
+		{
+			instances[index].group_tag = (long)swapped;
+		}
+	}
+
+	return;
+}
 
 static struct tag_reference *shadowrun_biped_unit_definition_reference(
 	struct biped_definition *definition)
