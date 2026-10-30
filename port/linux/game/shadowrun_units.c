@@ -490,10 +490,17 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 		}
 		if (generic != NONE || first != NONE)
 		{
+			long chosen = generic != NONE ? generic : first;
+
 			/* port: the tag's data as the game would give it, by the index the
 			table gives it (this build's tag_get compares groups as it packs
 			them: a map's other way round is asked for through the tag's own) */
-			result = (struct shadowrun_unit_definition *)instances[generic != NONE ? generic : first].base_address;
+			result = (struct shadowrun_unit_definition *)instances[chosen].base_address;
+			/* port: what it chose, and whether that tag has data yet (a table
+			whose tags were not all read gives them none) */
+			console_printf(FALSE, "shadowrun: shops by #%ld %s at %p (base_address %p)",
+				chosen, shadowrun_tag_name(instances, count, chosen), (void *)result,
+				instances[chosen].base_address);
 		}
 	}
 
