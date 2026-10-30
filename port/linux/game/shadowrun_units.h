@@ -275,6 +275,12 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_get(
 its player biped names no srud), or NULL (the map has none) */
 struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 	void);
+/* port: whether the map has an srud of this name, and the name of the first
+srud it has ("" for none): the buy menu's report of why it opens */
+boolean shadowrun_unit_definition_matches(
+	char const *name);
+char const *shadowrun_unit_definition_first_name(
+	void);
 struct shadowrun_race *shadowrun_unit_race_get(
 	long unit_index);
 struct shadowrun_magic1_definition *shadowrun_magic1_get(

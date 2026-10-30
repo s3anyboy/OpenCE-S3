@@ -297,6 +297,53 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_get(
 	return result;
 }
 
+/* port: whether the map has an srud of this name, and the name of the first
+srud it has (the debug build's report of why the buy menu opens or not:
+shadowrun_buy_menu.c, its port: notes). "" for none */
+boolean shadowrun_unit_definition_matches(
+	char const *name)
+{
+	struct tag_iterator iterator;
+	long tag_index;
+	boolean result = FALSE;
+
+	if (shadowrun_globals.map_loaded)
+	{
+		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		{
+			char const *tag_name = tag_get_name(tag_index);
+
+			if (tag_name && !csstrcmp(tag_name, name))
+			{
+				result = TRUE;
+				break;
+			}
+		}
+	}
+
+	return result;
+}
+
+char const *shadowrun_unit_definition_first_name(
+	void)
+{
+	struct tag_iterator iterator;
+	long tag_index;
+	char const *result = "";
+
+	if (shadowrun_globals.map_loaded)
+	{
+		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
+		if ((tag_index = tag_iterator_next(&iterator)) != NONE && tag_get_name(tag_index))
+		{
+			result = tag_get_name(tag_index);
+		}
+	}
+
+	return result;
+}
+
 /* port: the srud a map sells by for a player whose unit names none (recomp.map,
 whose `characters\sr_player\sr_player` names none: docs/shadowrun_caches.md).
 The prototype's multiplayer one is `shadowrunstuff\generic_unit`; a map with
@@ -315,11 +362,13 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 		tag_iterator_new(&iterator, SHADOWRUN_UNIT_DEFINITION_TAG);
 		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 		{
+			char const *tag_name = tag_get_name(tag_index);
+
 			if (first_index == NONE)
 			{
 				first_index = tag_index;
 			}
-			if (!csstrcmp(tag_get_name(tag_index), SHADOWRUN_GENERIC_UNIT_DEFINITION))
+			if (tag_name && !csstrcmp(tag_name, SHADOWRUN_GENERIC_UNIT_DEFINITION))
 			{
 				first_index = tag_index;
 				break;

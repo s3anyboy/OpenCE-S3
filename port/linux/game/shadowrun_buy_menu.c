@@ -29,6 +29,7 @@ grenade, which this build has no grenade type for).
 
 #include "cseries.h"
 #include "cutscene/cinematics.h"
+#include "main/console.h" /* port: the buy menu's report of why it opens */
 #include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
@@ -416,8 +417,24 @@ boolean shadowrun_buy_menu_input(
 		state = &shadowrun_shop_states[local_player_index];
 		/* port: the menu opens on the prototype's maps for a player whose unit
 		has a Shadowrun unit definition (srud), its own or, where the map gives
-		the player none (recomp.map), the first the map has (shadowrun_shop_list)
-		(docs/shadowrun_caches.md) */
+		the player none (recomp.map), the one the map sells by
+		(shadowrun_unit_definition_for_shopping: docs/shadowrun_caches.md) */
+		{
+			struct player_datum *debug_player = shadowrun_shop_player(local_player_index);
+			struct shadowrun_unit_definition *debug_definition = shadowrun_shop_unit_definition(local_player_index);
+			long debug_unit_index = debug_player ? debug_player->unit_index : NONE;
+
+			if (toggle)
+			{
+				console_printf(FALSE, "buy menu: map_loaded %d, unit %ld, own srud %d, shopping srud %d",
+					shadowrun_map_loaded(), debug_unit_index,
+					debug_unit_index != NONE && shadowrun_unit_definition_get(debug_unit_index) != NULL,
+					debug_definition != NULL);
+				console_printf(FALSE, "buy menu: map has generic_unit %d, first srud \"%s\"",
+					shadowrun_unit_definition_matches(SHADOWRUN_GENERIC_UNIT_DEFINITION),
+					shadowrun_unit_definition_first_name());
+			}
+		}
 		if (!shadowrun_shop_unit_definition(local_player_index) || cinematic_in_progress())
 		{
 			/* 0x0FD0C0: without a unit of its own it closes */
