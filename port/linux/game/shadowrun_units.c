@@ -65,11 +65,12 @@ static struct
 {
 	/* the map loaded is the Shadowrun prototype's */
 	boolean map_loaded;
-	/* port: the map's own tag table, kept as its tags loaded: the menus put a
+	/* port: a copy of the map's own tag table, made as its tags loaded. The game's
 
-table of their own in place of the game's (menu_tags.c,
-cache_files_set_tag_instances), and the map's tags are what Shadowrun's are
- */
+table is replaced by the menus' (menu_tags.c, cache_files_set_tag_instances),
+
+and came to a map still holding the last map's: Shadowrun's own copy is
+neither, and is the map's tags whatever the game's table is */
 	struct shadowrun_tag_instance *map_instances;
 	long map_instance_count;
 	/* the players' (in the game state) */
@@ -144,8 +145,27 @@ void shadowrun_tags_loaded_table(
 	void *tag_instances,
 	long tag_count)
 {
-	shadowrun_globals.map_instances = tag_instances;
-	shadowrun_globals.map_instance_count = tag_instances ? tag_count : 0;
+	/* port: the last map's copy is not this map's */
+	if (shadowrun_globals.map_instances)
+	{
+		free(shadowrun_globals.map_instances);
+		shadowrun_globals.map_instances = NULL;
+		shadowrun_globals.map_instance_count = 0;
+	}
+	if (shadowrun && tag_instances && tag_count > 0)
+	{
+		/* port: the map's tags, copied here while they are the game's: a
+		menu's table, or the last map's, is never what Shadowrun reads */
+		long bytes = tag_count * (long)sizeof(struct shadowrun_tag_instance);
+		struct shadowrun_tag_instance *copy = malloc((size_t)bytes);
+
+		if (copy)
+		{
+			memcpy(copy, tag_instances, (size_t)bytes);
+			shadowrun_globals.map_instances = copy;
+			shadowrun_globals.map_instance_count = tag_count;
+		}
+	}
 	shadowrun_tags_loaded(shadowrun);
 
 	return;
@@ -486,7 +506,6 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 			none of, as recomp's 2687 for its 2890): it is not chosen */
 			if (!instances[index].base_address)
 			{
-				console_printf(FALSE, "shadowrun: #%ld names a srud but has no data", index);
 				continue;
 			}
 			if (first == NONE)
@@ -508,26 +527,7 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 			table gives it (this build's tag_get compares groups as it packs
 			them: a map's other way round is asked for through the tag's own) */
 			result = (struct shadowrun_unit_definition *)instances[chosen].base_address;
-			/* port: what it chose, and whether that tag has data yet (a table
-			whose tags were not all read gives them none) */
-			console_printf(FALSE, "shadowrun: shops by #%ld %s at %p (base_address %p)",
-				chosen, shadowrun_tag_name(instances, count, chosen), (void *)result,
-				instances[chosen].base_address);
 		}
-		else
-		{
-			/* port: what the walk had to match against: the group it asked for
-			and the words the map holds, so that a map of another packing is
-			told by its own table */
-			console_printf(FALSE, "shadowrun: no tag of %ld is an srud, asked %08lx, first %08lx %08lx %08lx",
-				count, (unsigned long)SHADOWRUN_UNIT_DEFINITION_TAG, (unsigned long)instances[0].group_tag,
-				count > 1 ? (unsigned long)instances[1].group_tag : 0UL,
-				count > 2 ? (unsigned long)instances[2].group_tag : 0UL);
-		}
-	}
-	else if (shadowrun_globals.map_loaded)
-	{
-		console_printf(FALSE, "shadowrun: no tag table to sell by");
 	}
 
 	return result;

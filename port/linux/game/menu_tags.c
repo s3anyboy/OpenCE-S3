@@ -1416,8 +1416,15 @@ static struct cache_file_tag_instance *instances_grow(long count, long *first_in
 		if (instance_salt > salt)
 			salt = instance_salt;
 	}
-	menu_tags.original_instances = instances;
-	menu_tags.original_count = existing;
+	/* port: the map's own table, kept the first time the menus grow it, and
+	only then: a second grow (a pause menu's, after the first table was put in
+	place) would otherwise keep the menus' table as the original, and the
+	map's, which Shadowrun's tags are of, would be lost for good */
+	if (!menu_tags.original_instances)
+	{
+		menu_tags.original_instances = instances;
+		menu_tags.original_count = existing;
+	}
 	*first_index = existing;
 	*first_salt = salt + 1;
 	return grown;

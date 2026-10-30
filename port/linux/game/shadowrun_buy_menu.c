@@ -415,62 +415,12 @@ boolean shadowrun_buy_menu_input(
 		local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
 	{
 		state = &shadowrun_shop_states[local_player_index];
-		/* port: what the controls gave it this tick, before anything else: a
-		menu that never opens is told from one that never gets Back */
-		if (toggle)
-		{
-			console_printf(FALSE, "buy menu: toggle %d, buy %d, back %d, magazine %d, open %d",
-				toggle, buy, back, magazine, state->open);
-		}
 		/* port: the menu opens on the prototype's maps for a player whose unit
 		has a Shadowrun unit definition (srud), its own or, where the map gives
 		the player none (recomp.map), the one the map sells by
 		(shadowrun_unit_definition_for_shopping: docs/shadowrun_caches.md) */
-		{
-			struct player_datum *debug_player = shadowrun_shop_player(local_player_index);
-			struct shadowrun_unit_definition *debug_definition = shadowrun_shop_unit_definition(local_player_index);
-			long debug_unit_index = debug_player ? debug_player->unit_index : NONE;
-
-			if (toggle)
-			{
-				/* port: the map's srud lookup runs before the first line is printed:
-				it borrows a line of the terminal's output buffer, which printing the
-				first line would overwrite (the line came out cut, and with the rest
-				of the format in place of the name) */
-				char const *first_name = shadowrun_unit_definition_first_name();
-				boolean has_generic_unit = shadowrun_unit_definition_matches(SHADOWRUN_GENERIC_UNIT_DEFINITION);
-
-				console_printf(FALSE, "buy menu: map_loaded %d, unit %ld, own srud %d (index %d), shopping srud %d",
-					shadowrun_map_loaded(), debug_unit_index,
-					debug_unit_index != NONE && shadowrun_unit_definition_get(debug_unit_index) != NULL,
-					shadowrun_unit_definition_index(debug_unit_index),
-					debug_definition != NULL);
-				/* port: and the input this tick's other controls */
-				console_printf(FALSE, "buy menu: cinematic %d, open %d, buy %d, back %d, magazine %d",
-					cinematic_in_progress(), state->open, buy, back, magazine);
-				console_printf(FALSE, "buy menu: map has generic_unit %d, first srud \"%s\"",
-					has_generic_unit, first_name);
-			}
-		}
 		if (!shadowrun_shop_unit_definition(local_player_index) || cinematic_in_progress())
 		{
-			if (toggle)
-			{
-				/* port: why it did not open (the lines above are the lookup's) */
-				console_printf(FALSE, "buy menu: it does not open: no srud %d, cinematic %d",
-					shadowrun_shop_unit_definition(local_player_index) == NULL, cinematic_in_progress());
-			}
-			/* port: what closed it the first time is said here too: a map whose
-			player names no srud of its own (recomp.map's) opens the menu when
-			this is the one the menu sells by, not the unit's */
-			if (toggle)
-			{
-				console_printf(FALSE, "buy menu: shop srud %d, unit srud %d",
-					shadowrun_shop_unit_definition(local_player_index) != NULL,
-					shadowrun_unit_definition_get(
-						shadowrun_shop_player(local_player_index) ?
-							shadowrun_shop_player(local_player_index)->unit_index : NONE) != NULL);
-			}
 			/* 0x0FD0C0: without a unit of its own it closes */
 			if (state->open)
 			{
@@ -1105,12 +1055,18 @@ static void shadowrun_shop_buy(
 					state->purchase_time = game_time_get();
 				}
 			}
-			else
+			else if (shadowrun_unit_learn_power(unit_index, spell))
 			{
+				/* port: paid for when it is learned: a map whose unit has no srud
+				to learn it from (recomp.map's, its unit definitions stripped) sells
+				no spell, and takes no money for one */
 				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_learned);
-				shadowrun_unit_learn_power(unit_index, spell);
 				shadowrun_player->money -= price;
 				state->purchase_time = game_time_get();
+			}
+			else
+			{
+				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
 			}
 		}
 		else if (action == _shadowrun_shop_razorclaws || action == _shadowrun_shop_katana ||

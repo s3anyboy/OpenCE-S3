@@ -587,6 +587,20 @@ static void validate_block_extent(
 	struct tag_schema_definition const *definition = field->definition;
 
 	block->definition = NULL;
+	/* port: a block with no address holds nothing, whatever its count
+	says: a map's own group whose block was stripped from the map (recomp's
+	sruds, whose races point at 0) is played with none of them rather than
+	with a block of 0's bytes */
+	if (!block->address && block->count != 0)
+	{
+		if (block->count > 0 && block->count <= field->maximum)
+		{
+			tag_validate_correct(validation, "has %ld elements at no address: none", block->count);
+		}
+		block->count = 0;
+
+		return;
+	}
 	if (block->count < 0)
 	{
 		tag_validate_refuse(validation, "has %ld elements", block->count);
@@ -603,6 +617,19 @@ static void validate_block_extent(
 		((unsigned long)block->count > validation->region_size / (unsigned long)definition->size ||
 			!region_contains(validation, block->address, (unsigned long)block->count * definition->size)))
 	{
+		/* port: where the field was read, and the bytes there: a block of a
+		group's own layout read at another offset is told here */
+		{
+			extern void platform_log(char const *format, ...);
+
+			byte const *raw = (byte const *)block;
+
+			platform_log("validate: tag %08lx field '%s' at %p (+0x%lx), count %ld, address %p, "
+				"element %ld bytes, raw %02x %02x %02x %02x %02x %02x %02x %02x",
+				(unsigned long)validation->tag_index, field->name, (void *)block,
+				(unsigned long)field->offset, block->count, block->address, definition->size,
+				raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]);
+		}
 		tag_validate_refuse(validation, "has %ld elements of %ld bytes at %08lx, outside the tags",
 			block->count, definition->size, (unsigned long)block->address);
 		return;
