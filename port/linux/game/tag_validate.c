@@ -1087,6 +1087,169 @@ static boolean validate_buffers(
 	return TRUE;
 }
 
+/* port: whether the map's tag of `name` in one of `groups` is one (taken),
+and its index: a name no tag has, or one several tags have, is none (-1, and
+*count says how many) */
+static long tag_index_by_name(
+	struct tag_validate_instance const *instances,
+	long tag_count,
+	unsigned long const *groups,
+	char const *name,
+	long *count)
+{
+	long result = -1;
+	long index;
+
+	*count = 0;
+	if (!name || !*name)
+	{
+		return -1;
+	}
+	for (index = 0; index < tag_count; index++)
+	{
+		if (strcmp(instances[index].name, name) || !instance_in_groups(&instances[index], groups))
+		{
+			continue;
+		}
+		(*count)++;
+		result = index;
+	}
+
+	return result;
+}
+
+/* port: the references a tag's schema names (and those in its blocks and
+structures) that name a tag but give no index, which a map whose table gave
+none has: they are given the index of the tag they name, which is one in the
+map's tag table. The tags the schema follows but does not name a group for
+(a bsp's lightmaps' and shaders', a shader's) are left none, as their blocks'
+run into one another: that is a map no schema names. FALSE when a reference
+names tags more than one of its groups holds (none of the map's does; a map
+that does is refused rather than played with a wrong tag) */
+static boolean restore_references(
+	struct tag_validation *validation,
+	struct tag_schema_definition const *definition,
+	byte *base,
+	struct tag_validate_instance const *instances,
+	long tag_count);
+
+
+
+/* the references a structure's fields name that name a tag but give no
+index, and those in its blocks and structures (below) and its own structures
+(a structure's fields are at its offset, as the schema's are) */
+static boolean restore_references_in_fields(
+	struct tag_validation *validation,
+	struct tag_schema_definition const *definition,
+	byte *base,
+	struct tag_validate_instance const *instances,
+	long tag_count)
+{
+	long field_index;
+
+	for (field_index = 0; definition->fields[field_index].type != _tag_schema_terminator; field_index++)
+	{
+		struct tag_schema_field const *field = &definition->fields[field_index];
+
+		if (field->type == _tag_schema_reference && field->definition)
+		{
+			short item;
+
+			for (item = 0; item < field->count; item++)
+			{
+				struct tag_reference *reference =
+					(struct tag_reference *)(base + field->offset + item * field->size);
+
+				if (reference->index == 0 && string_valid(validation, reference->name))
+				{
+					long count = 0;
+					long index = tag_index_by_name(instances, tag_count, field->definition, reference->name, &count);
+
+					if (count > 1)
+					{
+						return FALSE;
+					}
+					if (index >= 0)
+					{
+						reference->index = instances[index].tag_index;
+					}
+				}
+				else if (reference->index > 0)
+				{
+					long index = DATUM_INDEX_TO_ABSOLUTE_INDEX(reference->index);
+
+					/* (a map whose table gave no indices named tags 0 and up: the
+					reference is to that tag, given its own index now) */
+					if ((short)reference->index == reference->index && index >= 0 && index < tag_count)
+					{
+						reference->index = instances[index].tag_index;
+					}
+				}
+			}
+		}
+		else if (field->type == _tag_schema_struct && field->definition)
+		{
+			if (!restore_references_in_fields(validation, field->definition, base + field->offset, instances,
+				tag_count))
+			{
+				return FALSE;
+			}
+		}
+		else if (field->type == _tag_schema_block && field->definition)
+		{
+			struct tag_block *block = (struct tag_block *)(base + field->offset);
+			long element;
+
+			for (element = 0; element < block->count && element < field->maximum; element++)
+			{
+				byte *element_base = (byte *)block->address + element * field->size;
+
+				if (!region_contains(validation, element_base, field->size) ||
+					!restore_references(validation, field->definition, element_base, instances, tag_count))
+				{
+					return FALSE;
+				}
+			}
+		}
+	}
+
+	return TRUE;
+}
+
+static boolean restore_references(
+	struct tag_validation *validation,
+	struct tag_schema_definition const *definition,
+	byte *base,
+	struct tag_validate_instance const *instances,
+	long tag_count)
+{
+	return restore_references_in_fields(validation, definition, base, instances, tag_count);
+}
+
+/* port: every reference of every tag's schema that gives no index is given
+one, by the tag it names (restore_references); FALSE if one names tags more
+than one of its group's has */
+static boolean restore_reference_indices(
+	struct tag_validation *validation,
+	struct tag_validate_instance const *instances,
+	long tag_count)
+{
+	long tag;
+
+	for (tag = 0; tag < tag_count; tag++)
+	{
+		struct tag_schema_group const *group = schema_group_get(instances[tag].group_tag);
+
+		if (group && group->definition && instances[tag].base_address &&
+			!restore_references(validation, group->definition, instances[tag].base_address, instances, tag_count))
+		{
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
 /* ---------- public code */
 
 /* the tags at tag_header (tag_data_size bytes of a tag cache), whose header
@@ -1100,10 +1263,9 @@ static boolean validate_tag_table(
 	/* (which names were the map's before any of it was claimed: at most the
 	tags a header may have, UNSIGNED_SHORT_MAX) */
 	static boolean annotated_names[UNSIGNED_SHORT_MAX + 1];
-	/* port: the map's own tag indices, kept where its table's place holds its
-	datum index (recomp's 0xE1740000 and up): every reference the game reads is
-	such an index, and a tag_get by it finds its tag */
-	static unsigned short table_indices[UNSIGNED_SHORT_MAX];
+	/* port: whether the map's table held its tags' datum indices where this
+	build's holds their indices (recomp's 0xE1740000 and up) */
+	boolean mapped_indices = FALSE;
 	long absolute_index;
 
 	csmemset(annotated_names, 0, sizeof(annotated_names));
@@ -1133,16 +1295,14 @@ static boolean validate_tag_table(
 		their own indices, and are left as they are */
 		if (instance->tag_index != absolute_index)
 		{
-			instance->tag_index = DATUM_INDEX_NEW(absolute_index);
+			instance->tag_index = DATUM_INDEX_NEW(absolute_index, DATUM_INDEX_TO_IDENTIFIER(instance->tag_index));
+			mapped_indices = TRUE;
 		}
-		table_indices[absolute_index] = (unsigned short)instance->tag_index;
 		if (!name_known)
 		{
 			instance->name = (char *)tag_validate_empty_name;
 			tag_validate_correct(validation, "has no name");
 		}
-			annotated_names[absolute_index] = name_known;
-		/* (a slicing bsp's root is filled with the scenario's tags over it) */
 		annotated_names[absolute_index] = name_known;
 		/* (a group's parents are what the game asks a tag's group by
 		(tag_get): they are the group's, not the map's) */
@@ -1180,17 +1340,13 @@ static boolean validate_tag_table(
 	}
 
 	/* port: a map whose table gave no indices had its references that way (a
-	name and an index of 0), and they are given their tags' index now that
-the table has them */
-	for (absolute_index = 0; absolute_index < tag_count && !validation->refused; absolute_index++)
+	name, which the tags' are, and an index of 0), and they are given their
+	tags' index now that the table has them, found by name among the map's own.
+	This build's tables' places are the indices, and its references name those */
+	if (mapped_indices && !restore_reference_indices(validation, instances, tag_count))
 	{
-		struct tag_validate_instance *instance = &instances[absolute_index];
-		struct tag_schema_definition const *definition = schema_group_definition(instance->group_tag);
-
-		if (definition)
-		{
-			mapped_references_restore(validation, definition, instance->base_address);
-		}
+		tag_validate_refuse(validation, "has a reference to a tag by a name more than one tag has");
+		return FALSE;
 	}
 
 	/* every tag through its schema, then every tag's checks */
@@ -1212,9 +1368,9 @@ the table has them */
 		validation->tag_index = instance->tag_index;
 		validation->depth = 0;
 		validation->field_name = NULL;
-		/* port: a name is one where it lies in the tag data, as a map of another
-		build's does not among its tags (recomp's): those the first pass kept
-		are the ones a tag's data could have taken, and are checked */
+		/* port: only a name that was the map's before its tags' data was claimed
+		can have been taken by it: a map of another build keeps its tag table
+		apart from its header, among the tags (recomp's), and those names are one */
 		if (!string_valid(validation, instance->name) ||
 			(annotated_names[absolute_index] &&
 				tag_validate_any_claimed(instance->name, (unsigned long)strlen(instance->name) + 1)))
