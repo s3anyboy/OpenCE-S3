@@ -24,6 +24,7 @@ each function names the one it is (its address in the executable).
 #include "saved games/game_state.h"
 #include "sound/game_sound.h"
 #include "tag_files/tag_groups.h"
+#include "main/console.h" /* port: the buy menu's report */
 #include "tag_files/tag_files.h"
 #include "units/bipeds.h"
 #include "units/biped_definitions.h"
@@ -358,6 +359,35 @@ char const *shadowrun_unit_definition_first_name(
 		else if (srud_count == 0)
 		{
 			snprintf(result, sizeof(result), "none (%.4s walked)", group_tag);
+		}
+		/* port: what the walk saw, when it saw no srud: the loaded tags' table
+		and the groups of its first tags */
+		if (srud_count == 0)
+		{
+			/* port: a tag instance is a group tag, two parents, an index, a
+			name and a data address (cache_files.c's); the loaded tags' table is
+			asked for as menu_tags.c asks */
+			void *cache_files_tag_instances(long *count);
+			struct tag_instance_prefix
+			{
+				long group_tag;
+				long parent_group_tags[2];
+			};
+			long total = 0;
+			struct tag_instance_prefix const *instances = cache_files_tag_instances(&total);
+
+			if (instances && total >= 4)
+			{
+				console_printf(FALSE, "buy menu: %ld tags, first groups %08lx %08lx %08lx %08lx (%s)",
+					total, (unsigned long)instances[0].group_tag, (unsigned long)instances[1].group_tag,
+					(unsigned long)instances[2].group_tag, (unsigned long)instances[3].group_tag,
+					(unsigned long)instances[0].group_tag == (unsigned long)SHADOWRUN_UNIT_DEFINITION_TAG ?
+						"the first is an srud" : "none of them is an srud");
+			}
+			else
+			{
+				console_printf(FALSE, "buy menu: no tag table to walk");
+			}
 		}
 	}
 
