@@ -48,22 +48,7 @@ DRIVER = r"""
           driver bsp LINKED READ FREE_ADDRESS FREE_BYTES
           driver convert TAG_DATA_FILE ADDRESS (writes the converted data back)
           driver header HEADER_FILE */
-/* a copy of the size bytes at bytes, at the first address in page whose low
-16 bits are linked_address's */
-static unsigned char *aligned_page(unsigned char *page, unsigned char const *bytes, unsigned long size,
-	unsigned long linked_address)
-{
-	unsigned char *at = page + ((0x10000UL - ((unsigned long)page & 0xFFFF)) & 0xFFFF);
 
-	at += linked_address & 0xFFFF;
-	if ((unsigned long)at > 0xFFFFFFFFUL - size)
-		exit(2);
-
-	if (size < 4)
-		exit(2);
-	memcpy(at, bytes, size);
-	return at;
-}
 
 static unsigned char *slurp(char const *path, unsigned long *size)
 {
@@ -98,18 +83,22 @@ int main(int argc, char **argv)
 	else if (argc == 4 && !strcmp(argv[1], "shadowrun"))
 	{
 		unsigned long size;
-		unsigned long linked = strtoul(argv[3], NULL, 0);
 		unsigned char *bytes = slurp(argv[2], &size);
-		unsigned char *page = calloc(1, size + 0x20000);
-		unsigned char *at;
 
-		/* (the format module reads the tag header at the address it is given:
-		the test's data is copied where the map says it is linked) */
-		if (!page)
-			exit(2);
-		at = aligned_page(page, bytes, size, linked);
-		result = (uint32_t)shadowrun_cache_tag_data_any((uint32_t)(unsigned long)at);
-		free(page);
+		/* (the map's tag data: its tag header's signature, as the map has
+		it) */
+		result = (uint32_t)shadowrun_cache_tag_data_group_tag(bytes, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG);
+		result |= (uint32_t)shadowrun_cache_tag_data_group_tag(bytes, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED);
+		free(bytes);
+		status = _cache_file_status_ok;
+	}
+	else if (argc == 4 && !strcmp(argv[1], "signature"))
+	{
+		unsigned long size;
+		unsigned char *bytes = slurp(argv[2], &size);
+
+		/* (the tag header the map has) */
+		result = (uint32_t)shadowrun_cache_tag_header_signature(bytes);
 		free(bytes);
 		status = _cache_file_status_ok;
 	}
@@ -186,6 +175,7 @@ def driver(request, tmp_path_factory):
     def run(*arguments):
         completed = subprocess.run([str(output), *map(str, arguments)], capture_output=True, text=True)
         assert completed.returncode == 0, completed
+        print(completed.stdout.strip())
         status, value = completed.stdout.strip().rsplit(" ", 1)
         return status, int(value, 16)
 
@@ -252,6 +242,23 @@ def test_this_builds_maps_are_not_shadowruns(driver):
 def test_tag_data_linked_outside_the_tag_cache_is_not_shadowruns(driver):
     path = write(driver, "outside.bin", tag_data(SHADOWRUN_TAG_DATA))
     assert driver("shadowrun", path, 0x80000000) == ("ok", 0)
+
+
+# ---------- the tag header the game reads
+
+
+def test_a_tag_header_this_build_reads_has_its_signature(driver):
+    path = write(driver, "signed.bin", tag_data(SHADOWRUN_TAG_DATA))
+    assert driver("signature", path, SHADOWRUN_TAG_DATA) == ("ok", 1)
+
+
+@pytest.mark.parametrize("signature", [b"tags", b"stga", b"\0\0\0\0", b"gat!"],
+                         ids=["swapped", "another word", "zeroes", "another near"])
+def test_other_tag_headers_are_not_this_builds(driver, signature):
+    data = bytearray(tag_data(SHADOWRUN_TAG_DATA))
+    data[0x20:0x24] = signature
+    path = write(driver, "unsigned.bin", bytes(data))
+    assert driver("signature", path, SHADOWRUN_TAG_DATA) == ("ok", 0)
 
 
 @pytest.mark.parametrize("table", [

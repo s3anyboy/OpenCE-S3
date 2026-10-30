@@ -429,10 +429,16 @@ static byte *cache_files_tags_place(
 	uint32_t linked_address;
 	byte *tag_data;
 
+	/* port: where a map links its tags, what this build reads there must read
+	as its own tag header ("tags"): every Xbox map of this build's is linked to
+	the base, so only another build's is asked, and a map of one that is not
+	the prototype's would otherwise fail the tag header's check later */
 	if (xbox_cache_tag_data_address(tag_cache, (uint32_t)tag_data_size, (uint32_t)(unsigned long)tag_cache,
-		TAG_CACHE_SIZE, &linked_address) != _cache_file_status_ok)
+		TAG_CACHE_SIZE, &linked_address) != _cache_file_status_ok ||
+		!shadowrun_cache_tag_header_signature((uint8_t const *)(unsigned long)linked_address))
 	{
-		error(_error_silent, "the cache file '%s' is damaged: its tags are linked outside the tag cache", scenario_name);
+		error(_error_silent, "the cache file '%s' is damaged: its tags are linked outside the tag cache, or are not a tag header",
+			scenario_name);
 		return NULL;
 	}
 	tag_data = (byte *)(unsigned long)linked_address;
@@ -1579,7 +1585,7 @@ long scenario_tags_load(
 			cache_file_globals.tags_loaded = TRUE;
 			/* port: a Shadowrun prototype map plays its own game (port/linux/game/shadowrun_units.c) */
 			shadowrun_tags_loaded(cache_file_other_build &&
-			shadowrun_cache_tag_data_any((uint32_t)(unsigned long)cache_file_tag_data));
+				shadowrun_cache_tag_data_any((uint32_t)(unsigned long)cache_file_tag_data));
 			/* port: a PAL map played as the NTSC maps are (port/linux/game/pal_tags.c) */
 			{
 				extern void pal_tags_loaded(char const *build);

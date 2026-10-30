@@ -4018,22 +4018,18 @@ signature has the byte order the map's group tags are written in: read as a
 group tag it is TAG_INDEX_SIGNATURE, or the same bytes the other way. This
 build's maps are linked to the tag cache's base, as every Xbox map was */
 int shadowrun_cache_tag_data_group_tag(
-	uint32_t tag_data_address,
+	uint8_t const *tag_header,
 	uint32_t group_tag)
 {
-	uint32_t bytes[1];
+	return read_u32(tag_header + XBOX_TAG_HEADER_SIGNATURE_OFFSET) == group_tag;
+}
 
-	if (tag_data_address < XBOX_TAG_CACHE_ADDRESS ||
-		tag_data_address - XBOX_TAG_CACHE_ADDRESS >= XBOX_TAG_CACHE_BYTES)
-	{
-		return 0;
-	}
-	/* (read at its address, as every unaligned field is: memcpy, never a
-	pointer to an int, which the compiler may assume is aligned) */
-	memcpy(bytes, (uint8_t const *)(unsigned long)(tag_data_address + XBOX_TAG_HEADER_SIGNATURE_OFFSET),
-		sizeof(bytes));
-
-	return read_u32((uint8_t const *)bytes) == group_tag;
+/* port: the tag header of the tags a map links there, read the way this build
+reads it, holds the signature its check of the header asserts */
+int shadowrun_cache_tag_header_signature(
+	uint8_t const *tag_header)
+{
+	return read_u32(tag_header + XBOX_TAG_HEADER_SIGNATURE_OFFSET) == SHADOWRUN_CACHE_TAG_HEADER_SIGNATURE;
 }
 
 /* this build's actor type (ai/actor_types.h) for each of Shadowrun's, by
@@ -4086,14 +4082,23 @@ int shadowrun_cache_header_campaign(
 int shadowrun_cache_tag_data(
 	uint32_t tag_data_address)
 {
-	return shadowrun_cache_tag_data_group_tag(tag_data_address, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG);
+	return shadowrun_cache_tag_data_any(tag_data_address);
 }
 
 int shadowrun_cache_tag_data_any(
 	uint32_t tag_data_address)
 {
-	return shadowrun_cache_tag_data_group_tag(tag_data_address, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG) ||
-		shadowrun_cache_tag_data_group_tag(tag_data_address, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED);
+	uint8_t const *tag_header;
+
+	if (tag_data_address < XBOX_TAG_CACHE_ADDRESS ||
+		tag_data_address - XBOX_TAG_CACHE_ADDRESS >= XBOX_TAG_CACHE_BYTES)
+	{
+		return 0;
+	}
+	tag_header = (uint8_t const *)(unsigned long)tag_data_address;
+
+	return shadowrun_cache_tag_data_group_tag(tag_header, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG) ||
+		shadowrun_cache_tag_data_group_tag(tag_header, SHADOWRUN_TAG_SIGNATURE_GROUP_TAG_SWAPPED);
 }
 
 
