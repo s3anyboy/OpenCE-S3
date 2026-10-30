@@ -65,6 +65,13 @@ static struct
 {
 	/* the map loaded is the Shadowrun prototype's */
 	boolean map_loaded;
+	/* port: the map's own tag table, kept as its tags loaded: the menus put a
+
+table of their own in place of the game's (menu_tags.c,
+cache_files_set_tag_instances), and the map's tags are what Shadowrun's are
+ */
+	struct shadowrun_tag_instance *map_instances;
+	long map_instance_count;
 	/* the players' (in the game state) */
 	struct shadowrun_player *players;
 } shadowrun_globals;
@@ -116,6 +123,10 @@ void shadowrun_initialize_for_new_map(
 	{
 		shadowrun_globals.players[player_index].chosen_tech = _shadowrun_tech_none;
 	}
+	/* port: the last map's table is not this map's (shadowrun_tags_loaded
+	takes this one's) */
+	shadowrun_globals.map_instances = NULL;
+	shadowrun_globals.map_instance_count = 0;
 	shadowrun_magic_initialize_for_new_map();
 	/* port: the cable's, of a unit that outlives a map (shadowrun_cable.c) */
 	shadowrun_cable_initialize_for_new_map();
@@ -137,6 +148,15 @@ void shadowrun_tags_loaded(
 		long tag_index;
 		long corrected = 0;
 
+		/* port: the map's tag table, which the menus' (menu_tags.c) does not
+		replace for Shadowrun: it is taken now, before they are added */
+		{
+			void *cache_files_tag_instances(long *count);
+
+			shadowrun_globals.map_instance_count = 0;
+			shadowrun_globals.map_instances = cache_files_tag_instances(&shadowrun_globals.map_instance_count);
+		}
+
 		/* port: the map's group tags as this build reads one. A map stores a
 		group as the bytes of its name ('srud' is s r u d, 0x64757273 read
 		from its first byte), and this build reads the four as a number of
@@ -151,19 +171,13 @@ void shadowrun_tags_loaded(
 		first group is none of this build's, is named here rather than told
 		by the menu's failure to find an srud */
 		{
-			/* cache_files.c's (menu_tags.c declares it as this) */
-			void *cache_files_tag_instances(long *count);
-			struct tag_instance_prefix
-			{
-				long group_tag;
-			};
-			long count = 0;
-			struct tag_instance_prefix const *first = cache_files_tag_instances(&count);
+			long count = shadowrun_globals.map_instance_count;
+			struct shadowrun_tag_instance const *first = shadowrun_globals.map_instances;
 
 			if (first && count > 0)
 			{
 				console_printf(FALSE, "shadowrun: %ld tags, the first of group %08lx",
-					count, (unsigned long)first->group_tag);
+					count, (unsigned long)first[0].group_tag);
 			}
 			else
 			{
@@ -415,18 +429,17 @@ char const *shadowrun_unit_definition_first_name(
 	return result;
 }
 
-/* port: the map's tag table, as the loader gave it (cache_files.c, through
-its own accessor: a tag instance is a group tag, two parents, an index, a
-name and a data address), and its tags' count; NULL for none. The loaded
-table is the one the game walks, which this build's tag iterator cannot
-match a group of another build in (SHADOWRUN_GROUP_TAG_IS) */
+/* port: the map's tag table, kept as the map's tags loaded (and its tags'
+count); NULL before a Shadowrun map does, or if one's tags did not load. It
+is not the game's current one, which a menu's may have replaced
+(shadowrun_globals.map_instances). This build's tag iterator cannot match a
+group of another build in it (SHADOWRUN_GROUP_TAG_IS) */
 static struct shadowrun_tag_instance const *shadowrun_tag_instances(
 	long *count)
 {
-	void *cache_files_tag_instances(long *count);
+	*count = shadowrun_globals.map_instance_count;
 
-	*count = 0;
-	return cache_files_tag_instances(count);
+	return shadowrun_globals.map_instances;
 }
 
 /* port: a tag's name, out of its instance */
