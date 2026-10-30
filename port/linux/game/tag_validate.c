@@ -1087,9 +1087,10 @@ static boolean validate_buffers(
 	return TRUE;
 }
 
-/* port: whether the map's tag of `name` in one of `groups` is one (taken),
-and its index: a name no tag has, or one several tags have, is none (-1, and
-*count says how many) */
+/* port: whether the map's tag of `name` in one of `groups` is one, and its
+index: -1 (and *count says how many have it) for none. A map may name more
+than one tag alike (missionlet's and ui.map's have such: their bsps' shaders
+share names): the one that has no namesake is given where one does */
 static long tag_index_by_name(
 	struct tag_validate_instance const *instances,
 	long tag_count,
@@ -1118,14 +1119,46 @@ static long tag_index_by_name(
 	return result;
 }
 
+/* port: whether the name of a reference into a tag's data is the map's,
+which the game reads (a tag's data the map does not write is its own; one it
+writes holds its runtime values, and those are a word at most) */
+static boolean reference_name_is_map_born(
+	struct tag_validation *validation,
+	char const *name)
+{
+	byte const *tag_cache = (byte const *)tag_validate_globals.header;
+	unsigned long first = (unsigned long)name - (unsigned long)tag_cache;
+	unsigned long length;
+
+	if (!name || (unsigned long)name < (unsigned long)tag_cache ||
+		first >= tag_validate_globals.tag_cache_size)
+	{
+		return FALSE;
+	}
+	for (length = 0; length < MAXIMUM_TAG_NAME_LENGTH; length++)
+	{
+		if (first + length >= tag_validate_globals.tag_cache_size)
+		{
+			return FALSE;
+		}
+		if (!name[length])
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
 /* port: the references a tag's schema names (and those in its blocks and
 structures) that name a tag but give no index, which a map whose table gave
 none has: they are given the index of the tag they name, which is one in the
 map's tag table. The tags the schema follows but does not name a group for
 (a bsp's lightmaps' and shaders', a shader's) are left none, as their blocks'
-run into one another: that is a map no schema names. FALSE when a reference
-names tags more than one of its groups holds (none of the map's does; a map
-that does is refused rather than played with a wrong tag) */
+run into one another: that is a map no schema names. A name more than one tag
+has is the first's that has no namesake, or none: never a refusal, a map's
+names being its own (the game reads a reference's index; its name is only
+what this recovers) */
 static boolean restore_references(
 	struct tag_validation *validation,
 	struct tag_schema_definition const *definition,
@@ -1160,31 +1193,56 @@ static boolean restore_references_in_fields(
 				struct tag_reference *reference =
 					(struct tag_reference *)(base + field->offset + item * field->size);
 
-				if (reference->index == 0 && string_valid(validation, reference->name))
+				if (reference->index == 0 && reference_name_is_map_born(validation, reference->name))
 				{
 					long count = 0;
 					long index = tag_index_by_name(instances, tag_count, field->definition, reference->name, &count);
 
-					if (count > 1)
-					{
-						return FALSE;
-					}
-					if (index >= 0)
+					if (index >= 0 && count == 1)
 					{
 						reference->index = instances[index].tag_index;
 					}
-				}
-				else if (reference->index > 0)
-				{
-					long index = DATUM_INDEX_TO_ABSOLUTE_INDEX(reference->index);
+					else if (index >= 0)
+					{
+						/* (a name more than one tag has: the one the map alone names so
+						is the tag's, and it is named wherever its own is no other's;
+						failing that, the first of them. Tags that share a name of
+						their own (a bsp's shaders' of levels\ui\ui) share none) */
+						long candidate;
 
-					/* (a map whose table gave no indices named tags 0 and up: the
-					reference is to that tag, given its own index now) */
-					if ((short)reference->index == reference->index && index >= 0 && index < tag_count)
-					{
-						reference->index = instances[index].tag_index;
+						reference->index = 0;
+						for (candidate = 0; candidate < tag_count; candidate++)
+						{
+							long other;
+
+							if (strcmp(instances[candidate].name, reference->name) ||
+								!instance_in_groups(&instances[candidate], field->definition))
+							{
+								continue;
+							}
+							for (other = 0; other < tag_count; other++)
+							{
+								if (other != candidate && !strcmp(instances[other].name, reference->name) &&
+									instances[other].base_address == instances[candidate].base_address)
+								{
+									break;
+								}
+							}
+							if (other < tag_count)
+							{
+								continue;
+							}
+							reference->index = instances[candidate].tag_index;
+							break;
+						}
+						if (reference->index == 0)
+						{
+							reference->index = instances[index].tag_index;
+						}
 					}
 				}
+				/* (one that names a tag is the table's already: some of the same
+				name are each other's, and a name gives none of them back) */
 			}
 		}
 		else if (field->type == _tag_schema_struct && field->definition)
@@ -1227,15 +1285,17 @@ static boolean restore_references(
 }
 
 /* port: every reference of every tag's schema that gives no index is given
-one, by the tag it names (restore_references); FALSE if one names tags more
-than one of its group's has */
+one, by the tag it names (restore_references); *restored says whether any
+was (a map's tags may be named alike, and its own names given back) */
 static boolean restore_reference_indices(
 	struct tag_validation *validation,
 	struct tag_validate_instance const *instances,
-	long tag_count)
+	long tag_count,
+	boolean *restored)
 {
 	long tag;
 
+	*restored = FALSE;
 	for (tag = 0; tag < tag_count; tag++)
 	{
 		struct tag_schema_group const *group = schema_group_get(instances[tag].group_tag);
@@ -1264,8 +1324,10 @@ static boolean validate_tag_table(
 	tags a header may have, UNSIGNED_SHORT_MAX) */
 	static boolean annotated_names[UNSIGNED_SHORT_MAX + 1];
 	/* port: whether the map's table held its tags' datum indices where this
-	build's holds their indices (recomp's 0xE1740000 and up) */
+	build's holds their indices (recomp's 0xE1740000 and up), and whether any
+	reference was taken by name (a map's own tags need not have unique names) */
 	boolean mapped_indices = FALSE;
+	boolean restored_by_name = FALSE;
 	long absolute_index;
 
 	csmemset(annotated_names, 0, sizeof(annotated_names));
@@ -1343,10 +1405,22 @@ static boolean validate_tag_table(
 	name, which the tags' are, and an index of 0), and they are given their
 	tags' index now that the table has them, found by name among the map's own.
 	This build's tables' places are the indices, and its references name those */
-	if (mapped_indices && !restore_reference_indices(validation, instances, tag_count))
+	if (mapped_indices)
 	{
-		tag_validate_refuse(validation, "has a reference to a tag by a name more than one tag has");
-		return FALSE;
+		if (!restore_reference_indices(validation, instances, tag_count, &restored_by_name))
+		{
+			tag_validate_refuse(validation, "has tags whose data does not lie in its tag cache");
+			return FALSE;
+		}
+		/* port: and a name a reference was given back by is the map's own, as
+		those of its tags are, however the game's writes lie about it */
+		if (restored_by_name)
+		{
+			for (absolute_index = 0; absolute_index < tag_count; absolute_index++)
+			{
+				annotated_names[absolute_index] = FALSE;
+			}
+		}
 	}
 
 	/* every tag through its schema, then every tag's checks */
