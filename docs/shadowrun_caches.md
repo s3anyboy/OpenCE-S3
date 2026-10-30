@@ -54,9 +54,13 @@ Shadowrun's own functions (see [Scripts](#scripts) and [Magic](#magic)).
 
 `recomp.map` is another of the prototype's maps (`levels\test\hangemhigh\recomp`,
 its header naming the same build), made with a larger game state: it links
-its tags to `0x806D0000` instead of `0x8069E000`. Its tags are the same as
-missionlet's, `srud`, `buym` and all, so it plays as missionlet does, and its
-buy menu, opened with Back, sells as missionlet's does.
+its tags to `0x806D0000` instead of `0x8069E000`. It has **no `srud` tags at
+all**, and its `characters\sr_player\sr_player` biped names none, so nothing
+of it is a Shadowrun unit definition: its players are races, spells and prices
+the map does not carry. Its `buym` (the buy menu's sounds) it does have, so
+the menu opens there with Back and sells, for $0, the spells, techs and
+grenades whose code the port has; its weapons are not sold, as those are its
+srud's (`shadowrun_buy_menu.c`, `shadowrun_shop_buy_menu`).
 
 ## What differs, and what is done
 
