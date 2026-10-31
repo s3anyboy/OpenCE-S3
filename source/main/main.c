@@ -404,6 +404,7 @@ symbols in this file:
 #include "text/font_group.h"
 #include "tag_files/files.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
+#include "custom_edition_maps.h" /* port: shadowrun_level_name */
 #include "view_fov.h" /* port: display.fov, before the projection and culling */
 
 #if defined(HALO_WINDOWS) || defined(HALO_ANDROID) || defined(__linux__)
@@ -1276,8 +1277,9 @@ short main_get_solo_level_from_name(
 
 	/* port: a Custom Edition map (custom_maps\a30) is never one of the
 	campaign's levels, whatever its name holds
-	(port/linux/game/custom_edition_cache.c) */
-	if (custom_edition_level_name(name))
+	(port/linux/game/custom_edition_cache.c), nor is a Shadowrun prototype
+	map (shadowrun\b30sr: port/linux/game/custom_edition_maps.c) */
+	if (custom_edition_level_name(name) || shadowrun_level_name(name))
 		return NONE;
 	csstrncpy(lower_name, name, NUMBEROF(lower_name) - 1);
 	lower_name[NUMBEROF(lower_name) - 1] = 0;

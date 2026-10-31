@@ -193,6 +193,11 @@ void shadowrun_tags_loaded(
 		given each tag's the way round this build's are, which the group's
 		schema then names, before anything asks a tag its group by */
 		shadowrun_cache_tag_groups_normalize();
+		/* port: the projectiles of the spells (tree of life, firewall), told by
+		their flags, which are taken off them here: once the groups are this
+		build's, which the walk asks by (shadowrun_magic.c). Without it, a
+		tree of life's grenade landed and no tree grew */
+		shadowrun_projectiles_loaded();
 		/* port: what the loader gave it, before anything walks it: the tags'
 		count (the header's), and the first tag's group, as this build reads
 		it and as the map holds it. A table of another count, or one whose

@@ -46,6 +46,11 @@ char *main_get_map_name(
 char *main_get_multiplayer_map_name(
 	void);
 
+/* port: which of the campaign's levels (0, a10, to 9, d40) a level name is, by
+the level's name it holds; NONE for none (a Custom Edition or Shadowrun
+prototype map's is none) */
+short main_get_solo_level_from_name(
+	char const *name);
 short main_get_difficulty(
 	void);
 

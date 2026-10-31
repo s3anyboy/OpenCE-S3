@@ -364,6 +364,10 @@ static short shadowrun_antimagic_zone_count;
 
 /* the map's t3ed (anti-magic's tech tag), looked for once a map */
 static long shadowrun_antimagic_definition_index = NONE;
+/* (defined with the anti-magic grenade's and the glider's code, below:
+shadowrun_antimagic_initialize_for_new_map resets them) */
+static long shadowrun_antimagic_grenade_index;
+static long shadowrun_glider_scenery_index;
 
 /* the map's t3ed: the Shadowrun unit's tech3, of the unit that threw it (the
 anti-magic grenade is a map's projectile, which has no unit's: the first t3ed
@@ -410,6 +414,12 @@ void shadowrun_antimagic_initialize_for_new_map(
 
 	shadowrun_antimagic_zone_count = 0;
 	shadowrun_antimagic_definition_index = NONE;
+	/* port: the tags looked for once a map are looked for anew in this one:
+	the menu's ui.map is a prototype map too, and its anti-magic grenade
+	(0xE23B00C7) made b30sr.map's second grenade whatever tag of b30sr.map
+	has that handle (its dust's effect: the grenade was never made) */
+	shadowrun_antimagic_grenade_index = NONE;
+	shadowrun_glider_scenery_index = NONE;
 	if (!shadowrun_map_loaded())
 	{
 		return;

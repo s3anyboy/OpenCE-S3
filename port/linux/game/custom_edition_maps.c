@@ -501,9 +501,12 @@ static void shadowrun_maps_look_for(
 		if (!extension || csstrcasecmp(extension, ".map"))
 			continue;
 		*extension = 0;
-		/* (the game's own levels, and a name the campaign's levels are told
-		by, main_get_solo_level_from_name) */
-		if (!csstrcasecmp(name, "ui") || main_get_solo_level_from_name(name) != NONE ||
+		/* (the game's own levels: ui, and a campaign level's own name, a10 to
+		d40. port: a name that only holds one is listed, as b30sr is: it loads
+		as shadowrun\b30sr, which main_get_solo_level_from_name tells from
+		the campaign's b30) */
+		if (!csstrcasecmp(name, "ui") ||
+			(csstrlen(name) == 3 && main_get_solo_level_from_name(name) != NONE) ||
 			csstrlen(name) > MAXIMUM_MAP_NAME_LENGTH ||
 			csstrlen(folder) + csstrlen(name) + 4 > MAXIMUM_FILENAME_LENGTH)
 		{
