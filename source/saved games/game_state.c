@@ -1049,6 +1049,13 @@ void game_state_initialize(
 	void)
 {
 	crc_new(&game_state_globals.allocation_size_checksum);
+	/* saved games hold pointers into the game state: those of a build that
+	placed it elsewhere do not load (halo_port_capacity.h moved it above the
+	larger tag cache) */
+	{
+		unsigned long base_address = HALO_PORT_GAME_STATE_BASE_ADDRESS;
+		crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &base_address, sizeof(base_address));
+	}
 	/* the native builds place their larger game state above the tag cache
 	(halo_port_capacity.h, cache/physical_memory_map.c) */
 	game_state_globals.base_address = game_state_allocate_buffer(HALO_PORT_GAME_STATE_BASE_ADDRESS, GAME_STATE_CPU_SIZE, GAME_STATE_GPU_SIZE);

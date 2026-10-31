@@ -30,7 +30,7 @@ fill 3,165,260 of its 0x305000 bytes); the GPU part holds only the decal
 vertices, as on the Xbox. A change to a pool's size changes the game state's
 layout: saved games of builds before it no longer load. */
 
-#define HALO_PORT_GAME_STATE_BASE_ADDRESS 0x82800000 /* (0x80061000) */
+#define HALO_PORT_GAME_STATE_BASE_ADDRESS 0x82D00000 /* (0x80061000) */
 #define HALO_PORT_GAME_STATE_CPU_SIZE 0x13C0000 /* (0x305000) */
 #define HALO_PORT_GAME_STATE_GPU_SIZE 0x40000 /* (0x40000) */
 #define HALO_PORT_GAME_STATE_SIZE (HALO_PORT_GAME_STATE_CPU_SIZE+HALO_PORT_GAME_STATE_GPU_SIZE)
@@ -73,15 +73,19 @@ the Xbox's. */
 
 The Xbox's tag cache is 0x1600000 bytes at 0x803A6000, to the game state at
 0x80660000, which the maps it shipped were made to fit. The Shadowrun
-prototype's campaign map b30sr.map has 0x1E34878 bytes of tag data, linked at
-0x806D0000 and ending at 0x82504878, and its structure bsp loads after them:
-the desktop builds' cache is larger, from 0x803A6000 to 0x82700000, with
-their game state above it (0x82800000); Android's and the web build's keep
-the Xbox's. */
+prototype's campaign map b30sr.map has up to 0x1E34878 bytes of tag data,
+linked at 0x806D0000 (ending at 0x82504878; the 2026-10-31 build's end at
+0x824C2948), and its structure bsps load after them: b30a is 0x64A000 bytes,
+so the cache must reach 0x82B4F000 (0x82B0D000 for the later build). With a
+smaller one the bsp stays at the address it was linked to, 0x82086000, over
+the last 4 MB of tags (the weapons' among them: weapons_initialize_for_new_map
+then reads garbage, and tag_groups.c asserts on an element size). The desktop
+builds' cache is from 0x803A6000 to 0x82C00000, with their game state above
+it (0x82D00000); Android's and the web build's keep the Xbox's. */
 #if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
 #define HALO_PORT_TAG_CACHE_SIZE 0x1600000 /* (0x1600000) */
 #else
-#define HALO_PORT_TAG_CACHE_SIZE 0x235A000 /* (0x1600000) */
+#define HALO_PORT_TAG_CACHE_SIZE 0x285A000 /* (0x1600000) */
 #endif
 
 /* ---------- the largest campaign map a cache file holds
