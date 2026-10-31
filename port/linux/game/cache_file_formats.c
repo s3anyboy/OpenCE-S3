@@ -4060,6 +4060,22 @@ element copied down to this build's */
 #define WEAPON_MAGAZINE_BYTES_THIS_BUILD 0x34
 #define WEAPON_TRIGGER_BYTES_THIS_BUILD 0x30
 #define MAXIMUM_WEAPON_BLOCK_ELEMENTS 8
+/* port: a Shadowrun unit definition (srud, shadowrun_definitions.h) as a map
+holds it when it was put in it uncompiled: the tag file's body as it is (its
+0x600 bytes big-endian, every reference with no name and no tag, its races'
+block with no address), followed by what the tag file keeps after it, the
+names of its references and its races' elements, in its fields' order. b30sr.map's
+are (invader built its sruds as opaque data: exclude/synth/make_opaque.py in
+invader-S3), and the buy menu sold nothing from them */
+#define SHADOWRUN_UNIT_GROUP_TAG 'srud'
+#define SHADOWRUN_UNIT_GROUP_TAG_BYTES 0x64757273UL
+#define SHADOWRUN_UNIT_BYTES 0x600
+#define SHADOWRUN_UNIT_RACES_OFFSET 0x160
+#define SHADOWRUN_UNIT_PRICES_OFFSET 0x500
+#define SHADOWRUN_UNIT_PRICE_COUNT 48
+#define SHADOWRUN_RACE_BYTES 0xA00
+#define SHADOWRUN_MAXIMUM_RACES 5
+#define MAXIMUM_TAG_FILE_NAME_LENGTH 255
 
 /* port: whether the tag header says the signature `group_tag` (the tag
 header's signature, 'tags', read as a group tag, or the same bytes the other
@@ -4207,13 +4223,364 @@ static int shadowrun_weapon_blocks_convert(
 	return converted;
 }
 
+/* port: an srud's fields in the tag file's order: its references (by their
+offset), and its races' block (SHADOWRUN_UNIT_RACES_OFFSET), whose elements'
+names follow theirs. A race's references, and the fields the game reads of it
+(shadowrun_definitions.h, struct shadowrun_race): its flags, its AI unit
+effect (a short), its mana capacity (a long) and the reals */
+static uint16_t const shadowrun_unit_field_offsets[] =
+{
+	0x100, 0x110, 0x120, 0x130, 0x140, 0x150, SHADOWRUN_UNIT_RACES_OFFSET, 0x220, 0x400, 0x410, 0x420,
+	0x430, 0x440, 0x450, 0x460, 0x470, 0x480, 0x490, 0x4A0, 0x4B0, 0x4F0
+};
+static uint16_t const shadowrun_race_reference_offsets[] = { 0x104, 0x12C, 0x13C };
+#define SHADOWRUN_RACE_FLAGS_OFFSET 0xFC
+#define SHADOWRUN_RACE_AI_UNIT_EFFECT_OFFSET 0x11A
+#define SHADOWRUN_RACE_MANA_CAPACITY_OFFSET 0x400
+static uint16_t const shadowrun_race_real_offsets[] =
+{
+	0x100, 0x11C, 0x120, 0x124, 0x128, 0x14C, 0x15C, 0x160, 0x164, 0x168, 0x16C,
+	0x200, 0x204, 0x208, 0x20C, 0x210, 0x214, 0x218, 0x21C, 0x220, 0x224, 0x228, 0x22C, 0x230,
+	0x404, 0x408
+};
+#define NUMBER_OF_SHADOWRUN_RACE_REALS (sizeof(shadowrun_race_real_offsets) / sizeof(shadowrun_race_real_offsets[0]))
+
+/* port: the prototype's own races (missionlet.map's shadowrunstuff\generic_unit, the unit
+its multiplayer players are), given an uncompiled srud whose races came
+without their values: the tags invader extracted from the prototype's maps
+kept each race's 0xA00 bytes as zeros (its definition has them as padding),
+and a race of zeros has no mana to cast with, no scale and no vitality */
+struct shadowrun_stock_race
+{
+	uint32_t flags;
+	int16_t ai_unit_effect;
+	int32_t mana_capacity;
+	char const *references[3];
+	float reals[NUMBER_OF_SHADOWRUN_RACE_REALS];
+};
+static struct shadowrun_stock_race const shadowrun_stock_races[SHADOWRUN_MAXIMUM_RACES] =
+{
+	{ 0x1U, 0, 9, { NULL, NULL, NULL }, { 1.0f, 1.0f, 4.0f, 90.0f, 100.0f, 0.0f, 0.800000011920929f, 0.8999999761581421f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.800000011920929f, 1.0f } },
+	{ 0x4U, 0, 7, { "shadowrunstuff\\trollhead\\trollhead", NULL, NULL }, { 1.2999999523162842f, 1.0f, 0.0f, 0.0f, 120.0f, 0.0f, 0.699999988079071f, 0.699999988079071f, 0.75f, 1.350000023841858f, 0.0f, 0.0f, 0.20000000298023224f, 1.0f, 0.6000000238418579f, 1.0f, 0.009999999776482582f, 15.0f, 0.5f, 1.0f, 0.6000000238418579f, 1.5f, 0.18000000715255737f, 0.10000000149011612f, 0.800000011920929f, 1.0f } },
+	{ 0x1U, 2, 10, { "shadowrunstuff\\elfhead\\elfhead", NULL, "shadowrunstuff\\elf_heal" }, { 1.100000023841858f, 1.0f, 5.0f, 60.0f, 85.0f, 0.4000000059604645f, 0.800000011920929f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.800000011920929f, 1.0f } },
+	{ 0x18U, 0, 12, { "shadowrunstuff\\dwarfhead\\dwarfhead", NULL, NULL }, { 1.0f, 1.0f, 0.0f, 0.0f, 90.0f, 0.0f, 0.699999988079071f, 0.800000011920929f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f } },
+	{ 0x10U, 0, 0, { NULL, NULL, NULL }, { 1.0f, 1.0f, 10.0f, 60.0f, 30.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f } },
+};
+
+static uint32_t swap_u32(
+	uint32_t value)
+{
+	return (value >> 24) | ((value >> 8) & 0xFF00UL) | ((value << 8) & 0xFF0000UL) | (value << 24);
+}
+
+/* the tag of the map named `name` (of `name_length` bytes) whose group is
+`group_tag` (either way round, as a map's instances hold them), as a reference
+names it: its handle, and the address of its own name (if `name_address`).
+0xFFFFFFFF (none) if the map has no such tag */
+static uint32_t shadowrun_tag_handle_by_name(
+	uint8_t const *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	uint32_t group_tag,
+	char const *name,
+	uint32_t name_length,
+	uint32_t *name_address)
+{
+	uint32_t instances_address = read_u32(tag_data + XBOX_TAG_HEADER_INSTANCES_OFFSET);
+	int32_t tag_count = read_s32(tag_data + XBOX_TAG_HEADER_COUNT_OFFSET);
+	int32_t index;
+
+	if (instances_address < tag_data_address)
+	{
+		return 0xFFFFFFFFUL;
+	}
+	for (index = 0; index < tag_count; index++)
+	{
+		uint32_t instance_offset = instances_address - tag_data_address + (uint32_t)index * TAG_INSTANCE_BYTES;
+		uint8_t const *instance;
+		uint32_t group;
+		uint32_t name_offset;
+		uint32_t character;
+
+		if (!range_fits(instance_offset, TAG_INSTANCE_BYTES, tag_data_bytes))
+		{
+			break;
+		}
+		instance = tag_data + instance_offset;
+		group = read_u32(instance + TAG_INSTANCE_GROUP_OFFSET);
+		if (group != group_tag && group != swap_u32(group_tag))
+		{
+			continue;
+		}
+		name_offset = read_u32(instance + TAG_INSTANCE_NAME_OFFSET) - tag_data_address;
+		if (read_u32(instance + TAG_INSTANCE_NAME_OFFSET) < tag_data_address ||
+			!range_fits(name_offset, name_length + 1, tag_data_bytes))
+		{
+			continue;
+		}
+		/* (names compared without case, as the game's tag paths are) */
+		for (character = 0; character < name_length; character++)
+		{
+			int a = (unsigned char)tag_data[name_offset + character];
+			int b = (unsigned char)name[character];
+
+			if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+			if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+			if (a != b)
+			{
+				break;
+			}
+		}
+		if (character == name_length && tag_data[name_offset + name_length] == 0)
+		{
+			if (name_address)
+			{
+				*name_address = read_u32(instance + TAG_INSTANCE_NAME_OFFSET);
+			}
+			return read_u32(instance + TAG_INSTANCE_HANDLE_OFFSET);
+		}
+	}
+
+	return 0xFFFFFFFFUL;
+}
+
+/* a reference of an uncompiled tag, at `reference`: its group made this
+build's way round, and its name, the next of the tag file's names (at
+*position, which moves past it), the name of its tag in the map. FALSE if the
+name is not there as the reference says (the tag's bytes are not a tag file's) */
+static int shadowrun_raw_reference_convert(
+	uint8_t *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	uint8_t *reference,
+	uint32_t *position)
+{
+	uint32_t group = swap_u32(read_u32(reference));
+	uint32_t name_length = swap_u32(read_u32(reference + 8));
+	uint32_t handle = 0xFFFFFFFFUL;
+	uint32_t name_address = 0;
+	uint32_t character;
+
+	if (name_length > MAXIMUM_TAG_FILE_NAME_LENGTH)
+	{
+		return 0;
+	}
+	if (name_length)
+	{
+		if (!range_fits(*position, name_length + 1, tag_data_bytes) || tag_data[*position + name_length] != 0)
+		{
+			return 0;
+		}
+		for (character = 0; character < name_length; character++)
+		{
+			if (tag_data[*position + character] < 0x20 || tag_data[*position + character] > 0x7E)
+			{
+				return 0;
+			}
+		}
+		handle = shadowrun_tag_handle_by_name(tag_data, tag_data_bytes, tag_data_address, group,
+			(char const *)tag_data + *position, name_length, NULL);
+		name_address = tag_data_address + *position;
+		*position += name_length + 1;
+	}
+	write_u32(reference, group);
+	write_u32(reference + 4, name_address);
+	write_u32(reference + 8, name_length);
+	write_u32(reference + 12, handle);
+
+	return 1;
+}
+
+/* a reference given the map's tag of a name, and that tag's own name (none,
+if the map has none: the validator refuses a name outside the tags) */
+static void shadowrun_reference_set(
+	uint8_t const *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	uint8_t *reference,
+	uint32_t group_tag,
+	char const *name)
+{
+	uint32_t name_address = 0;
+	uint32_t handle = name ?
+		shadowrun_tag_handle_by_name(tag_data, tag_data_bytes, tag_data_address, group_tag, name,
+			(uint32_t)strlen(name), &name_address) : 0xFFFFFFFFUL;
+
+	write_u32(reference, group_tag);
+	write_u32(reference + 4, handle != 0xFFFFFFFFUL ? name_address : 0);
+	write_u32(reference + 8, handle != 0xFFFFFFFFUL ? (uint32_t)strlen(name) : 0);
+	write_u32(reference + 12, handle);
+
+	return;
+}
+
+/* port: an srud a map holds uncompiled, compiled where it is (see
+SHADOWRUN_UNIT_BYTES): its references given its tags by name, its races'
+block their elements' address, the numbers the game reads made little-endian,
+and races of zeros the prototype's own. One whose bytes are not a tag
+file's is left with no references and no races, so nothing reads them as if
+they were. Returns 1 when it was compiled, 0 when it was not uncompiled, -1
+when it was emptied */
+static int shadowrun_raw_unit_definition_convert(
+	uint8_t *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	uint32_t definition_offset)
+{
+	uint8_t *definition;
+	uint32_t position;
+	uint32_t races_offset = 0;
+	int32_t race_count = 0;
+	int compiled = 1;
+	size_t field;
+
+	if (!range_fits(definition_offset, SHADOWRUN_UNIT_BYTES, tag_data_bytes))
+	{
+		return 0;
+	}
+	definition = tag_data + definition_offset;
+	/* (uncompiled: its magic's reference or its first weapon's names its group
+	the tag file's way round, and has no tag) */
+	if (!((read_u32(definition + 0x100) == swap_u32(0x6D316564UL) /* 'm1ed' */ ||
+			read_u32(definition + 0x430) == swap_u32(0x77656170UL) /* 'weap' */) &&
+		read_u32(definition + 0x10C) == 0xFFFFFFFFUL))
+	{
+		return 0;
+	}
+	position = definition_offset + SHADOWRUN_UNIT_BYTES;
+	for (field = 0; compiled && field < sizeof(shadowrun_unit_field_offsets) / sizeof(shadowrun_unit_field_offsets[0]); field++)
+	{
+		uint8_t *bytes = definition + shadowrun_unit_field_offsets[field];
+
+		if (shadowrun_unit_field_offsets[field] != SHADOWRUN_UNIT_RACES_OFFSET)
+		{
+			compiled = shadowrun_raw_reference_convert(tag_data, tag_data_bytes, tag_data_address, bytes, &position);
+			continue;
+		}
+		/* the races: their elements, then each one's names */
+		race_count = (int32_t)swap_u32(read_u32(bytes));
+		if (race_count < 0 || race_count > SHADOWRUN_MAXIMUM_RACES ||
+			!range_fits(position, (uint32_t)race_count * SHADOWRUN_RACE_BYTES, tag_data_bytes))
+		{
+			compiled = 0;
+			break;
+		}
+		races_offset = position;
+		position += (uint32_t)race_count * SHADOWRUN_RACE_BYTES;
+		{
+			int32_t race;
+			size_t reference;
+
+			for (race = 0; compiled && race < race_count; race++)
+			{
+				for (reference = 0; compiled && reference < 3; reference++)
+				{
+					compiled = shadowrun_raw_reference_convert(tag_data, tag_data_bytes, tag_data_address,
+						tag_data + races_offset + (uint32_t)race * SHADOWRUN_RACE_BYTES +
+							shadowrun_race_reference_offsets[reference], &position);
+				}
+			}
+		}
+	}
+	if (compiled)
+	{
+		int32_t race;
+		int zeros = 1;
+		uint32_t byte_index;
+
+		/* the races' numbers, the tag file's big-endian made this build's,
+		unless they are all zeros: then the prototype's */
+		for (byte_index = 0; byte_index < (uint32_t)race_count * SHADOWRUN_RACE_BYTES && zeros; byte_index++)
+		{
+			uint32_t in_race = byte_index % SHADOWRUN_RACE_BYTES;
+
+			if ((in_race < 0x104 || in_race >= 0x114) && (in_race < 0x12C || in_race >= 0x14C))
+			{
+				zeros = tag_data[races_offset + byte_index] == 0;
+			}
+		}
+		for (race = 0; race < race_count; race++)
+		{
+			uint8_t *element = tag_data + races_offset + (uint32_t)race * SHADOWRUN_RACE_BYTES;
+			size_t index;
+
+			if (zeros)
+			{
+				struct shadowrun_stock_race const *stock = &shadowrun_stock_races[race];
+				static uint32_t const reference_groups[3] = { 0x7363656EUL /* 'scen' */, 0x6A707421UL /* 'jpt!' */,
+					0x65666665UL /* 'effe' */ };
+
+				write_u32(element + SHADOWRUN_RACE_FLAGS_OFFSET, stock->flags);
+				write_u16(element + SHADOWRUN_RACE_AI_UNIT_EFFECT_OFFSET, (uint16_t)stock->ai_unit_effect);
+				write_u32(element + SHADOWRUN_RACE_MANA_CAPACITY_OFFSET, (uint32_t)stock->mana_capacity);
+				for (index = 0; index < NUMBER_OF_SHADOWRUN_RACE_REALS; index++)
+				{
+					uint32_t bits;
+
+					memcpy(&bits, &stock->reals[index], sizeof(bits));
+					write_u32(element + shadowrun_race_real_offsets[index], bits);
+				}
+				for (index = 0; index < 3; index++)
+				{
+					shadowrun_reference_set(tag_data, tag_data_bytes, tag_data_address,
+						element + shadowrun_race_reference_offsets[index], reference_groups[index],
+						stock->references[index]);
+				}
+			}
+			else
+			{
+				write_u32(element + SHADOWRUN_RACE_FLAGS_OFFSET, swap_u32(read_u32(element + SHADOWRUN_RACE_FLAGS_OFFSET)));
+				write_u16(element + SHADOWRUN_RACE_AI_UNIT_EFFECT_OFFSET,
+					(uint16_t)((read_u16(element + SHADOWRUN_RACE_AI_UNIT_EFFECT_OFFSET) >> 8) |
+						(read_u16(element + SHADOWRUN_RACE_AI_UNIT_EFFECT_OFFSET) << 8)));
+				write_u32(element + SHADOWRUN_RACE_MANA_CAPACITY_OFFSET,
+					swap_u32(read_u32(element + SHADOWRUN_RACE_MANA_CAPACITY_OFFSET)));
+				for (index = 0; index < NUMBER_OF_SHADOWRUN_RACE_REALS; index++)
+				{
+					write_u32(element + shadowrun_race_real_offsets[index],
+						swap_u32(read_u32(element + shadowrun_race_real_offsets[index])));
+				}
+			}
+		}
+		write_u32(definition + SHADOWRUN_UNIT_RACES_OFFSET, (uint32_t)race_count);
+		write_u32(definition + SHADOWRUN_UNIT_RACES_OFFSET + 4, race_count ? tag_data_address + races_offset : 0);
+		write_u32(definition + SHADOWRUN_UNIT_RACES_OFFSET + 8, 0);
+	}
+	else
+	{
+		/* (not a tag file's bytes: no references, no races) */
+		for (field = 0; field < sizeof(shadowrun_unit_field_offsets) / sizeof(shadowrun_unit_field_offsets[0]); field++)
+		{
+			uint8_t *bytes = definition + shadowrun_unit_field_offsets[field];
+
+			memset(bytes, 0, 12);
+			if (shadowrun_unit_field_offsets[field] != SHADOWRUN_UNIT_RACES_OFFSET)
+			{
+				write_u32(bytes + 12, 0xFFFFFFFFUL);
+			}
+		}
+	}
+	/* its prices (the buy menu's, and a magazine of each weapon) */
+	{
+		uint32_t price;
+
+		for (price = 0; price < SHADOWRUN_UNIT_PRICE_COUNT; price++)
+		{
+			uint8_t *bytes = definition + SHADOWRUN_UNIT_PRICES_OFFSET + price * 4;
+
+			write_u32(bytes, swap_u32(read_u32(bytes)));
+		}
+	}
+
+	return compiled ? 1 : -1;
+}
+
 enum cache_file_status shadowrun_cache_convert(
 	uint8_t *tag_data,
 	uint32_t tag_data_bytes,
 	uint32_t tag_data_address,
 	struct shadowrun_conversion_report *report)
 {
-	uint32_t instances_offset;
 	int32_t tag_count;
 	int32_t index;
 
@@ -4267,6 +4634,26 @@ enum cache_file_status shadowrun_cache_convert(
 					weapon_offset - tag_data_address) > 0)
 			{
 				report->weapons_converted++;
+			}
+			continue;
+		}
+		/* port: an srud the map holds uncompiled is compiled here, before the
+		validator reads its references and races */
+		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) == SHADOWRUN_UNIT_GROUP_TAG ||
+			read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) == SHADOWRUN_UNIT_GROUP_TAG_BYTES)
+		{
+			uint32_t unit_offset = read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET);
+			int result = unit_offset >= tag_data_address ?
+				shadowrun_raw_unit_definition_convert(tag_data, tag_data_bytes, tag_data_address,
+					unit_offset - tag_data_address) : 0;
+
+			if (result > 0)
+			{
+				report->unit_definitions_compiled++;
+			}
+			else if (result < 0)
+			{
+				report->unit_definitions_emptied++;
 			}
 			continue;
 		}

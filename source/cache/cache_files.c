@@ -462,6 +462,14 @@ static byte *cache_files_tags_place(
 			error(_error_silent, "'%s' is a Shadowrun prototype map: its tags are linked to %08lx, %ld of its actor definitions were given this build's actor types, and %ld of its weapons this build's magazine and trigger sizes",
 				scenario_name, (unsigned long)linked_address, (long)conversion.actors_retyped,
 				(long)conversion.weapons_converted);
+			/* port: and its Shadowrun unit definitions it held uncompiled
+			(cache_file_formats.c, shadowrun_raw_unit_definition_convert) */
+			if (conversion.unit_definitions_compiled || conversion.unit_definitions_emptied)
+			{
+				error(_error_silent, "'%s' held %ld Shadowrun unit definitions uncompiled: %ld compiled where they are, %ld emptied (not a tag file's bytes)",
+					scenario_name, (long)(conversion.unit_definitions_compiled + conversion.unit_definitions_emptied),
+					(long)conversion.unit_definitions_compiled, (long)conversion.unit_definitions_emptied);
+			}
 		}
 	}
 

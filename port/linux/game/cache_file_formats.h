@@ -606,6 +606,11 @@ struct shadowrun_conversion_report
 	/* port: weapon tags whose magazines and triggers were moved from the
 	prototype's element sizes to this build's */
 	int32_t weapons_converted;
+	/* port: Shadowrun unit definitions (srud) the map held uncompiled, as a tag
+	file's bytes: compiled where they are, or, where their bytes are not a tag
+	file's, left with no references and no races */
+	int32_t unit_definitions_compiled;
+	int32_t unit_definitions_emptied;
 };
 
 /* Whether a Shadowrun prototype map's tag data is `tag_header`'s: its tag

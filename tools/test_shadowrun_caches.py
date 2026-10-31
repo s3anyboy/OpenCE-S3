@@ -50,6 +50,7 @@ DRIVER = r"""
           driver shadowrun TAG_DATA_FILE ADDRESS (any of Shadowrun's builds')
           driver bsp LINKED READ FREE_ADDRESS FREE_BYTES
           driver convert TAG_DATA_FILE ADDRESS (writes the converted data back)
+          driver units TAG_DATA_FILE ADDRESS (the same, its result the sruds')
           driver header HEADER_FILE */
 
 
@@ -125,6 +126,21 @@ int main(int argc, char **argv)
 
 		status = shadowrun_cache_convert(bytes, (uint32_t)size, (uint32_t)strtoul(argv[3], NULL, 0), &report);
 		result = (uint32_t)report.actors_retyped;
+		file = fopen(argv[2], "wb");
+		if (!file || (size && fwrite(bytes, size, 1, file) != 1) || fclose(file))
+			return 2;
+		free(bytes);
+	}
+	else if (argc == 4 && !strcmp(argv[1], "units"))
+	{
+		/* (as convert, its result the sruds compiled, and those emptied << 16) */
+		struct shadowrun_conversion_report report;
+		unsigned long size;
+		unsigned char *bytes = slurp(argv[2], &size);
+		FILE *file;
+
+		status = shadowrun_cache_convert(bytes, (uint32_t)size, (uint32_t)strtoul(argv[3], NULL, 0), &report);
+		result = (uint32_t)report.unit_definitions_compiled | ((uint32_t)report.unit_definitions_emptied << 16);
 		file = fopen(argv[2], "wb");
 		if (!file || (size && fwrite(bytes, size, 1, file) != 1) || fclose(file))
 			return 2;
@@ -334,6 +350,100 @@ def test_b30srs_bsps_load_clear_of_where_they_are_linked(driver):
 def test_a_bsp_that_fits_nowhere_is_refused(driver, linked, read, free, room):
     status, _ = driver("bsp", linked, read, free, room)
     assert status != "ok"
+
+
+# ---------- Shadowrun unit definitions a map holds uncompiled
+
+SRUD_FIELDS = [(0x100, "m1ed"), (0x110, "m2ed"), (0x120, "m3ed"), (0x130, "t1ed"), (0x140, "t2ed"), (0x150, "t3ed"),
+               (0x160, None), (0x220, "srwd"), (0x400, "wphi"), (0x410, "bitm"), (0x420, "bitm")] + \
+              [(0x430 + 0x10 * index, "weap") for index in range(9)] + [(0x4F0, "buym")]
+RAW_UNIT_TAGS = [("weap", "weapons\\pistol\\pistol"), ("buym", "shadowrunstuff\\menu"),
+                 ("scen", "shadowrunstuff\\trollhead\\trollhead")]
+
+
+def raw_unit_map(names, races=2, prices=(0, 2250, 2000), damage=False):
+    """Tag data linked to 0x806D0000 with an srud as invader's opaque build put
+    one in b30sr.map: the tag file's body as it is (big-endian, its references
+    with no tag, the names and race elements after it), and named tags it
+    names (RAW_UNIT_TAGS, instances 1 on). names: the srud's names by field
+    offset. damage: a name without its terminator"""
+    address = 0x806D0000
+    count = 1 + len(RAW_UNIT_TAGS)
+    table = address + TAG_HEADER_BYTES
+    strings = b""
+    name_addresses = []
+    strings_start = table + count * TAG_INSTANCE_BYTES
+    for _, name in RAW_UNIT_TAGS:
+        name_addresses.append(strings_start + len(strings))
+        strings += name.encode() + b"\0"
+    strings += b"\0" * (-len(strings) % 4)
+    unit_address = strings_start + len(strings)
+    body = bytearray(0x600)
+    tail = b""
+    for offset, group in SRUD_FIELDS:
+        if group is None:
+            struct.pack_into(">i", body, offset, races)
+            tail += b"\0" * (0xA00 * races)
+            continue
+        name = names.get(offset, "")
+        struct.pack_into(">4sIII", body, offset, group.encode(), 0, len(name), 0xFFFFFFFF)
+        if name:
+            tail += name.encode() + (b"" if damage else b"\0")
+    for index, price in enumerate(prices):
+        struct.pack_into(">i", body, 0x500 + 4 * index, price)
+    instances = [("srud", unit_address)] + [(group, 0) for group, _ in RAW_UNIT_TAGS]
+    header = struct.pack("<IiIi", table, 0, 0, count) + b"\0" * 16 + b"sgat"
+    entries = b"".join(
+        struct.pack("<4sIIIIIII", group[::-1].encode("latin-1"), 0xFFFFFFFF, 0xFFFFFFFF, 0xE1740000 + index,
+                    name_addresses[index - 1] if index else 0, definition, 0, 0)
+        for index, (group, definition) in enumerate(instances))
+    return header + entries + strings + bytes(body) + tail, unit_address - address
+
+
+def test_an_uncompiled_srud_is_compiled_where_it_is(driver):
+    data, unit = raw_unit_map({0x470: RAW_UNIT_TAGS[0][1], 0x4F0: RAW_UNIT_TAGS[1][1]})
+    path = write(driver, "srud.bin", data)
+    assert driver("units", path, 0x806D0000) == ("ok", 1)
+    out = path.read_bytes()
+    # its references: this build's group, the name the tag file had, and the
+    # map's tag of that name (none where it named nothing)
+    group, name, length, index = struct.unpack_from("<IIII", out, unit + 0x470)
+    assert (group, length, index) == (0x77656170, len(RAW_UNIT_TAGS[0][1]), 0xE1740001)
+    assert out[name - 0x806D0000:name - 0x806D0000 + length].decode() == RAW_UNIT_TAGS[0][1]
+    assert struct.unpack_from("<12xI", out, unit + 0x4F0)[0] == 0xE1740002
+    assert struct.unpack_from("<IIII", out, unit + 0x100) == (0x6D316564, 0, 0, 0xFFFFFFFF)
+    # its prices little-endian
+    assert struct.unpack_from("<3i", out, unit + 0x500) == (0, 2250, 2000)
+    # its races (zeros, as the extracted tags' are): the prototype's, at their
+    # elements' address, the troll's head the map's
+    count, races, _ = struct.unpack_from("<iII", out, unit + 0x160)
+    assert count == 2 and races > 0x806D0000
+    race0 = races - 0x806D0000
+    assert struct.unpack_from("<I", out, race0 + 0xFC)[0] == 1
+    assert struct.unpack_from("<i", out, race0 + 0x400)[0] == 9
+    assert struct.unpack_from("<f", out, race0 + 0x128)[0] == 100.0
+    assert struct.unpack_from("<I", out, race0 + 0xA00 + 0x110)[0] == 0xE1740003
+
+
+def test_a_compiled_srud_is_left_as_it_is(driver):
+    data, unit = raw_unit_map({0x470: RAW_UNIT_TAGS[0][1]})
+    path = write(driver, "srud_twice.bin", data)
+    driver("units", path, 0x806D0000)
+    once = path.read_bytes()
+    assert driver("units", path, 0x806D0000) == ("ok", 0)
+    assert path.read_bytes() == once
+
+
+def test_an_uncompiled_srud_whose_names_are_wrong_is_emptied(driver):
+    data, unit = raw_unit_map({0x470: RAW_UNIT_TAGS[0][1], 0x4F0: RAW_UNIT_TAGS[1][1]}, damage=True)
+    path = write(driver, "srud_damaged.bin", data)
+    assert driver("units", path, 0x806D0000) == ("ok", 1 << 16)
+    out = path.read_bytes()
+    for offset, group in SRUD_FIELDS:
+        if group is None:
+            assert struct.unpack_from("<iII", out, unit + offset) == (0, 0, 0)
+        else:
+            assert struct.unpack_from("<I", out, unit + offset + 12)[0] == 0xFFFFFFFF
 
 
 # ---------- Shadowrun's actor types
