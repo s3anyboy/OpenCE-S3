@@ -204,7 +204,9 @@ enum
 	MAXIMUM_CACHE_FILES = 20,
 	CACHE_FILE_THREAD_STACK_SIZE = 0x4000,
 
-	SOLO_CACHE_FILE_MAXIMUM_SIZE = 0x11600000,
+	/* port: the desktop builds' larger, for the Shadowrun prototype's
+	campaign maps (halo_port_capacity.h: b30sr.map is 0x11750000 bytes) */
+	SOLO_CACHE_FILE_MAXIMUM_SIZE = HALO_PORT_SOLO_CACHE_FILE_MAXIMUM_SIZE,
 	MAIN_MENU_CACHE_FILE_MAXIMUM_SIZE = 0x02300000,
 	/* port: the desktop builds' larger, for the Shadowrun prototype's maps
 	(halo_port_capacity.h) */

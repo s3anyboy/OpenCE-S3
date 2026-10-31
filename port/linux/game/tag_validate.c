@@ -55,6 +55,9 @@ enum
 {
 	TAG_HEADER_SIGNATURE = 'tags',
 	STRUCTURE_BSP_HEADER_SIGNATURE = 'sbsp',
+	/* port: the same four bytes the other way round, which a map of another
+	build holds ('psbs': the Shadowrun prototype's b30sr.map) */
+	STRUCTURE_BSP_HEADER_SIGNATURE_BYTES = 0x73627370UL,
 	STRUCTURE_BSP_GROUP_TAG = 'sbsp',
 
 	/* a vertex or index buffer in a header (a D3DResource: Common, Data,
@@ -1614,10 +1617,13 @@ boolean tag_validate_structure_bsp(
 
 	validation_new(&validation, base, (unsigned long)size);
 	validation.tag_index = tag_index;
+	/* port: a bsp may load inside the tags' own span, where a map made with a
+	larger game state linked it (the Shadowrun prototype's campaign map
+	b30sr.map has its bsp at 0x82086000, within its tags): what it must not do
+	is load outside the tag cache */
 	if (!header || !instance || instance->group_tag != STRUCTURE_BSP_GROUP_TAG ||
 		size < (long)sizeof(*bsp_header) ||
-		tag_cache_offset < (unsigned long)tag_validate_globals.tag_data_size ||
-		tag_cache_offset > tag_validate_globals.tag_cache_size ||
+		tag_cache_offset >= tag_validate_globals.tag_cache_size ||
 		(unsigned long)size > tag_validate_globals.tag_cache_size - tag_cache_offset)
 	{
 		tag_validate_refuse(&validation, "has a structure bsp outside the tag cache");
@@ -1625,8 +1631,16 @@ boolean tag_validate_structure_bsp(
 	}
 	/* (another bsp may have been where this one is) */
 	unclaim(tag_validate_globals.tag_data_size, tag_validate_globals.tag_cache_size - tag_validate_globals.tag_data_size);
+	/* port: where the bsp lies inside the tags' span, as a map made with a
+	larger game state links it (b30sr.map's at 0x82086000, within its tags),
+	what the bsp itself covers is released too, so that it can be claimed */
+	if (tag_cache_offset < (unsigned long)tag_validate_globals.tag_data_size)
+	{
+		unclaim(tag_cache_offset, (unsigned long)size);
+	}
 
-	if (bsp_header->signature != STRUCTURE_BSP_HEADER_SIGNATURE ||
+	if ((bsp_header->signature != STRUCTURE_BSP_HEADER_SIGNATURE &&
+			bsp_header->signature != STRUCTURE_BSP_HEADER_SIGNATURE_BYTES) ||
 		!claim(bsp_header, sizeof(*bsp_header)) ||
 		!validate_buffers(&validation, bsp_header->vertex_buffers, bsp_header->vertex_buffer_count,
 			bsp_header->index_buffers, bsp_header->index_buffer_count))
@@ -1786,7 +1800,8 @@ long tag_validate_relocate_structure_bsp(
 	unsigned long offset;
 
 	if (size < (long)sizeof(*bsp_header) || !group || !group->definition ||
-		bsp_header->signature != STRUCTURE_BSP_HEADER_SIGNATURE)
+		(bsp_header->signature != STRUCTURE_BSP_HEADER_SIGNATURE &&
+			bsp_header->signature != STRUCTURE_BSP_HEADER_SIGNATURE_BYTES))
 	{
 		return NONE;
 	}

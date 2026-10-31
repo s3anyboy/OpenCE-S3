@@ -11,8 +11,11 @@ header included in hcex build.
 /* ---------- constants */
 
 /* port: the tag cache's size, which the loader checks a map's tag data and
-structure bsps against (cache_files.c) */
-#define TAG_CACHE_SIZE 0x1600000
+structure bsps against (cache_files.c). The desktop builds' is larger, for
+the Shadowrun prototype's campaign map b30sr.map, whose 0x1E34878 bytes of
+tags are linked at 0x806D0000 and end at 0x82504878: past the Xbox's cache,
+which ends at 0x80506000 (halo_port_capacity.h) */
+#define TAG_CACHE_SIZE HALO_PORT_TAG_CACHE_SIZE
 
 /* ---------- macros */
 

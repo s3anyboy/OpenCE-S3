@@ -157,6 +157,9 @@ enum
 
 #define STRUCTURE_BSP_TAG 'sbsp'
 #define CACHE_FILE_TAG_HEADER_SIGNATURE 'tags'
+/* port: the same four bytes the other way round, which a map of another build
+holds ('psbs': the Shadowrun prototype's b30sr.map) */
+#define CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE_BYTES 0x73627370UL
 #define CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE 'sbsp'
 #define CACHE_FILE_HEADER_SIGNATURE 'head'
 #define CACHE_FILE_FOOTER_SIGNATURE 'foot'
@@ -681,9 +684,13 @@ static boolean cache_file_structure_bsp_reference_verify(
 	}
 
 	read_size = (reference->file_size + CACHE_FILE_SECTOR_SIZE - 1) & ~(CACHE_FILE_SECTOR_SIZE - 1);
+	/* port: a bsp may load inside the tags' own span, where the map made
+	with a larger game state linked it (the Shadowrun prototype's campaign
+	map b30sr.map links its bsp at 0x82086000, within its tags' 0x806D0000
+	to 0x82504878): what it must not do is load outside the tag cache */
 	if (!cache_file_region_contains(
-		tag_cache_base_address + tag_data_size,
-		cache_file_tag_cache_room(tag_cache_base_address + tag_data_size),
+		tag_cache_base_address,
+		cache_file_tag_cache_room(tag_cache_base_address),
 		reference->base_address,
 		read_size,
 		1))
@@ -895,7 +902,9 @@ long tag_loaded(
 void cache_files_enable_writes(
 	void)
 {
-	XPhysicalProtect((void *)0x803A6000, 0x01600000, PAGE_READWRITE);
+	/* port: the tag cache's whole, which the desktop builds' is larger
+	(halo_port_capacity.h) */
+	XPhysicalProtect((void *)0x803A6000, TAG_CACHE_SIZE, PAGE_READWRITE);
 
 	return;
 }
@@ -903,7 +912,7 @@ void cache_files_enable_writes(
 void cache_files_disable_writes(
 	void)
 {
-	XPhysicalProtect((void *)0x803A6000, 0x01600000, PAGE_READONLY);
+	XPhysicalProtect((void *)0x803A6000, TAG_CACHE_SIZE, PAGE_READONLY);
 	XPhysicalProtect(
 		cache_file_globals.tag_header->vertex_buffers,
 		cache_file_globals.tag_header->vertex_buffer_count * 12,
@@ -1058,10 +1067,23 @@ boolean cache_file_header_verify(
 	if (header->header_signature != CACHE_FILE_HEADER_SIGNATURE ||
 		header->footer_signature != CACHE_FILE_FOOTER_SIGNATURE ||
 		header->file_length < 0 ||
-		header->file_length > 0x11600000 ||
+		/* port: the largest a cache file holds, which the desktop builds'
+		is larger than the Xbox's (halo_port_capacity.h: the Shadowrun
+		prototype's campaign map b30sr.map is 0x11750000 bytes) */
+		header->file_length > HALO_PORT_MAXIMUM_MAP_FILE_SIZE ||
 		/* port: its name ends within its field (csstrlen read on past it) */
 		!memchr(header->name, 0, sizeof(header->name)))
 	{
+		/* port: a map too large for a cache file is told so, not called
+		something that is not a cache file at all */
+		if (fatal && header->file_length > HALO_PORT_MAXIMUM_MAP_FILE_SIZE &&
+			header->header_signature == CACHE_FILE_HEADER_SIGNATURE &&
+			header->footer_signature == CACHE_FILE_FOOTER_SIGNATURE)
+		{
+			error(_error_silent, "'%s' is %08x bytes, larger than a cache file holds (%08x)",
+				scenario_name, header->file_length, HALO_PORT_MAXIMUM_MAP_FILE_SIZE);
+			return FALSE;
+		}
 		if (fatal)
 		{
 			match_vassert(
@@ -1496,7 +1518,7 @@ long scenario_tags_load(
 				{
 					read_size = cache_file_globals.header.file_length - cache_file_globals.header.tag_data_offset;
 				}
-				csmemset(tag_cache_base_address, 0xCD, 0x01600000);
+				csmemset(tag_cache_base_address, 0xCD, TAG_CACHE_SIZE);
 				cache_file_read(
 					NONE,
 					cache_file_globals.header.tag_data_offset,
@@ -1763,7 +1785,8 @@ boolean scenario_structure_bsp_load(
 		leave what was read, is not loaded */
 		structure_bsp_header = reference->base_address;
 		if (read_complete != TRUE ||
-			structure_bsp_header->signature != CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE ||
+			(structure_bsp_header->signature != CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE &&
+				structure_bsp_header->signature != CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE_BYTES) ||
 			!cache_file_region_contains(
 				reference->base_address,
 				reference->file_size,
@@ -1813,7 +1836,8 @@ boolean scenario_structure_bsp_load(
 	match_assert(
 		"c:\\halo\\SOURCE\\cache\\cache_files.c",
 		0xE0,
-		cache_file_globals.structure_bsp_header->signature==CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE);
+		(cache_file_globals.structure_bsp_header->signature==CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE ||
+			cache_file_globals.structure_bsp_header->signature==CACHE_FILE_STRUCTURE_BSP_HEADER_SIGNATURE_BYTES));
 	structure_bsp_header_register_vertex_buffers(cache_file_globals.structure_bsp_header);
 	tag_instance = cache_get_tag_instance(reference->structure_bsp.index);
 	match_assert(

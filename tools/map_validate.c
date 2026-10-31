@@ -44,6 +44,7 @@ usage: map_validate [--strict] [--quiet] [--maps folder] [--fuzz iterations [--s
 #include <unistd.h>
 
 #include "zlib_prefixed.h"
+#include "../port/linux/include/halo_port_capacity.h"
 #include "../port/linux/game/cache_file_formats.h"
 
 /* ---------- constants */
@@ -51,9 +52,10 @@ usage: map_validate [--strict] [--quiet] [--maps folder] [--fuzz iterations [--s
 enum
 {
 	/* where the game reads a map's tags, and how many bytes there are room
-	for (physical_memory_map.c, physical_memory_map.h) */
+	for: the desktop builds' (physical_memory_map.c, physical_memory_map.h,
+	halo_port_capacity.h) */
 	TAG_CACHE_BASE_ADDRESS = 0x803A6000,
-	TAG_CACHE_SIZE = 0x1600000,
+	TAG_CACHE_SIZE = HALO_PORT_TAG_CACHE_SIZE,
 
 	CACHE_FILE_HEADER_SIZE = 0x800,
 	CACHE_FILE_HEADER_SIGNATURE = 'head',

@@ -30,7 +30,7 @@ fill 3,165,260 of its 0x305000 bytes); the GPU part holds only the decal
 vertices, as on the Xbox. A change to a pool's size changes the game state's
 layout: saved games of builds before it no longer load. */
 
-#define HALO_PORT_GAME_STATE_BASE_ADDRESS 0x81A00000 /* (0x80061000) */
+#define HALO_PORT_GAME_STATE_BASE_ADDRESS 0x82800000 /* (0x80061000) */
 #define HALO_PORT_GAME_STATE_CPU_SIZE 0x13C0000 /* (0x305000) */
 #define HALO_PORT_GAME_STATE_GPU_SIZE 0x40000 /* (0x40000) */
 #define HALO_PORT_GAME_STATE_SIZE (HALO_PORT_GAME_STATE_CPU_SIZE+HALO_PORT_GAME_STATE_GPU_SIZE)
@@ -68,6 +68,36 @@ the Xbox's. */
 #else
 #define HALO_PORT_SOUND_CACHE_SIZE 0x1000000 /* (0x400000) */
 #endif
+
+/* ---------- the tag cache
+
+The Xbox's tag cache is 0x1600000 bytes at 0x803A6000, to the game state at
+0x80660000, which the maps it shipped were made to fit. The Shadowrun
+prototype's campaign map b30sr.map has 0x1E34878 bytes of tag data, linked at
+0x806D0000 and ending at 0x82504878, and its structure bsp loads after them:
+the desktop builds' cache is larger, from 0x803A6000 to 0x82700000, with
+their game state above it (0x82800000); Android's and the web build's keep
+the Xbox's. */
+#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
+#define HALO_PORT_TAG_CACHE_SIZE 0x1600000 /* (0x1600000) */
+#else
+#define HALO_PORT_TAG_CACHE_SIZE 0x235A000 /* (0x1600000) */
+#endif
+
+/* ---------- the largest campaign map a cache file holds
+
+The Xbox's solo cache files hold 0x11600000 bytes (cache_files_windows.c,
+SOLO_CACHE_FILE_MAXIMUM_SIZE), which every map it shipped fits. The
+Shadowrun prototype's campaign maps do not: b30sr.map is 0x11750000 bytes
+(cache_files.c, cache_file_header_verify, which refused it as not a cache
+file at all). The desktop builds' solo cache files hold more, as their
+texture cache does above; Android's and the web build's keep the Xbox's. */
+#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
+#define HALO_PORT_SOLO_CACHE_FILE_MAXIMUM_SIZE 0x11600000 /* (0x11600000) */
+#else
+#define HALO_PORT_SOLO_CACHE_FILE_MAXIMUM_SIZE 0x20000000 /* (0x11600000) */
+#endif
+#define HALO_PORT_MAXIMUM_MAP_FILE_SIZE HALO_PORT_SOLO_CACHE_FILE_MAXIMUM_SIZE
 
 /* ---------- the map files a map is precached into
 
