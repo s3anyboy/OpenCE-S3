@@ -459,8 +459,9 @@ static byte *cache_files_tags_place(
 				error(_error_silent, "the cache file '%s' is damaged: its tag header is wrong", scenario_name);
 				return NULL;
 			}
-			error(_error_silent, "'%s' is a Shadowrun prototype map: its tags are linked to %08lx, and %ld of its actor definitions were given this build's actor types",
-				scenario_name, (unsigned long)linked_address, (long)conversion.actors_retyped);
+			error(_error_silent, "'%s' is a Shadowrun prototype map: its tags are linked to %08lx, %ld of its actor definitions were given this build's actor types, and %ld of its weapons this build's magazine and trigger sizes",
+				scenario_name, (unsigned long)linked_address, (long)conversion.actors_retyped,
+				(long)conversion.weapons_converted);
 		}
 	}
 

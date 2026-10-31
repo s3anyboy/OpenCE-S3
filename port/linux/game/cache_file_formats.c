@@ -4028,6 +4028,21 @@ other) */
 #define ACTOR_GROUP_TAG_BYTES 0x72746361UL
 /* an actor definition's type (ai/actor_definitions.h) */
 #define ACTOR_DEFINITION_TYPE_OFFSET 0x14
+/* port: a weapon definition's magazines and triggers, at the same offsets in
+the prototype's build and this one's, and an element's size in each. The
+prototype's are larger (cachesym.xbe's own reads: its FUN_001716F0 asks for a
+magazine with 0x70, and its trigger loops for 0x114), and the fields this build
+reads come first in both, so a block is read with the map's stride and each
+element copied down to this build's */
+#define WEAPON_GROUP_TAG 'weap'
+#define WEAPON_GROUP_TAG_BYTES 0x70616577UL
+#define WEAPON_MAGAZINES_OFFSET 0x4F0
+#define WEAPON_TRIGGERS_OFFSET 0x4FC
+#define WEAPON_MAGAZINE_BYTES 0x70
+#define WEAPON_TRIGGER_BYTES 0x114
+#define WEAPON_MAGAZINE_BYTES_THIS_BUILD 0x34
+#define WEAPON_TRIGGER_BYTES_THIS_BUILD 0x30
+#define MAXIMUM_WEAPON_BLOCK_ELEMENTS 8
 
 /* port: whether the tag header says the signature `group_tag` (the tag
 header's signature, 'tags', read as a group tag, or the same bytes the other
@@ -4118,6 +4133,63 @@ int shadowrun_cache_tag_data_any(
 
 
 
+/* port: a weapon's magazines and triggers, each element copied down to this
+build's stride within the block's own bytes: element i, at the map's element
+size from the block's start, becomes element i at this build's, which is before
+where it was. The block's count and start do not move. Returns how many of the
+two blocks were converted */
+static int shadowrun_weapon_blocks_convert(
+	uint8_t *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	uint32_t definition_offset)
+{
+	uint32_t const offsets[2] = { WEAPON_MAGAZINES_OFFSET, WEAPON_TRIGGERS_OFFSET };
+	uint32_t const source_bytes[2] = { WEAPON_MAGAZINE_BYTES, WEAPON_TRIGGER_BYTES };
+	uint32_t const target_bytes[2] = { WEAPON_MAGAZINE_BYTES_THIS_BUILD, WEAPON_TRIGGER_BYTES_THIS_BUILD };
+	int converted = 0;
+	int block;
+
+	for (block = 0; block < 2; block++)
+	{
+		uint32_t block_offset = definition_offset + offsets[block];
+		int32_t count;
+		uint32_t elements_offset;
+		int32_t index;
+
+		if (block_offset < definition_offset || !range_fits(block_offset, 8, tag_data_bytes))
+		{
+			continue;
+		}
+		count = read_s32(tag_data + block_offset);
+		if (count <= 0 || count > MAXIMUM_WEAPON_BLOCK_ELEMENTS)
+		{
+			continue;
+		}
+		elements_offset = read_u32(tag_data + block_offset + 4);
+		if (elements_offset < tag_data_address)
+		{
+			continue;
+		}
+		elements_offset -= tag_data_address;
+		if (!range_fits(elements_offset, (uint32_t)count * source_bytes[block], tag_data_bytes))
+		{
+			continue;
+		}
+		/* (in place, each element forward to its new place first, so no
+		element is written over before it is read: element 0 needs no move) */
+		for (index = 1; index < count; index++)
+		{
+			memmove(tag_data + elements_offset + (uint32_t)index * target_bytes[block],
+				tag_data + elements_offset + (uint32_t)index * source_bytes[block],
+				(size_t)target_bytes[block]);
+		}
+		converted++;
+	}
+
+	return converted;
+}
+
 enum cache_file_status shadowrun_cache_convert(
 	uint8_t *tag_data,
 	uint32_t tag_data_bytes,
@@ -4165,6 +4237,22 @@ enum cache_file_status shadowrun_cache_convert(
 			return _cache_file_status_bad_tag_instances_range;
 		}
 		instance = tag_data + instances_offset;
+		/* port: a weapon's magazines and triggers are moved to this build's
+		stride, which the validator would otherwise refuse for their size
+		(tag_groups.c, tag_group_get_element_with_size) */
+		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) == WEAPON_GROUP_TAG ||
+			read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) == WEAPON_GROUP_TAG_BYTES)
+		{
+			uint32_t weapon_offset = read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET);
+
+			if (weapon_offset >= tag_data_address &&
+				shadowrun_weapon_blocks_convert(tag_data, tag_data_bytes, tag_data_address,
+					weapon_offset - tag_data_address) > 0)
+			{
+				report->weapons_converted++;
+			}
+			continue;
+		}
 		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != ACTOR_GROUP_TAG &&
 			read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) != ACTOR_GROUP_TAG_BYTES)
 		{

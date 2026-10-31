@@ -601,6 +601,9 @@ struct shadowrun_conversion_report
 {
 	/* actor definitions of Shadowrun's actor types, given one of this build's */
 	int32_t actors_retyped;
+	/* port: weapon tags whose magazines and triggers were moved from the
+	prototype's element sizes to this build's */
+	int32_t weapons_converted;
 };
 
 /* Whether a Shadowrun prototype map's tag data is `tag_header`'s: its tag
