@@ -761,7 +761,7 @@ static long shadowrun_glider_scenery_index = NONE;
 static long shadowrun_glider_scenery(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_player(unit_index);
 
 	if (definition && definition->tech2.index != NONE)
 	{

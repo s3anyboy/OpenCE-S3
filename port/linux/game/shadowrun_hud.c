@@ -154,11 +154,11 @@ void shadowrun_hud_draw(
 
 		return;
 	}
-	/* port: a map that gives its player no srud (recomp.map) has no magic and
-	no tech of its unit to show (it knows no spells), but the buy menu still
-	sells it by the map's (shadowrun_buy_menu.c), so that is drawn on its own:
-	the menu shows the player its money */
-	if (!shadowrun_unit_definition_get(unit_index))
+	/* port: a player with no srud at all (a map that has none) has no magic
+	and no tech of its unit to show, but the buy menu is still drawn on its
+	own: the menu shows the player its money. One whose biped names none
+	plays by the map's (shadowrun_unit_definition_player: b30sr.map's) */
+	if (!shadowrun_unit_definition_player(unit_index))
 	{
 		shadowrun_buy_menu_draw(local_player_index);
 

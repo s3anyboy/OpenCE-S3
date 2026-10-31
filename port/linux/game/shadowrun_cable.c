@@ -130,7 +130,7 @@ static boolean shadowrun_cable_move(
 static struct shadowrun_tech2_definition *shadowrun_cable_definition(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_player(unit_index);
 
 	return definition && definition->tech2.index != NONE ? tag_get(SHADOWRUN_TECH2_DEFINITION_TAG, definition->tech2.index) : NULL;
 }

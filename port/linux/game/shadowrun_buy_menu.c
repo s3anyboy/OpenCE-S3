@@ -774,7 +774,7 @@ static long shadowrun_shop_price(
 	{
 		return 0;
 	}
-	if (player && player->unit_index != NONE && definition == shadowrun_unit_definition_get(player->unit_index))
+	if (player && player->unit_index != NONE && definition == shadowrun_unit_definition_player(player->unit_index))
 	{
 		return definition->prices[price_index];
 	}

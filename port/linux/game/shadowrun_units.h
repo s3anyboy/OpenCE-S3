@@ -295,6 +295,12 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_for_shopping(
 which buys its magic and tech too; NULL where the map has none */
 struct shadowrun_unit_definition *shadowrun_unit_definition_shop(
 	long unit_index);
+/* port: the srud a player's unit plays by: its own, or, where its biped names
+none (b30sr.map's player is Halo's cyborg, recomp.map's names none), the one
+the map sells by (shadowrun_unit_definition_for_shopping). An AI unit's is
+its own alone. NULL for none */
+struct shadowrun_unit_definition *shadowrun_unit_definition_player(
+	long unit_index);
 /* port: the index the unit's biped names (NONE for none, or one that is not
 an srud's): what the buy menu's report prints */
 long shadowrun_unit_definition_index(

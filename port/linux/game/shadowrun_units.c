@@ -550,6 +550,21 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_shop(
 	return result;
 }
 
+struct shadowrun_unit_definition *shadowrun_unit_definition_player(
+	long unit_index)
+{
+	struct shadowrun_unit_definition *result = unit_index != NONE ? shadowrun_unit_definition_get(unit_index) : NULL;
+	struct unit_datum *unit;
+
+	if (!result && shadowrun_globals.map_loaded && unit_index != NONE &&
+		(unit = unit_try_and_get(unit_index)) != NULL && unit->unit.player_index != NONE)
+	{
+		result = shadowrun_unit_definition_for_shopping();
+	}
+
+	return result;
+}
+
 /* port: what the unit's biped names, whether or not the map has it (0x0FD0C0's,
 which observed a unit's srud by its name) */
 long shadowrun_unit_definition_index(
@@ -634,7 +649,7 @@ it is smartlinked: Shadowrun's tech, not played), else its srud's */
 struct shadowrun_weapon_data *shadowrun_unit_weapon_data_get(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_player(unit_index);
 	struct shadowrun_weapon_data *result = NULL;
 
 	if (definition)
@@ -683,7 +698,7 @@ void shadowrun_unit_show_head(
 struct shadowrun_buy_menu_definition *shadowrun_buy_menu_get(
 	long unit_index)
 {
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_player(unit_index);
 
 	/* BUG (original, preserved): it asks whether the unit has magic1, not a
 	buy menu */
@@ -1119,7 +1134,7 @@ void shadowrun_unit_set_race(
 	long race_index)
 {
 	struct unit_datum *unit = unit_try_and_get(unit_index);
-	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_get(unit_index);
+	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_player(unit_index); /* port: a player's plays by the map's where its biped names none */
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
 	if (unit && definition && shadowrun_unit && unit->object.type == _object_type_biped)
@@ -1489,7 +1504,7 @@ static void shadowrun_unit_mana_update(
 {
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 
-	if (shadowrun_unit && shadowrun_unit_definition_get(unit_index))
+	if (shadowrun_unit && shadowrun_unit_definition_player(unit_index) /* port: as the race it has */)
 	{
 		real capacity = shadowrun_unit_mana_capacity(unit_index);
 		real regeneration = shadowrun_unit_mana_regeneration(unit_index);
