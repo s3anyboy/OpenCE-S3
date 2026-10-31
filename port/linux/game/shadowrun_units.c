@@ -65,6 +65,9 @@ static struct
 {
 	/* the map loaded is the Shadowrun prototype's */
 	boolean map_loaded;
+	/* port: whether the log has said a player plays by the map's srud
+	(shadowrun_unit_definition_player), this map */
+	boolean player_definition_reported;
 	/* port: a copy of the map's own tag table, made as its tags loaded. The game's
 
 table is replaced by the menus' (menu_tags.c, cache_files_set_tag_instances),
@@ -175,6 +178,7 @@ void shadowrun_tags_loaded(
 	boolean shadowrun)
 {
 	shadowrun_globals.map_loaded = shadowrun;
+	shadowrun_globals.player_definition_reported = FALSE;
 	if (shadowrun)
 	{
 		struct tag_iterator iterator;
@@ -560,6 +564,29 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_player(
 		(unit = unit_try_and_get(unit_index)) != NULL && unit->unit.player_index != NONE)
 	{
 		result = shadowrun_unit_definition_for_shopping();
+		/* (said once a map, the first time: the log's word that a player's
+		unit plays by the map's srud, and by which) */
+		if (!shadowrun_globals.player_definition_reported)
+		{
+			shadowrun_globals.player_definition_reported = TRUE;
+			if (result)
+			{
+				struct shadowrun_race const *race = result->races.count > 0 ?
+					tag_block_get_element_with_size(&result->races, 0, sizeof(struct shadowrun_race)) : NULL;
+
+				error(_error_silent, "shadowrun: a player's unit names no srud: it plays by the map's (%ld races, the first's mana %ld, %ld shop weapons)",
+					(long)result->races.count, race ? (long)race->mana_capacity : 0L,
+					(long)((result->shop_weapons[0].index != NONE) + (result->shop_weapons[1].index != NONE) +
+						(result->shop_weapons[2].index != NONE) + (result->shop_weapons[3].index != NONE) +
+						(result->shop_weapons[4].index != NONE) + (result->shop_weapons[5].index != NONE) +
+						(result->shop_weapons[6].index != NONE) + (result->shop_weapons[7].index != NONE) +
+						(result->shop_weapons[8].index != NONE)));
+			}
+			else
+			{
+				error(_error_silent, "shadowrun: a player's unit names no srud, and the map has none: no magic, no tech");
+			}
+		}
 	}
 
 	return result;
@@ -1265,6 +1292,18 @@ boolean shadowrun_unit_learn_power(
 		if (shadowrun_player)
 		{
 			shadowrun_player->known_powers[power] = 1;
+		}
+		/* port: a spell learned with none chosen is the one the right bumper
+		casts (and the HUD names): one bought from the buy menu was otherwise
+		chosen only by the d-pad, so a player's first spell did nothing */
+		if (power < NUMBER_OF_SHADOWRUN_SPELLS && shadowrun_unit->current_spell == 0)
+		{
+			shadowrun_unit->current_spell = power + 1;
+			shadowrun_unit->desired_spell = power + 1;
+			if (shadowrun_player)
+			{
+				shadowrun_player->assigned_spell = power + 1;
+			}
 		}
 		result = TRUE;
 	}
