@@ -100,7 +100,7 @@ enum
 	map's (cache_file_formats.h, CUSTOM_EDITION_TAG_CACHE_BYTES), or the
 	desktop builds' larger one (halo_port_capacity.h, HALO_PORT_TAG_CACHE_SIZE:
 	the Shadowrun prototype's campaign map b30sr.map's tags) */
-	TAG_VALIDATE_MAXIMUM_TAG_CACHE_SIZE = 0x02900000,
+	TAG_VALIDATE_MAXIMUM_TAG_CACHE_SIZE = 0x02B00000,
 	/* the file ranges a Custom Edition map's bitmap pixels and sound samples
 	may be in (tag_validate_custom_edition_tags) */
 	MAXIMUM_TAG_VALIDATE_FILE_RANGES = 4,

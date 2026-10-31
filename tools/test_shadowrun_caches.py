@@ -309,6 +309,22 @@ def test_missionlets_bsp_loads_after_its_tags_keeping_its_page_offset(driver):
     assert address & 0xFFF == 0x800 and address >= free and address + 0x15F800 <= 0x819A6000
 
 
+def test_b30srs_bsps_load_clear_of_where_they_are_linked(driver):
+    # b30sr.map: tags at 0x806D0000 to 0x82504878, its BSPs linked inside them
+    # (b30a 0x64A000 bytes at 0x82086000, b30b 0x3D4800 at 0x822FB800). The
+    # first room after the tags, 0x82505000, overlaps b30a's linked range, and
+    # a BSP moved onto that cannot have its pointers moved
+    # (tag_validate_relocate_structure_bsp): each loads past it instead
+    free, end = 0x82504878, 0x82E00000
+    for linked, read, expected in ((0x82086000, 0x64A000, 0x826D0000), (0x822FB800, 0x3D4800, 0x826D0800)):
+        status, address = driver("bsp", linked, read, free, end - free)
+        assert (status, address) == ("ok", expected)
+        assert address >= linked + read and address + read <= end
+    # (and with less room than that, refused rather than overlapping)
+    status, _ = driver("bsp", 0x82086000, 0x64A000, free, 0x82C00000 - free)
+    assert status != "ok"
+
+
 @pytest.mark.parametrize("linked, read, free, room", [
     (0x81EBB800, 0x400000, 0x8169C834, 0x819A6000 - 0x8169C834),  # too large for the room
     (0x81EBB800, 0, 0x8169C834, 0x100000),                          # nothing to read

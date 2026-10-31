@@ -549,7 +549,9 @@ enum cache_file_status xbox_cache_tag_data_address(
 sectors, as it is read), linked to `linked_address`, loads in the free part
 of the tag cache, the `free_bytes` at `free_address` after the tag data: at
 its own address when it fits there, otherwise as low as it fits with the
-same offset in its 4096-byte page (so that every alignment within it holds).
+same offset in its 4096-byte page (so that every alignment within it holds)
+and without overlapping the range it is linked to (its pointers are moved by
+the distance, which must not leave one where they were).
 _cache_file_status_ok with the address in `*address`;
 _cache_file_status_bad_structure_bsp_range when it fits nowhere. */
 enum cache_file_status xbox_cache_structure_bsp_address(

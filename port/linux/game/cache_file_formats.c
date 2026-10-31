@@ -4004,6 +4004,23 @@ enum cache_file_status xbox_cache_structure_bsp_address(
 	{
 		lowest += 0x1000;
 	}
+	/* (and clear of where it is linked: its pointers are moved by the
+	distance, and one moved into the range it was linked to would look like
+	one still to move, tag_validate_relocate_structure_bsp. b30sr.map's b30a
+	is linked inside its tags, 0x64A000 bytes at 0x82086000, and the first
+	room after them, at 0x82505000, would overlap it) */
+	if (lowest < linked_address + read_bytes && linked_address < lowest + read_bytes)
+	{
+		if (linked_address > UINT32_MAX - read_bytes - 0x1000)
+		{
+			return _cache_file_status_bad_structure_bsp_range;
+		}
+		lowest = ((linked_address + read_bytes) & ~(uint32_t)0xFFF) + page_offset;
+		if (lowest < linked_address + read_bytes)
+		{
+			lowest += 0x1000;
+		}
+	}
 	if (!range_fits(lowest - free_address, read_bytes, free_bytes))
 	{
 		return _cache_file_status_bad_structure_bsp_range;
