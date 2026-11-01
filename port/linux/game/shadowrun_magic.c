@@ -178,6 +178,9 @@ the least; and its turn's bound (the executable's, 3.14) */
 #define STRANGLE_STARTING_SCALE 0.1f
 #define STRANGLE_MINIMUM_SCALE 0.01f
 #define STRANGLE_PI 3.14f
+/* port: how much harder strangle's thorns hurt than the damage tag they are
+cast with says (the port's, not the prototype's) */
+#define STRANGLE_DAMAGE_MULTIPLIER 2.5f
 /* port: a thorn withers twenty seconds after it grows (the executable kept
 them until the most kept, the definition's, pushed the oldest out) */
 #define STRANGLE_THORN_LIFETIME_TICKS (20 * 30)
@@ -1619,6 +1622,9 @@ static void shadowrun_strangle_hurt(
 			vector_from_points3d(&thorn->object.bounding_sphere_center, &biped->object.bounding_sphere_center,
 				&damage.direction);
 			damage.material_type = NONE;
+			/* port: strangle's thorns hurt harder than their damage tag says
+			(damage.c's object_cause_damage scales by this) */
+			damage.multiplier = STRANGLE_DAMAGE_MULTIPLIER;
 			object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
 		}
 		shadowrun_unit->strangle_hurt_ticks = magic->strangle_damage_ticks;

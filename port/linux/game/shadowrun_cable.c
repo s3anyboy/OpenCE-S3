@@ -162,7 +162,10 @@ static void shadowrun_cable_effect(
 	struct tag_reference const *reference,
 	long object_index)
 {
-	if (object_index != NONE && shadowrun_cable_tag(reference->index, EFFECT_DEFINITION_TAG))
+	/* port: on an object that is still there (the hook may have gone with
+	the structure: a switch of the map's BSPs deletes what it holds) */
+	if (object_index != NONE && object_try_and_get_and_verify_type(object_index, NONE) &&
+		shadowrun_cable_tag(reference->index, EFFECT_DEFINITION_TAG))
 	{
 		effect_new_from_object(reference->index, object_index, object_index, NONE, 0.f, 0.f, NULL, NULL);
 	}
@@ -707,6 +710,17 @@ boolean shadowrun_cable_update(
 		SHADOWRUN_CABLE_STUCK_DISTANCE_SQUARED ? cable->stuck_ticks + 1 : 0;
 	cable->last_position = unit->object.position;
 
+	/* port: the hook and the line the game deleted itself (the line, a
+	projectile, detonates; a switch of the map's BSPs deletes them) are
+	forgotten, not used: their indices are another object's, or none */
+	if (cable->hook_index != NONE && !object_try_and_get_and_verify_type(cable->hook_index, NONE))
+	{
+		cable->hook_index = NONE;
+	}
+	if (cable->line_index != NONE && !object_try_and_get_and_verify_type(cable->line_index, NONE))
+	{
+		cable->line_index = NONE;
+	}
 	/* (FUN_00251840) */
 	if (cable->state == _shadowrun_cable_state_none || cable->state == _shadowrun_cable_state_hanging)
 	{
