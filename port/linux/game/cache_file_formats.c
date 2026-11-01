@@ -4046,19 +4046,22 @@ other) */
 /* an actor definition's type (ai/actor_definitions.h) */
 #define ACTOR_DEFINITION_TYPE_OFFSET 0x14
 /* port: a weapon definition's magazines and triggers, at the same offsets in
-the prototype's build and this one's, and an element's size in each. The
-prototype's are larger (cachesym.xbe's own reads: its FUN_001716F0 asks for a
-magazine with 0x70, and its trigger loops for 0x114), and the fields this build
-reads come first in both, so a block is read with the map's stride and each
-element copied down to this build's */
+the prototype's build and this one's, and an element's size in each: the
+prototype's (cachesym.xbe's own reads: its FUN_001716F0 asks for a magazine
+with 0x70, and its trigger loops for 0x114), and this build's, which are the
+same (items/weapon_definitions.h: struct weapon_magazine_definition is 0x70
+bytes, struct weapon_trigger_definition 0x114). They were taken to be 0x34
+and 0x30, and a weapon with two triggers (the plasma pistol, its charged
+shot) had its second copied over the first's errors and charging, and fired
+as fast as it was pressed: nothing is moved now */
 #define WEAPON_GROUP_TAG 'weap'
 #define WEAPON_GROUP_TAG_BYTES 0x70616577UL
 #define WEAPON_MAGAZINES_OFFSET 0x4F0
 #define WEAPON_TRIGGERS_OFFSET 0x4FC
 #define WEAPON_MAGAZINE_BYTES 0x70
 #define WEAPON_TRIGGER_BYTES 0x114
-#define WEAPON_MAGAZINE_BYTES_THIS_BUILD 0x34
-#define WEAPON_TRIGGER_BYTES_THIS_BUILD 0x30
+#define WEAPON_MAGAZINE_BYTES_THIS_BUILD 0x70
+#define WEAPON_TRIGGER_BYTES_THIS_BUILD 0x114
 #define MAXIMUM_WEAPON_BLOCK_ELEMENTS 8
 /* port: a Shadowrun unit definition (srud, shadowrun_definitions.h) as a map
 holds it when it was put in it uncompiled: the tag file's body as it is (its
@@ -4211,7 +4214,7 @@ static int shadowrun_weapon_blocks_convert(
 		}
 		/* (in place, each element forward to its new place first, so no
 		element is written over before it is read: element 0 needs no move) */
-		for (index = 1; index < count; index++)
+		for (index = 1; target_bytes[block] != source_bytes[block] && index < count; index++)
 		{
 			memmove(tag_data + elements_offset + (uint32_t)index * target_bytes[block],
 				tag_data + elements_offset + (uint32_t)index * source_bytes[block],

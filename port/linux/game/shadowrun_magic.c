@@ -549,12 +549,15 @@ boolean shadowrun_unit_camouflage_update(
 	long unit_index)
 {
 	struct shadowrun_magic3_definition *magic = shadowrun_map_loaded() ? shadowrun_magic3_get(unit_index) : NULL;
+	struct shadowrun_unit *shadowrun_unit = magic ? shadowrun_unit_get(unit_index) : NULL;
+	struct unit_datum *unit = magic ? unit_get(unit_index) : NULL;
 	boolean result = FALSE;
 
-	if (magic)
+	/* port: only smoke's own camouflage (or one fading): an active
+	camouflage the unit picked up comes and goes as the game's does */
+	if (magic && shadowrun_unit &&
+		(shadowrun_unit->smoke_active || !TEST_FLAG(unit->unit.flags, _unit_active_camouflaged_bit)))
 	{
-		struct unit_datum *unit = unit_get(unit_index);
-
 		if (TEST_FLAG(unit->unit.flags, _unit_active_camouflaged_bit))
 		{
 			unit->unit.active_camouflage += 1.f / (magic->smoke_camouflage_time * (real)TICKS_PER_SECOND);
@@ -2553,6 +2556,13 @@ static void shadowrun_smoke_update(
 	if (unit->unit.active_camouflage > 0.f)
 	{
 		shadowrun_unit_show_head(unit_index, unit->unit.active_camouflage != magic->smoke_camouflage);
+	}
+	/* port: an attack ends smoke's alone (the executable asked whether the
+	unit was camouflaged at all, so an active camouflage picked up on
+	b30sr.map kept its holder from firing or meleeing: each press was taken
+	to end a smoke it did not have) */
+	if (unit->unit.active_camouflage > 0.f && shadowrun_unit->smoke_active)
+	{
 		if (TEST_FLAG(unit->unit.control_flags, _unit_control_use_equipment_bit))
 		{
 			shadowrun_smoke_end(unit_index);
