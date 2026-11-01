@@ -127,6 +127,11 @@ variant of a name starting so */
 what these are compared with) */
 #define SHADOWRUN_SUMMONED_ACTOR_VARIANT "characters\\elemental\\elite commander\\elite commander energy sword"
 #define SHADOWRUN_SUMMONED_ACTOR_VARIANT_PREFIX "elite commander"
+/* port: the actor variant Resurrection raises where the map has no encounter
+of its definition's name (missionlet.map's "zombie" encounter's: b30sr.map,
+Halo's b30, has the variant but not the encounter) */
+#define SHADOWRUN_RESURRECTED_ACTOR_VARIANT "characters\\zombie\\zombie"
+#define SHADOWRUN_RESURRECTED_ACTOR_VARIANT_PREFIX "zombie"
 
 /* port: the actor variant the Hologram tech makes: its hologram with the
 assault rifle (shadowrun_tech.c). No prefix search: this is the whole name */
@@ -380,6 +385,8 @@ a static starts at 0, which is a tag's index) */
 static long shadowrun_summoned_variant = NONE;
 /* ... and the Hologram tech's */
 static long shadowrun_hologram_variant_index = NONE;
+/* ... and Resurrection's, where the map has no encounter of its own */
+static long shadowrun_resurrected_variant = NONE;
 
 /* ---------- public code */
 
@@ -398,6 +405,7 @@ void shadowrun_magic_initialize_for_new_map(
 	/* port: looked for in this map's tags */
 	shadowrun_summoned_variant = NONE;
 	shadowrun_hologram_variant_index = NONE;
+	shadowrun_resurrected_variant = NONE;
 
 	return;
 }
@@ -3230,8 +3238,9 @@ static void shadowrun_resurrection_update(
 
 /* 0x26D800: a body rises where it lay, as an actor of the definition's
 encounter on the caster's side, in the caster's colour: it lies there and
-gets up, as one feigning death does. The caster keeps six; the seventh takes
-the place of the one furthest from it, which is to die */
+gets up, as one feigning death does. The caster keeps twelve (port: the
+prototype's six); the next takes the place of the one furthest from it,
+which is to die */
 static void shadowrun_resurrection_raise(
 	long unit_index,
 	real_point3d const *position,
@@ -3242,6 +3251,7 @@ static void shadowrun_resurrection_raise(
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 	char encounter_name[sizeof(magic->resurrection_encounter) + 1];
 	long ai_reference = NONE;
+	long resurrected_actor_index = NONE;
 	short slot = NONE;
 	short furthest = 0;
 	real furthest_distance_squared = 0.f;
@@ -3285,9 +3295,30 @@ static void shadowrun_resurrection_raise(
 	csmemcpy(encounter_name, magic->resurrection_encounter, sizeof(magic->resurrection_encounter));
 	encounter_name[sizeof(magic->resurrection_encounter)] = 0;
 	ai_index_from_string(global_scenario_get(), encounter_name, &ai_reference);
-	if (ai_reference != NONE)
+	/* port: where the map has no such encounter (b30sr.map), one of the map's
+	zombie variant rises where the body lay, placed as a summon's is */
+	if (ai_reference == NONE)
 	{
-		long actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
+		long variant = shadowrun_actor_variant_named(SHADOWRUN_RESURRECTED_ACTOR_VARIANT,
+			SHADOWRUN_RESURRECTED_ACTOR_VARIANT_PREFIX, &shadowrun_resurrected_variant);
+
+		if (variant != NONE)
+		{
+			resurrected_actor_index = shadowrun_summon_elemental_place(variant, unit_index, position);
+		}
+		if (resurrected_actor_index == NONE)
+		{
+			error(_error_silent, "shadowrun: resurrection raised no actor (no encounter '%s', no zombie variant)",
+				encounter_name);
+		}
+	}
+	else
+	{
+		resurrected_actor_index = encounter_port_create_actor(ai_reference & UNSIGNED_SHORT_MAX);
+	}
+	if (resurrected_actor_index != NONE)
+	{
+		long actor_index = resurrected_actor_index;
 		struct actor_datum *actor = actor_index != NONE ? actor_try_and_get(actor_index) : NULL;
 
 		if (actor)

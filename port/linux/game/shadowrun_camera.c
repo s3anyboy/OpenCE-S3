@@ -27,8 +27,8 @@ played.)
 
 enum
 {
-	/* a weapon's flag of Shadowrun's: it is a melee weapon */
-	_shadowrun_weapon_melee_bit = 16,
+	/* (a weapon's flag of Shadowrun's, that it is a melee weapon, is
+	shadowrun_definitions.h's _shadowrun_weapon_melee_bit) */
 
 	/* the camera track a melee weapon's holder is followed on */
 	SHADOWRUN_MELEE_CAMERA_TRACK = 2,

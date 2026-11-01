@@ -360,6 +360,7 @@ void shadowrun_hud_draw_accuracy(
 	if (unit && unit->object.type == _object_type_biped && shadowrun_unit->accuracy_active &&
 		shadowrun_unit_definition_player(unit_index))
 	{
+
 		struct shadowrun_weapon_data *data = shadowrun_unit_weapon_data_get(unit_index);
 		real gap = (1.f - PIN(shadowrun_unit->accuracy_unitized, 0.f, 1.f)) * SHADOWRUN_HUD_ACCURACY_SPREAD +
 			(data ? data->accuracy_reticle_gap : 0.f);

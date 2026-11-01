@@ -63,6 +63,9 @@ enum
 
 	/* an srwd's flags: its accuracy (the prototype's weapon bloom) */
 	SHADOWRUN_WEAPON_DATA_ACCURACY_BIT = 0,
+	/* a weapon's flag of Shadowrun's (its definition's weapon flags): it is
+	a melee weapon (the katanas, the razorclaws) */
+	_shadowrun_weapon_melee_bit = 16,
 
 	/* (a marker past any index, so that the group tags stay longs) */
 	SHADOWRUN_GROUP_TAG_LONG = 0x7FFFFFFF,

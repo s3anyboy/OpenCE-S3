@@ -40,9 +40,11 @@ each function names the one it is (its address in the executable).
 
 enum
 {
-	/* where a biped's definition names its srud: a tag index in what this
-	build's bipd has as unused (the reference's index, 0x468) */
-	SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET = 0x45C,
+	/* where a biped's definition names its srud: a tag reference in what this
+	build's bipd has as unused, from 0x45C (its group, name, name's length and
+	index, which is at 0x468: missionlet's bipeds hold 'srud' at 0x45C and the
+	srud's index at 0x468, and the executable reads the index there) */
+	SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET = 0x468,
 	/* where a weapon's definition names its srwd: in what this build's weap
 	has as unused, after its heat illumination (the reference's index,
 	0x370) */
@@ -104,6 +106,13 @@ static void shadowrun_unit_new_head(
 static void shadowrun_unit_delete_head(
 	long unit_index);
 static void shadowrun_unit_head_update(
+	long unit_index);
+/* port: an actor's magic (shadowrun_actor_learn_magic and
+shadowrun_actor_spell_update, below) */
+static void shadowrun_actor_learn_magic(
+	long unit_index,
+	struct shadowrun_unit_definition *definition);
+static void shadowrun_actor_spell_update(
 	long unit_index);
 
 /* port: the srwd each of the prototype's weapons names (missionlet.map's),
@@ -280,7 +289,7 @@ void shadowrun_tags_loaded(
 			}
 			/* port: one that names none is given the srwd the prototype's
 			own weapon of its name names (b30sr.map's weapons name none: its
-			guns would have no accuracy, its katanas no melee) */
+			guns would have no accuracy, its races no speed with them) */
 			if (reference->index == NONE)
 			{
 				char const *weapon_name = tag_get_name(tag_index);
@@ -419,6 +428,93 @@ void shadowrun_unit_new(
 		/* port: the cable's state (bipeds.c's 0x10B8: the executable keeps it
 		in the biped's datum) */
 		shadowrun_cable_new(unit_index);
+	}
+
+	return;
+}
+
+/* port: the spells an actor's srud gives it: every spell whose magic tag the
+srud names, whose levels hold one for the actor's race (each spell's levels are
+one an race, so a magic tag with as many levels as the race's index has one)
+*/
+static void shadowrun_actor_learn_magic(
+	long unit_index,
+	struct shadowrun_unit_definition *definition)
+{
+	short spell;
+
+	if (!definition)
+	{
+		return;
+	}
+	for (spell = 0; spell < NUMBER_OF_SHADOWRUN_SPELLS; spell++)
+	{
+		long mana_cost = 0;
+
+		/* (the level is the srud's magic's: shadowrun_spell_get reads it for
+		the unit's race, and leaves the cost 0 when it has none) */
+		shadowrun_spell_get(unit_index, spell, &mana_cost, NULL, NULL, NULL, NULL);
+		if (mana_cost > 0)
+		{
+			shadowrun_unit_learn_power(unit_index, spell);
+			error(_error_silent, "port: actor unit %ld learns spell %d (mana %ld)", (long)unit_index, (int)spell,
+				(long)mana_cost);
+		}
+	}
+
+	return;
+}
+
+/* port: an actor's magic, each tick: a unit a player does not hold, of a race
+whose srud gives it spells (an elite), casts one now and then, as long as the
+map's magic gives the spell a level for its race and its mana pays for it. The
+spell is the one it casts, else the first it knows, chosen again at random with
+the wait between casts (the prototype's own AI never cast: nothing of its cast
+its magic, and its spells' mana, costs and waits are all the game's) */
+static void shadowrun_actor_spell_update(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct unit_datum *unit = shadowrun_unit ? unit_try_and_get(unit_index) : NULL;
+
+	if (!unit || !shadowrun_unit)
+	{
+		return;
+	}
+	/* (an actor's spells cost nothing of its own mana, as its race's magic
+	is the map's: shadowrun_unit_spend_mana lets anything an actor casts
+	through, and its mana is never spent) */
+	if (shadowrun_unit->actor_cast_ticks > 0)
+	{
+		shadowrun_unit->actor_cast_ticks--;
+		return;
+	}
+	if (shadowrun_unit->known_power_count > 0)
+	{
+		short spells[NUMBER_OF_SHADOWRUN_SPELLS];
+		short spell_count = 0;
+		short spell;
+
+		for (spell = 0; spell < NUMBER_OF_SHADOWRUN_SPELLS; spell++)
+		{
+			if (shadowrun_unit->known_powers[spell] != 0)
+			{
+				spells[spell_count++] = spell;
+			}
+		}
+		if (spell_count > 0)
+		{
+			short chosen = spells[random_range(0, (short)(spell_count - 1))];
+
+			/* (the game decides whether it may be cast: its level for the
+			race, its mana, its waits; a spell it cannot cast is tried again)
+			*/
+			shadowrun_spell_cast(unit_index, chosen);
+			shadowrun_unit->current_spell = (long)chosen + 1;
+			shadowrun_unit->desired_spell = (long)chosen + 1;
+			/* (the wait after a cast: a second and a half to four seconds) */
+			shadowrun_unit->actor_cast_ticks = random_range(45, 120);
+		}
 	}
 
 	return;
@@ -624,13 +720,18 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_player(
 	struct shadowrun_unit_definition *result = unit_index != NONE ? shadowrun_unit_definition_get(unit_index) : NULL;
 	struct unit_datum *unit;
 
+	/* port: an actor that names none plays by the map's too, as a player's
+	does: the prototype's campaign map gives its bipeds no srud at all,
+	its elites' included, so an elite without this had no race to set and
+	no magic to cast */
 	if (!result && shadowrun_globals.map_loaded && unit_index != NONE &&
-		(unit = unit_try_and_get(unit_index)) != NULL && unit->unit.player_index != NONE)
+		(unit = unit_try_and_get(unit_index)) != NULL &&
+		(unit->unit.player_index != NONE || unit->unit.actor_index != NONE))
 	{
 		result = shadowrun_unit_definition_for_shopping();
 		/* (said once a map, the first time: the log's word that a player's
 		unit plays by the map's srud, and by which) */
-		if (!shadowrun_globals.player_definition_reported)
+		if (unit->unit.player_index != NONE && !shadowrun_globals.player_definition_reported)
 		{
 			shadowrun_globals.player_definition_reported = TRUE;
 			if (result)
@@ -824,6 +925,34 @@ struct shadowrun_race *shadowrun_unit_race_get(
 	return result;
 }
 
+/* port: a definition's reference to a magic tag, by its index, or, where the
+index is none and the reference names the tag's group (a campaign map's, whose
+sruds name their magic's group alone: b30sr.map's are 'm1ed', 'm2ed' and
+'m3ed' with no index), the first tag of that group the map has. NULL for
+neither */
+static void *shadowrun_reference_tag(
+	struct tag_reference const *reference,
+	long group_tag)
+{
+	long count = 0;
+	struct shadowrun_tag_instance const *instances = shadowrun_tag_instances(&count);
+	long index;
+
+	if (reference->index != NONE)
+	{
+		return tag_get(group_tag, reference->index);
+	}
+	for (index = 0; instances && index < count; index++)
+	{
+		if (SHADOWRUN_GROUP_TAG_IS(instances[index].group_tag, group_tag) && instances[index].base_address)
+		{
+			return instances[index].base_address;
+		}
+	}
+
+	return NULL;
+}
+
 /* 0x25E5E0 */
 struct shadowrun_magic1_definition *shadowrun_magic1_get(
 	long unit_index)
@@ -831,8 +960,7 @@ struct shadowrun_magic1_definition *shadowrun_magic1_get(
 	/* port: by the srud the unit buys by (shadowrun_unit_definition_shop) */
 	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_shop(unit_index);
 
-	return definition && definition->magic1.index != NONE ?
-		tag_get(SHADOWRUN_MAGIC1_DEFINITION_TAG, definition->magic1.index) : NULL;
+	return definition ? shadowrun_reference_tag(&definition->magic1, SHADOWRUN_MAGIC1_DEFINITION_TAG) : NULL;
 }
 
 /* 0x25E680 */
@@ -842,8 +970,7 @@ struct shadowrun_magic2_definition *shadowrun_magic2_get(
 	/* port: by the srud the unit buys by (shadowrun_unit_definition_shop) */
 	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_shop(unit_index);
 
-	return definition && definition->magic2.index != NONE ?
-		tag_get(SHADOWRUN_MAGIC2_DEFINITION_TAG, definition->magic2.index) : NULL;
+	return definition ? shadowrun_reference_tag(&definition->magic2, SHADOWRUN_MAGIC2_DEFINITION_TAG) : NULL;
 }
 
 /* 0x25E720 */
@@ -853,8 +980,7 @@ struct shadowrun_magic3_definition *shadowrun_magic3_get(
 	/* port: by the srud the unit buys by (shadowrun_unit_definition_shop) */
 	struct shadowrun_unit_definition *definition = shadowrun_unit_definition_shop(unit_index);
 
-	return definition && definition->magic3.index != NONE ?
-		tag_get(SHADOWRUN_MAGIC3_DEFINITION_TAG, definition->magic3.index) : NULL;
+	return definition ? shadowrun_reference_tag(&definition->magic3, SHADOWRUN_MAGIC3_DEFINITION_TAG) : NULL;
 }
 
 /* 0x264AD0: how much a heal heals the unit: as much as damage hurts it (a
@@ -1296,20 +1422,34 @@ static struct shadowrun_weapon_data *shadowrun_unit_accuracy_data(
 	return data && TEST_FLAG(data->flags, SHADOWRUN_WEAPON_DATA_ACCURACY_BIT) ? data : NULL;
 }
 
-/* port: a melee weapon is one whose own srwd has no accuracy (the katanas',
-razorclaws', the spirit animal's: their srwds name none; every gun's do) */
-boolean shadowrun_unit_melee_weapon(
+/* the weapon flags of the weapon in the unit's hand (0 for none) */
+static unsigned long shadowrun_unit_weapon_flags(
 	long unit_index)
 {
 	struct unit_datum *unit = shadowrun_globals.map_loaded ? unit_try_and_get(unit_index) : NULL;
 	long weapon_index = unit && unit->unit.current_weapon_index != NONE ?
 		unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index) : NONE;
 	struct object_datum *weapon = weapon_index != NONE ? object_try_and_get_and_verify_type(weapon_index, _object_mask_weapon) : NULL;
-	long data_index = weapon ?
-		shadowrun_weapon_data_reference(weapon_definition_get(weapon->definition_index))->index : NONE;
-	struct shadowrun_weapon_data *data = data_index != NONE ? tag_get(SHADOWRUN_WEAPON_DATA_TAG, data_index) : NULL;
 
-	return data && !TEST_FLAG(data->flags, SHADOWRUN_WEAPON_DATA_ACCURACY_BIT);
+	return weapon ? weapon_definition_get(weapon->definition_index)->weapon.flags : 0;
+}
+
+/* 0x173E20, 0x173DD0: whether the weapon in the unit's hand is a melee
+weapon, or must be readied (shadowrun_camera.c) */
+boolean shadowrun_unit_melee_weapon(
+	long unit_index)
+{
+	unsigned long flags = shadowrun_unit_weapon_flags(unit_index);
+
+	return TEST_FLAG(flags, _shadowrun_weapon_melee_bit) || TEST_FLAG(flags, _weapon_must_be_readied_bit);
+}
+
+/* port: a unit holding a melee weapon (the katanas, the razorclaws) strikes
+with the fire control (player_control.c) */
+boolean shadowrun_unit_fire_strikes(
+	long unit_index)
+{
+	return TEST_FLAG(shadowrun_unit_weapon_flags(unit_index), _shadowrun_weapon_melee_bit);
 }
 
 /* 0x25F120: a unit's accuracy reset (a weapon picked up, players.c; and
@@ -1511,6 +1651,15 @@ void shadowrun_unit_update(
 					shadowrun_spell_cast(unit_index, (short)(shadowrun_unit->current_spell - 1));
 				}
 			}
+			/* port: an actor of a race that knows spells casts one now and then:
+			the prototype's own AI never cast (nothing reads its magic), so this
+			is the port's. A unit a player does not hold, whose race's magic
+			gives the spell its level and whose mana pays for it
+			(shadowrun_actor_spell_update) */
+			if (unit->unit.player_index == NONE && unit->unit.actor_index != NONE)
+			{
+				shadowrun_actor_spell_update(unit_index);
+			}
 			/* port: a player's tech (the left bumper) is used where its controls
 			are made the unit's (players.c, shadowrun_player_controls in
 			port/linux/game/shadowrun_tech.c): the game's control flags are the
@@ -1578,6 +1727,16 @@ void shadowrun_unit_set_race(
 			if (unit->unit.actor_index == NONE)
 			{
 				unit->object.maximum_body_vitality = race->maximum_body_vitality;
+			}
+			else
+			{
+				/* port: an actor of a srud whose magic its race's level has (an
+				elite, the prototype's elemental) knows that magic's spells, and
+				casts one now and then (shadowrun_actor_spell_update). A map that
+				gives the actor's srud no magic tag leaves it without */
+				shadowrun_actor_learn_magic(unit_index, definition);
+				error(_error_silent, "port: actor unit %ld, race %ld, now knows %ld spells",
+					(long)unit_index, (long)shadowrun_unit->race_index, (long)shadowrun_unit->known_power_count);
 			}
 		}
 	}
@@ -1908,10 +2067,14 @@ static void shadowrun_cache_tag_groups_normalize(
 	return;
 }
 
+/* port: the srud a biped names, as the tag reference it is: its index is
+SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET's (0x468), and the reference's first
+field (its group) is 12 bytes before it */
 static struct tag_reference *shadowrun_biped_unit_definition_reference(
 	struct biped_definition *definition)
 {
-	return (struct tag_reference *)((byte *)definition + SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET);
+	return (struct tag_reference *)((byte *)definition + SHADOWRUN_BIPED_UNIT_DEFINITION_OFFSET -
+		(long)offsetof(struct tag_reference, index));
 }
 
 static struct tag_reference *shadowrun_weapon_data_reference(

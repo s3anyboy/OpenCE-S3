@@ -57,9 +57,9 @@ enum
 	/* smoke may be cast again so long after it ended (ticks) */
 	SMOKE_RECAST_WAIT = 15,
 
-	/* the actors a unit's Resurrection keeps raised at once, and the summons
-	it keeps */
-	MAXIMUM_SHADOWRUN_RESURRECTED_ACTORS = 6,
+	/* the actors a unit's Resurrection keeps raised at once (port: 12; the
+	prototype's 6), and the summons it keeps */
+	MAXIMUM_SHADOWRUN_RESURRECTED_ACTORS = 12,
 	MAXIMUM_SHADOWRUN_SUMMONS = 5,
 
 	/* strangle's thorns growing at once, a unit's (the executable's list has
@@ -114,6 +114,11 @@ definition (0x10F0) */
 	/* a spell that could not be cast (0xB34) */
 	boolean spell_failed[NUMBER_OF_SHADOWRUN_SPELLS];
 	byte pad0[3];
+
+	/* port: an actor's wait before it casts another spell (ticks), which it
+	sets at random each time it casts one (shadowrun_units.c,
+	shadowrun_actor_spell_update: the prototype's AI never cast its magic) */
+	long actor_cast_ticks;
 
 	/* port: the tech the left bumper uses (_shadowrun_tech_none for none), the ticks its look
 	lasts, and its output: the number of the navpoint it marks it against

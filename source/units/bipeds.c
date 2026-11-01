@@ -3363,6 +3363,15 @@ static void biped_update_turning(
 			biped->unit.player_index!=NONE &&
 			biped->unit.animation.state==_unit_state_throw_grenade &&
 			unit_animation_enhanced(biped_index);
+		/* port: and a player in the air turns with the aim, as one running
+		does: the original never turned the airborne state, and clipped the
+		aim to its aiming screen about the body left facing where the jump
+		began, so a shot after a turn in the air missed the crosshair
+		(game.enhanced_animations: unit_animation_enhanced) */
+		boolean airborne_turn =
+			biped->unit.player_index!=NONE &&
+			biped->unit.animation.state==_unit_state_airborne &&
+			unit_animation_enhanced(biped_index);
 		real_vector3d turn_axis;
 		real turn_error;
 		real facing_alignment;
@@ -3427,7 +3436,8 @@ static void biped_update_turning(
 
 		if (biped->biped.state==biped_state_moving ||
 			TEST_FLAG(flags, _biped_turns_without_animating_bit) ||
-			throwing_turn)
+			throwing_turn ||
+			airborne_turn)
 		{
 			if (!TEST_FLAG(biped->unit.control_flags, _unit_control_look_dont_turn_bit))
 			{
@@ -4012,6 +4022,13 @@ static void biped_update_moving(
 		!TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
 	{
 		SET_FLAG(in_flags, _biped_physics_in_climb_anything_bit, TRUE);
+	}
+	/* port: the Shadowrun prototype's grapple reels the biped in, holds it
+	where it hangs, or pulls it to its caster: its velocity is the cable's,
+	its own movement none, and it flies (port/linux/game/shadowrun_cable.c) */
+	if (shadowrun_cable_physics(biped_index, &physics.velocity, &physics.movement_desired))
+	{
+		SET_FLAG(in_flags, _biped_physics_in_flying_bit, TRUE);
 	}
 	physics.in_flags = in_flags;
 

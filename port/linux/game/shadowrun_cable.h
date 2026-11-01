@@ -2,8 +2,8 @@
 SHADOWRUN_CABLE.H
 
 The Shadowrun prototype's cable, as the executable keeps it: the grapple
-(fired level, 30 m, the first thing it hits attached to, the unit reeled in
-over the tag's ticks), the glider, and the heal of the undead, which are one
+(its end travels from the unit the way it aims; the world it holds reels the
+unit in to hang there, a biped it holds is pulled to the unit), which is a
 tag of the map's (t2ed, its srud's tech2: shadowrun_definitions.h).
 
 Ported from the prototype's executable (cachesym.xbe, build 01.12.07.0132):
@@ -25,13 +25,15 @@ FUN_0025B650 lets it go.
 
 enum
 {
-	/* the cable's state, as bipeds.c FUN_002541D0 numbers it (0x10B8) */
+	/* the cable's state, as bipeds.c FUN_002541D0 numbers it (0x10B8): its
+	end travelling, the unit reeled in to where it holds the world, hanging
+	there, pulling a biped to it, and (the biped's) pulled */
 	_shadowrun_cable_state_none = 0,
-	_shadowrun_cable_state_attached_to_world = 1,
-	_shadowrun_cable_state_attached_to_unit = 2,
-	_shadowrun_cable_state_reeling = 3,
-	_shadowrun_cable_state_released = 4,
-	_shadowrun_cable_state_gliding = 5,
+	_shadowrun_cable_state_fired = 1,
+	_shadowrun_cable_state_reeling = 2,
+	_shadowrun_cable_state_hanging = 3,
+	_shadowrun_cable_state_pulling = 4,
+	_shadowrun_cable_state_pulled = 5,
 };
 
 /* ---------- prototypes/SHADOWRUN_CABLE.C */
@@ -56,7 +58,14 @@ void shadowrun_cable_force_release(
 /* FUN_0025B7D0: fires it, and reels the unit in. TRUE when it fired */
 boolean shadowrun_cable_fire(
 	long unit_index);
-/* FUN_002541D0: each tick. TRUE when the unit is held */
+/* FUN_002541D0: each tick of a biped's physics (bipeds.c): TRUE when the
+cable moves it, its velocity and movement set, and it flies */
+boolean shadowrun_cable_physics(
+	long biped_index,
+	real_vector3d *velocity,
+	real_vector3d *movement_desired);
+/* each tick of a unit: the cable's waits, its hook and its line (FUN_00251840).
+TRUE while its cable is out */
 boolean shadowrun_cable_update(
 	long unit_index);
 /* whether the unit is reeling in, or held by a cable (shadowrun_camera.c) */

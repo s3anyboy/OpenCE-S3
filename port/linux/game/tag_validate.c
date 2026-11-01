@@ -359,6 +359,39 @@ static boolean region_contains(
 		size <= validation->region_size - offset;
 }
 
+/* port: zeroed data of a group's size, for a tag the map gives none (see
+below): its own buffer, made once and kept, outside the tag cache and the
+validator's claims. Reads as an empty tag of that group -- no blocks, no
+references, no data -- whatever group's schema it is read through. NULL when
+the group has no schema, or the memory cannot be had */
+static void *tag_validate_zeroed_tag(
+	struct tag_schema_definition const *definition)
+{
+	/* (a map has a handful of such tags, and a map's count of them is bounded
+	by the tag table: this is well past any map's) */
+	static void *buffers[64];
+	static short buffer_count;
+	/* port: a group with no schema in the table is given the largest tag this
+	build reads a group of no schema as: enough that reading any field of it
+	is defined, and nothing a reader can take for a block's or a reference's
+	being there */
+	long size = definition && definition->size > 0 ? definition->size : 0x1000;
+	void *result;
+	if (buffer_count >= (short)(sizeof(buffers) / sizeof(buffers[0])))
+	{
+		return NULL;
+	}
+	result = match_malloc("c:\\halo\\SOURCE\\tag_files\\tag_validate.c", 0, size);
+	if (!result)
+	{
+		return NULL;
+	}
+	csmemset(result, 0, size);
+	buffers[buffer_count++] = result;
+
+	return result;
+}
+
 /* marks size bytes at address (in the tag cache, as the region is) as a
 tag's: FALSE if any of them already were */
 static boolean claim(
@@ -1414,6 +1447,28 @@ static boolean validate_tag_table(
 		if (instance->group_tag == STRUCTURE_BSP_GROUP_TAG)
 		{
 			instance->base_address = NULL;
+			continue;
+		}
+		/* port: a tag whose data is the tag cache's own base has none: a map of
+		the prototype's build names a weapon's projectile and gives it no data
+		(b30sr.map's 'weapons\flamethrower\flame', at 0x806D0000). The game
+		itself never validates a tag's data, and only reads one it is asked
+		for; this build's reader asserts on a tag with no data, so such a tag
+		is given zeroed data of its own group's size, which reads as an empty
+		tag of its group (no blocks, no references). Not the empty tag's shared
+		bytes: a menu's widget block read from those is not empty, and the
+		menu goes on to read what is not there */
+		if ((unsigned long)instance->base_address == (unsigned long)tag_validate_globals.header)
+		{
+			void *data = tag_validate_zeroed_tag(group ? group->definition : NULL);
+
+			if (!data)
+			{
+				tag_validate_refuse(validation, "has no data, and none can be given it");
+				break;
+			}
+			instance->base_address = data;
+			tag_validate_correct(validation, "has no data");
 			continue;
 		}
 		if (!instance->base_address)

@@ -983,9 +983,13 @@ static void crosshairs_draw(
 	long return_eip = get_return_eip();
 	long stack_buffer[STACK_BUFFER_LENGTH];
 	boolean firing_active = FALSE;
-	/* port: the Shadowrun prototype's accuracy reticle, drawn once about the
-	aim crosshair (port/linux/game/shadowrun_hud.c) */
-	boolean accuracy_drawn = FALSE;
+	/* port: the unit whose weapon bloom is drawn, and where its crosshair is
+	and in what colour: the first crosshair item drawn leaves them, and the
+	reticle is drawn there once the items are (port/linux/game/shadowrun_hud.c) */
+	long unit_index = player->unit_index;
+	point2d accuracy_point;
+	boolean accuracy_placed = FALSE;
+	pixel32 accuracy_color = 0;
 
 	/* port: project the passenger's shot once for all pieces of its reticle */
 	if (!passenger_camera_reticle_begin(player->local_player_index, weapon_index))
@@ -997,7 +1001,6 @@ static void crosshairs_draw(
 	if (TEST_FLAG(weapon_hud_globals->script_flags, _hud_crosshair_show_bit) &&
 		hud_index != NONE)
 	{
-		long unit_index = player->unit_index;
 		struct crosshair_hud_state *crosshair = get_crosshair_state(player->local_player_index);
 		struct weapon_hud_interface_definition *root_definition = weapon_hud_interface_definition_get(hud_index);
 		short map_type_flags = global_scenario_get()->type != _scenario_type_main_menu;
@@ -1317,6 +1320,15 @@ static void crosshairs_draw(
 												interface_bitmap,
 												/* port: not scaled with display.fov (view_fov.c) */
 												FALSE);
+											/* port: where this crosshair sits, and its colour, for the
+											accuracy reticle drawn about it */
+											if (!accuracy_placed)
+											{
+												hud_calculate_point(player->local_player_index, &absolute_placement,
+													&item->placement, NULL, in_multiplayer, scale, &accuracy_point);
+												accuracy_color = color;
+												accuracy_placed = TRUE;
+											}
 										}
 										else
 										{
@@ -1346,23 +1358,7 @@ static void crosshairs_draw(
 												!custom_edition_hud_warning(state_index));
 										}
 									}
-									/* port: the Shadowrun prototype's accuracy reticle, about
-									the crosshair's point, in its colour (its weapon bloom,
-									game_engine.c's FUN_000EF590). It is drawn for every
-									crosshair state, not only the aim's (which aim assist
-									alone sets, and so only a scope's): a weapon whose bloom
-									the map gives none -- a melee weapon's -- has no
-									accuracy to draw, and shadowrun_hud_draw_accuracy says
-									so (its accuracy_active) */
-									if (!accuracy_drawn)
-									{
-										point2d point;
 
-										accuracy_drawn = TRUE;
-										hud_calculate_point(player->local_player_index, &absolute_placement, &item->placement,
-											NULL, in_multiplayer, scale, &point);
-										shadowrun_hud_draw_accuracy(unit_index, point.x, point.y, color);
-									}
 								}
 							}
 						}
@@ -1370,6 +1366,20 @@ static void crosshairs_draw(
 				}
 			}
 		}
+	}
+
+	/* port: the Shadowrun prototype's accuracy reticle -- its weapon bloom,
+	game_engine.c's FUN_000EF590 -- about the middle of the view, in the
+	crosshair's colour. It is drawn once here, for any weapon and any
+	crosshair state: the states a weapon draws are the map's, and a weapon
+	that has only a default crosshair has no aim state to draw it in (which
+	is why it showed for a scope alone). A weapon whose bloom the map gives
+	none -- a melee weapon's -- has no accuracy to draw, and
+	shadowrun_hud_draw_accuracy says so (its accuracy_active) */
+	if (TEST_FLAG(weapon_hud_globals->script_flags, _hud_crosshair_show_bit) && unit_index != NONE &&
+		accuracy_placed)
+	{
+		shadowrun_hud_draw_accuracy(unit_index, accuracy_point.x, accuracy_point.y, accuracy_color);
 	}
 
 	/* port: other HUD elements keep their ordinary anchors */

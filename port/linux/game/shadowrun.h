@@ -83,10 +83,15 @@ worsened by a jump, a crouch (each tick it is crouched: bipeds.c) and a
 reload (weapons.c); and a shot's error (weapons.c: TRUE if the unit's
 weapon has accuracy, *error its angle, the shot's worsening it), given the
 trigger's error fraction */
-/* port: whether the unit holds a melee weapon (its katanas', razorclaws',
-the spirit animal's: a weapon whose own srwd has no accuracy), whose fire
-control strikes as the melee control does (player_control.c) */
+/* port: whether the weapon in the unit's hand is a melee weapon (the
+katanas, the razorclaws: the weapon flag of Shadowrun's,
+_shadowrun_weapon_melee_bit), or one that must be readied (the flag, the
+ball): its holder is seen from behind (shadowrun_camera.c); and whether its
+fire control strikes, as the melee control does (player_control.c): a melee
+weapon's alone */
 boolean shadowrun_unit_melee_weapon(
+	long unit_index);
+boolean shadowrun_unit_fire_strikes(
 	long unit_index);
 void shadowrun_unit_accuracy_reset(
 	long unit_index);
