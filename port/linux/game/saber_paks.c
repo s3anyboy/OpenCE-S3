@@ -45,6 +45,8 @@ on the Xbox 360, which are big-endian. What is read of one, as Reclaimer
 		0x0701 its submeshes: in its 0x0401 (after an i32 count), for each
 		a 0x0501 (its first triangle and count), and a 0x0B01 whose first
 		0x0E01 is the material its base layer is drawn with
+	A mesh named .lod1, .lod2 ... is the template's at a lower level of
+	detail.
 
 Saber3D's axes are forward x, right -z and up y, Halo's forward x, left y
 and up z: a point of the template is Halo's with its y and z exchanged,
@@ -186,6 +188,8 @@ struct template_node
 	struct block submeshes;
 	unsigned short mesh_flags;
 	boolean has_mesh_flags;
+	/* its level of detail, of its name (".lod1.c": 1; none, 0) */
+	short lod;
 };
 
 struct template_walk
@@ -602,6 +606,14 @@ static void node_read(
 		node = &walk->nodes[walk->node_count++];
 		csmemset(node, 0, sizeof(*node));
 		node->id = read_short(bytes + name_end + 1);
+		for (index = (long)block.start; index + 4 <= (long)name_end; index++)
+		{
+			if (bytes[index] == '.' && bytes[index + 1] == 'l' && bytes[index + 2] == 'o' && bytes[index + 3] == 'd' &&
+				index + 4 < (long)name_end && bytes[index + 4] >= '0' && bytes[index + 4] <= '9')
+			{
+				node->lod = (short)(bytes[index + 4] - '0');
+			}
+		}
 		node->parent_id = NONE;
 		for (index = 0; index < 16; index++)
 			node->transform[index] = (index % 5) ? 0.f : 1.f;
@@ -1112,6 +1124,7 @@ static boolean mesh_read(
 			part = &parts[template_->part_count];
 			csmemset(part, 0, sizeof(*part));
 			part->material_index = submesh_material[index];
+			part->lod = node->lod;
 			part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
 			part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
 			template_->part_count++;

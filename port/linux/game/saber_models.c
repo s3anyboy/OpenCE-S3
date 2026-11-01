@@ -9,9 +9,12 @@ The Master Chief Collection's) is read for the templates of the models
 named in saber_model_templates, and each is drawn in place of the map's
 model, textured with the package's textures.
 
-This is the first of them: one object (b30's boulder), to see the way
-through. A template is drawn as a Custom Edition map's model is (mod_models.c
-does the same for the mods' models): its meshes made the vertices of the
+These are the first of them: b30's boulder and Covenant storage crate, to
+see the way through. A template's lower levels of detail (its .lod1, .lod2
+meshes) are the model's geometries of Halo's lower ones.
+
+A template is drawn as a Custom Edition map's model is (mod_models.c does
+the same for the mods' models): its meshes made the vertices of the
 map's model's parts (saber_paks.c reads them, in Halo's axes), compressed
 by the game's own rasterizer_geometry_compress_vertices into the Xbox's
 contiguous memory and given buffers by rasterizer_vertex_buffer_new and
@@ -40,6 +43,7 @@ definitions in place, and their own come back as the map goes.
 #include "errors.h"
 #include "bitmaps/bitmaps.h"
 #include "bitmaps/bitmap_group.h"
+#include "cache/cache_files.h"
 #include "math/real_math.h"
 #include "models/model_definitions.h"
 #include "rasterizer/rasterizer.h"
@@ -204,7 +208,9 @@ struct saber_model
 	struct model model;
 	struct model_region *regions;
 	struct model_region_permutation *permutations;
-	struct model_geometry geometry;
+	/* a geometry of each of the template's levels of detail */
+	struct model_geometry geometries[5];
+	long geometry_count;
 	struct model_geometry_part *parts;
 	long part_count;
 	byte *vertices;
@@ -233,10 +239,11 @@ struct saber_bitmap
 
 /* ---------- globals */
 
-/* the models drawn as templates: one, to begin with */
+/* the models drawn as templates: two, to begin with */
 static struct saber_model_template const saber_model_templates[] =
 {
 	{ "scenery\\rocks\\boulder\\boulder", "boulder__h" },
+	{ "scenery\\c_storage\\c_storage", "c_storage__h" },
 };
 
 static struct
@@ -488,11 +495,38 @@ static struct saber_model *saber_model_new(
 	long next = 0;
 	struct model_vertex_compressed *vertices;
 	word *strips;
+	/* the template's levels of detail there are parts of, and its parts in
+	the order of their levels (each level's parts a geometry's) */
+	short levels[5];
+	long level_count = 0;
+	long order[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
+	long first[5];
+	long level;
+	long made_index;
 
 	*reason = "out of memory";
 	if (!made)
 		return NULL;
 	csmemset(made, 0, sizeof(*made));
+	for (level = 0; level < 5; level++)
+	{
+		for (part_index = 0; part_index < template_->part_count; part_index++)
+		{
+			if (MIN(template_->parts[part_index].lod, 4) == level)
+				break;
+		}
+		if (part_index < template_->part_count)
+			levels[level_count++] = (short)level;
+	}
+	for (level = 0, made_index = 0; level < level_count; level++)
+	{
+		first[level] = made_index;
+		for (part_index = 0; part_index < template_->part_count; part_index++)
+		{
+			if (MIN(template_->parts[part_index].lod, 4) == levels[level])
+				order[made_index++] = part_index;
+		}
+	}
 	made->tag_index = tag_index;
 	made->map_model = *map_model;
 	made->model = *map_model;
@@ -527,8 +561,10 @@ static struct saber_model *saber_model_new(
 
 			*permutation = *TAG_BLOCK_GET_ELEMENT(&map_region->permutations, permutation_index,
 				struct model_region_permutation);
+			/* (super high the template's most detailed, each lower Halo level
+			its next, and the rest its least) */
 			for (detail = 0; detail < 5; detail++)
-				permutation->geometry_indices[detail] = 0;
+				permutation->geometry_indices[detail] = (short)MIN(level_count - 1, 4 - detail);
 		}
 	}
 	made->model.regions.address = made->regions;
@@ -551,10 +587,10 @@ static struct saber_model *saber_model_new(
 		vertices += template_->parts[part_index].vertex_count;
 	strips = (word *)vertices;
 	vertices = (struct model_vertex_compressed *)made->vertices;
-	for (part_index = 0; part_index < template_->part_count; part_index++)
+	for (made_index = 0; made_index < template_->part_count; made_index++)
 	{
-		struct saber_mesh_part const *source = &template_->parts[part_index];
-		struct model_geometry_part *part = &made->parts[part_index];
+		struct saber_mesh_part const *source = &template_->parts[order[made_index]];
+		struct model_geometry_part *part = &made->parts[made_index];
 		struct model_vertex_uncompressed *scaled = malloc(sizeof(*scaled) * ((size_t)source->vertex_count + 1));
 		long strip_count;
 		long index;
@@ -562,7 +598,7 @@ static struct saber_model *saber_model_new(
 		*reason = "out of memory";
 		if (!scaled)
 			goto refused;
-		part->shader_index = shader_indices[part_index];
+		part->shader_index = shader_indices[order[made_index]];
 		part->previous_part_index = NONE;
 		part->next_part_index = NONE;
 		part->centroid_primary_node_weight = 1.f;
@@ -585,7 +621,7 @@ static struct saber_model *saber_model_new(
 			source->vertex_count * uncompressed_size);
 		free(scaled);
 		strip_count = part_strip(source, strips);
-		made->part_count = part_index + 1;
+		made->part_count = made_index + 1;
 		*reason = "the renderer cannot make its buffers";
 		if (!rasterizer_vertex_buffer_new(&part->vertex_buffer, _rasterizer_vertex_type_model_compressed,
 				source->vertex_count, vertices, source->vertex_count * compressed_size) ||
@@ -597,11 +633,17 @@ static struct saber_model *saber_model_new(
 		vertices += source->vertex_count;
 		strips += strip_count;
 	}
-	made->geometry.parts.count = made->part_count;
-	made->geometry.parts.address = made->parts;
-	made->geometry.parts.definition = NULL;
-	made->model.geometries.count = 1;
-	made->model.geometries.address = &made->geometry;
+	for (level = 0; level < level_count; level++)
+	{
+		long end = level + 1 < level_count ? first[level + 1] : made->part_count;
+
+		made->geometries[level].parts.count = end - first[level];
+		made->geometries[level].parts.address = made->parts + first[level];
+		made->geometries[level].parts.definition = NULL;
+	}
+	made->geometry_count = level_count;
+	made->model.geometries.count = level_count;
+	made->model.geometries.address = made->geometries;
 	made->model.geometries.definition = NULL;
 
 	return made;
@@ -628,6 +670,44 @@ static long model_shader_tag(
 	shader = shader_definition_get(reference->shader.index);
 
 	return shader && shader->base.type == SHADER_TYPE_MODEL ? reference->shader.index : NONE;
+}
+
+/* the map's model tag `model_name`, or (a map whose tags are named
+otherwise) one whose name ends as it does, its last folder and name
+("c_storage\\c_storage"), or NONE */
+static long model_tag_find(
+	char const *model_name)
+{
+	long tag_index = tag_loaded(MODELS_GROUP_TAG, model_name);
+	char const *tail = model_name + strlen(model_name);
+	struct tag_iterator iterator;
+	long separators = 0;
+
+	if (tag_index != NONE)
+		return tag_index;
+	while (tail > model_name && separators < 2)
+	{
+		tail--;
+		if (*tail == '\\')
+			separators++;
+	}
+	if (separators == 2)
+		tail++;
+	tag_iterator_new(&iterator, MODELS_GROUP_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		char const *name = tag_get_name(tag_index);
+		size_t length = strlen(name);
+		size_t tail_length = strlen(tail);
+
+		if (length >= tail_length && !_stricmp(name + length - tail_length, tail) &&
+			(length == tail_length || name[length - tail_length - 1] == '\\'))
+		{
+			return tag_index;
+		}
+	}
+
+	return NONE;
 }
 
 /* the bitmap of the package's texture `texture_name`, made to be played
@@ -766,7 +846,7 @@ static void model_play(
 	char const *model_name,
 	char const *template_name)
 {
-	long tag_index = tag_loaded(MODELS_GROUP_TAG, model_name);
+	long tag_index = model_tag_find(model_name);
 	struct model *definition;
 	struct saber_template template_;
 	struct saber_model *made = NULL;
@@ -853,8 +933,8 @@ static void model_play(
 	*definition = made->model;
 	made->next = saber_models_globals.models;
 	saber_models_globals.models = made;
-	platform_log("anniversary: %s drawn as the template %s (%ld parts)", model_name, template_name,
-		made->part_count);
+	platform_log("anniversary: %s drawn as the template %s (%ld parts, %ld levels of detail)",
+		tag_get_name(tag_index), template_name, made->part_count, made->geometry_count);
 	saber_template_dispose(&template_);
 	free(bytes);
 

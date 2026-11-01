@@ -47,6 +47,8 @@ struct saber_mesh_part
 	long triangle_count;
 	unsigned short *triangles;
 	short material_index;
+	/* its level of detail (0 the most detailed) */
+	short lod;
 };
 
 struct saber_template

@@ -298,7 +298,8 @@ static const struct config_setting config_settings[] =
 		"Draw the models of Halo: Combat Evolved Anniversary's remastered\n"
 		"graphics over the map's, from the map's Saber3D package (<map>.s3dpak,\n"
 		"the Xbox 360's paks360 or Halo: The Master Chief Collection's) in\n"
-		"anniversary_paks. Only what is drawn changes. So far, one: b30's boulder.\n"
+		"anniversary_paks. Only what is drawn changes. So far b30's boulder and\n"
+		"Covenant storage crate.\n"
 		"Read as a map loads." },
 	{ "display.anniversary_paks", _config_string, "\"paks\"", "HALO_ANNIVERSARY_PAKS", _environment_value, _platform_all,
 		"The folder of Halo: Combat Evolved Anniversary's packages (.s3dpak)\n"
