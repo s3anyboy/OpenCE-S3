@@ -1051,8 +1051,10 @@ static void shadowrun_teleport_update(
 
 			set_real_point3d(&hiding_place, TELEPORT_HIDING_COORDINATE, TELEPORT_HIDING_COORDINATE,
 				TELEPORT_HIDING_COORDINATE);
-			set_real_vector3d(&forward, 0.f, 0.f, 1.f);
-			object_set_position(unit_index, &hiding_place, &forward, NULL);
+			/* port: facing as it does, not straight up (the executable's
+			0,0,1), which with the unit's own up (0,0,1) has no frame */
+			forward = unit->object.forward;
+			object_set_position(unit_index, &hiding_place, &forward, &unit->object.up);
 			SET_FLAG(unit->unit.flags, _unit_suspended_bit, TRUE);
 		}
 		else
@@ -1074,7 +1076,11 @@ static void shadowrun_teleport_update(
 		boolean placed = FALSE;
 		short index;
 
-		if (unit->unit.actor_index != NONE)
+		/* port: an actor faces where the AI meant it to, if anything gave it
+		that facing: nothing does in this build (the executable's own AI cast
+		no spells), and a facing of zeros made the unit's vectors zeros
+		(unit_verify_vectors halted the game), so it keeps its own */
+		if (unit->unit.actor_index != NONE && magnitude_squared3d(&shadowrun_unit->teleport_actor_forward) > 0.f)
 		{
 			forward = shadowrun_unit->teleport_actor_forward;
 		}

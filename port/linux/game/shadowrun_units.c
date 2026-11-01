@@ -439,11 +439,80 @@ void shadowrun_unit_new(
 	return;
 }
 
+/* port: the spells an elite of each rank casts, by its actor variant's name
+(b30sr.map's elites): a minor strangles and gusts; a major smokes and
+teleports too; a commander resurrects and takes its spirit animal too; a
+special elite (stealth, spec ops, cloaked) only teleports. An elite of no
+rank named (the prototype's ninja) casts all its magic has */
+#define SHADOWRUN_ELITE_MINOR_SPELLS (FLAG(_shadowrun_spell_strangle) | FLAG(_shadowrun_spell_gust))
+#define SHADOWRUN_ELITE_MAJOR_SPELLS \
+	(SHADOWRUN_ELITE_MINOR_SPELLS | FLAG(_shadowrun_spell_smoke) | FLAG(_shadowrun_spell_teleport))
+#define SHADOWRUN_ELITE_COMMANDER_SPELLS \
+	(SHADOWRUN_ELITE_MAJOR_SPELLS | FLAG(_shadowrun_spell_resurrection) | FLAG(_shadowrun_spell_spirit_animal))
+#define SHADOWRUN_ELITE_SPECIAL_SPELLS FLAG(_shadowrun_spell_teleport)
+#define SHADOWRUN_ELITE_ANY_SPELLS (FLAG(NUMBER_OF_SHADOWRUN_SPELLS) - 1)
+
+/* whether a name holds a word (of lowercase letters), whatever its case */
+static boolean shadowrun_name_has(
+	char const *name,
+	char const *word)
+{
+	size_t length = strlen(word);
+
+	for (; *name; name++)
+	{
+		size_t index;
+
+		for (index = 0; index < length && name[index] &&
+			(name[index] >= 'A' && name[index] <= 'Z' ? name[index] - 'A' + 'a' : name[index]) == word[index]; index++)
+		{
+		}
+		if (index == length)
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* the spells an elite of the variant may cast (SHADOWRUN_ELITE_*_SPELLS) */
+static unsigned long shadowrun_elite_spells(
+	long variant_definition_index)
+{
+	char const *name = variant_definition_index != NONE ? tag_get_name(variant_definition_index) : NULL;
+	unsigned long spells = SHADOWRUN_ELITE_ANY_SPELLS;
+
+	if (name)
+	{
+		if (shadowrun_name_has(name, "stealth") || shadowrun_name_has(name, "special") ||
+			shadowrun_name_has(name, "specops") || shadowrun_name_has(name, "spec ops") ||
+			shadowrun_name_has(name, "cloak"))
+		{
+			spells = SHADOWRUN_ELITE_SPECIAL_SPELLS;
+		}
+		else if (shadowrun_name_has(name, "commander"))
+		{
+			spells = SHADOWRUN_ELITE_COMMANDER_SPELLS;
+		}
+		else if (shadowrun_name_has(name, "major"))
+		{
+			spells = SHADOWRUN_ELITE_MAJOR_SPELLS;
+		}
+		else if (shadowrun_name_has(name, "minor"))
+		{
+			spells = SHADOWRUN_ELITE_MINOR_SPELLS;
+		}
+	}
+
+	return spells;
+}
+
 /* port: the spells an actor's srud gives it, if it is an elite (an actor
-of the elite's type: b30sr.map's elites, the prototype's ninja): every spell
-its magic has a level of for the actor's race. (An actor's spells cost it
-nothing, so the level is looked for, not its cost.) Other actors, and the
-dead raised or the summoned, cast none */
+of the elite's type: b30sr.map's elites, the prototype's ninja): those of
+its rank (shadowrun_elite_spells) its magic has a level of for the actor's
+race. (An actor's spells cost it nothing, so the level is looked for, not
+its cost.) Other actors, and the dead raised or the summoned, cast none */
 static void shadowrun_actor_learn_magic(
 	long unit_index,
 	struct shadowrun_unit_definition *definition)
@@ -451,6 +520,7 @@ static void shadowrun_actor_learn_magic(
 	struct unit_datum *unit = unit_try_and_get(unit_index);
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 	struct actor_datum *actor = unit && unit->unit.actor_index != NONE ? actor_try_and_get(unit->unit.actor_index) : NULL;
+	unsigned long spells;
 	short spell;
 
 	if (!definition || !actor || !shadowrun_unit || actor->meta.type != _actor_elite ||
@@ -458,11 +528,12 @@ static void shadowrun_actor_learn_magic(
 	{
 		return;
 	}
+	spells = shadowrun_elite_spells(actor->meta.variant_definition_index);
 	for (spell = 0; spell < NUMBER_OF_SHADOWRUN_SPELLS; spell++)
 	{
 		long cooldown;
 
-		if (shadowrun_spell_level_get(unit_index, spell, &cooldown))
+		if (TEST_FLAG(spells, spell) && shadowrun_spell_level_get(unit_index, spell, &cooldown))
 		{
 			shadowrun_unit_learn_power(unit_index, spell);
 		}
@@ -1776,8 +1847,13 @@ void shadowrun_unit_set_race(
 				shadowrun_actor_learn_magic(unit_index, definition);
 				if (shadowrun_unit->known_power_count > 0)
 				{
-					error(_error_silent, "shadowrun: actor unit %08lx (an elite, race %ld) knows %ld spells",
-						(unsigned long)unit_index, (long)shadowrun_unit->race_index, (long)shadowrun_unit->known_power_count);
+					struct actor_datum *actor = actor_try_and_get(unit->unit.actor_index);
+
+					error(_error_silent, "shadowrun: actor unit %08lx (%s, race %ld) knows %ld spells",
+						(unsigned long)unit_index,
+						actor && actor->meta.variant_definition_index != NONE ?
+							tag_name_strip_path(tag_get_name(actor->meta.variant_definition_index)) : "an elite",
+						(long)shadowrun_unit->race_index, (long)shadowrun_unit->known_power_count);
 				}
 			}
 		}
