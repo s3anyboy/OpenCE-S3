@@ -30,6 +30,8 @@ each function names the one it is (its address in the executable).
 #include "units/bipeds.h"
 #include "units/biped_definitions.h"
 #include "units/units.h"
+#include "ai/actors.h" /* port: an actor's type and target (its magic) */
+#include "ai/actor_types.h"
 #include "shadowrun_units.h"
 #include "shadowrun_tech.h"
 #include "shadowrun_cable.h"
@@ -114,6 +116,10 @@ static void shadowrun_actor_learn_magic(
 	struct shadowrun_unit_definition *definition);
 static void shadowrun_actor_spell_update(
 	long unit_index);
+static struct shadowrun_spell_level *shadowrun_spell_level_get(
+	long unit_index,
+	short spell,
+	long *cooldown);
 
 /* port: the srwd each of the prototype's weapons names (missionlet.map's),
 for a map's weapon of the same name that names none */
@@ -433,32 +439,32 @@ void shadowrun_unit_new(
 	return;
 }
 
-/* port: the spells an actor's srud gives it: every spell whose magic tag the
-srud names, whose levels hold one for the actor's race (each spell's levels are
-one an race, so a magic tag with as many levels as the race's index has one)
-*/
+/* port: the spells an actor's srud gives it, if it is an elite (an actor
+of the elite's type: b30sr.map's elites, the prototype's ninja): every spell
+its magic has a level of for the actor's race. (An actor's spells cost it
+nothing, so the level is looked for, not its cost.) Other actors, and the
+dead raised or the summoned, cast none */
 static void shadowrun_actor_learn_magic(
 	long unit_index,
 	struct shadowrun_unit_definition *definition)
 {
+	struct unit_datum *unit = unit_try_and_get(unit_index);
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct actor_datum *actor = unit && unit->unit.actor_index != NONE ? actor_try_and_get(unit->unit.actor_index) : NULL;
 	short spell;
 
-	if (!definition)
+	if (!definition || !actor || !shadowrun_unit || actor->meta.type != _actor_elite ||
+		shadowrun_unit->undead || shadowrun_unit->summoned)
 	{
 		return;
 	}
 	for (spell = 0; spell < NUMBER_OF_SHADOWRUN_SPELLS; spell++)
 	{
-		long mana_cost = 0;
+		long cooldown;
 
-		/* (the level is the srud's magic's: shadowrun_spell_get reads it for
-		the unit's race, and leaves the cost 0 when it has none) */
-		shadowrun_spell_get(unit_index, spell, &mana_cost, NULL, NULL, NULL, NULL);
-		if (mana_cost > 0)
+		if (shadowrun_spell_level_get(unit_index, spell, &cooldown))
 		{
 			shadowrun_unit_learn_power(unit_index, spell);
-			error(_error_silent, "port: actor unit %ld learns spell %d (mana %ld)", (long)unit_index, (int)spell,
-				(long)mana_cost);
 		}
 	}
 
@@ -489,6 +495,18 @@ static void shadowrun_actor_spell_update(
 		shadowrun_unit->actor_cast_ticks--;
 		return;
 	}
+	/* port: only an actor that fights (it has a target), and only a spell it
+	can cast now (its waits run out, it is not in an enemy's anti-magic) */
+	{
+		struct actor_datum *actor = actor_try_and_get(unit->unit.actor_index);
+
+		/* (nor the summoned or the raised, which are made elites: a summon
+		that summoned would never end) */
+		if (!actor || actor->target.target_prop_index == NONE || shadowrun_unit->summoned || shadowrun_unit->undead)
+		{
+			return;
+		}
+	}
 	if (shadowrun_unit->known_power_count > 0)
 	{
 		short spells[NUMBER_OF_SHADOWRUN_SPELLS];
@@ -497,14 +515,14 @@ static void shadowrun_actor_spell_update(
 
 		for (spell = 0; spell < NUMBER_OF_SHADOWRUN_SPELLS; spell++)
 		{
-			if (shadowrun_unit->known_powers[spell] != 0)
+			if (shadowrun_unit->known_powers[spell] != 0 && shadowrun_spell_castable(unit_index, spell))
 			{
 				spells[spell_count++] = spell;
 			}
 		}
 		if (spell_count > 0)
 		{
-			short chosen = spells[random_range(0, (short)(spell_count - 1))];
+			short chosen = spells[random_range(0, spell_count)];
 
 			/* (the game decides whether it may be cast: its level for the
 			race, its mana, its waits; a spell it cannot cast is tried again)
@@ -1055,6 +1073,111 @@ struct shadowrun_buy_menu_definition *shadowrun_buy_menu_get(
 		tag_get(SHADOWRUN_BUY_MENU_DEFINITION_TAG, definition->buy_menu.index) : NULL;
 }
 
+/* port: a spell's level for the unit's race (its srud's magic's), and the
+wait after it is cast (*cooldown: NONE for none); NULL where its magic has
+none for the race. An actor's is found as a player's is: only what it costs
+differs (shadowrun_spell_get) */
+static struct shadowrun_spell_level *shadowrun_spell_level_get(
+	long unit_index,
+	short spell,
+	long *cooldown)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct tag_block *levels = NULL;
+	struct shadowrun_spell_level *level = NULL;
+
+	*cooldown = NONE;
+	if (!shadowrun_unit)
+	{
+		return NULL;
+	}
+	switch (spell)
+	{
+	case _shadowrun_spell_teleport:
+	case _shadowrun_spell_gust:
+	case _shadowrun_spell_tree_of_life:
+	{
+		struct shadowrun_magic1_definition *magic = shadowrun_magic1_get(unit_index);
+
+		if (magic)
+		{
+			switch (spell)
+			{
+			case _shadowrun_spell_teleport:
+				levels = &magic->teleport_levels;
+				*cooldown = magic->teleport_cooldown_ticks;
+				break;
+			case _shadowrun_spell_gust:
+				levels = &magic->gust_levels;
+				*cooldown = magic->gust_cooldown_ticks;
+				break;
+			default:
+				levels = &magic->tree_of_life_levels;
+				*cooldown = magic->tree_of_life_cooldown_ticks;
+				break;
+			}
+		}
+		break;
+	}
+	case _shadowrun_spell_resurrection:
+	case _shadowrun_spell_strangle:
+	case _shadowrun_spell_summon_elemental:
+	{
+		struct shadowrun_magic2_definition *magic = shadowrun_magic2_get(unit_index);
+
+		if (magic)
+		{
+			switch (spell)
+			{
+			case _shadowrun_spell_resurrection:
+				levels = &magic->resurrection_levels;
+				*cooldown = magic->resurrection_cooldown_ticks;
+				break;
+			case _shadowrun_spell_strangle:
+				levels = &magic->strangle_levels;
+				*cooldown = magic->strangle_cooldown_ticks;
+				break;
+			default:
+				levels = &magic->summon_levels;
+				*cooldown = magic->summon_cooldown_ticks;
+				break;
+			}
+		}
+		break;
+	}
+	case _shadowrun_spell_spirit_animal:
+	case _shadowrun_spell_smoke:
+	{
+		struct shadowrun_magic3_definition *magic = shadowrun_magic3_get(unit_index);
+
+		if (magic)
+		{
+			if (spell == _shadowrun_spell_spirit_animal)
+			{
+				levels = &magic->spirit_animal_levels;
+				*cooldown = magic->spirit_animal_cooldown_ticks;
+			}
+			else
+			{
+				levels = &magic->smoke_levels;
+				*cooldown = magic->smoke_cooldown_ticks;
+			}
+		}
+		break;
+	}
+	default:
+		/* (pillar of salt and the rest have none) */
+		break;
+	}
+	if (levels && shadowrun_unit->race_index >= 0 && shadowrun_unit->race_index < levels->count)
+	{
+		level = tag_block_get_element_with_size(levels, shadowrun_unit->race_index,
+			sizeof(struct shadowrun_spell_level));
+	}
+
+	return level;
+}
+
 /* 0x25EB20 */
 void shadowrun_spell_get(
 	long unit_index,
@@ -1072,93 +1195,9 @@ void shadowrun_spell_get(
 	{
 		if (unit->unit.actor_index == NONE)
 		{
-			struct tag_block *levels = NULL;
-			long cooldown = NONE;
-			struct shadowrun_spell_level *level = NULL;
+			long cooldown;
+			struct shadowrun_spell_level *level = shadowrun_spell_level_get(unit_index, spell, &cooldown);
 
-			switch (spell)
-			{
-			case _shadowrun_spell_teleport:
-			case _shadowrun_spell_gust:
-			case _shadowrun_spell_tree_of_life:
-			{
-				struct shadowrun_magic1_definition *magic = shadowrun_magic1_get(unit_index);
-
-				if (magic)
-				{
-					switch (spell)
-					{
-					case _shadowrun_spell_teleport:
-						levels = &magic->teleport_levels;
-						cooldown = magic->teleport_cooldown_ticks;
-						break;
-					case _shadowrun_spell_gust:
-						levels = &magic->gust_levels;
-						cooldown = magic->gust_cooldown_ticks;
-						break;
-					default:
-						levels = &magic->tree_of_life_levels;
-						cooldown = magic->tree_of_life_cooldown_ticks;
-						break;
-					}
-				}
-				break;
-			}
-			case _shadowrun_spell_resurrection:
-			case _shadowrun_spell_strangle:
-			case _shadowrun_spell_summon_elemental:
-			{
-				struct shadowrun_magic2_definition *magic = shadowrun_magic2_get(unit_index);
-
-				if (magic)
-				{
-					switch (spell)
-					{
-					case _shadowrun_spell_resurrection:
-						levels = &magic->resurrection_levels;
-						cooldown = magic->resurrection_cooldown_ticks;
-						break;
-					case _shadowrun_spell_strangle:
-						levels = &magic->strangle_levels;
-						cooldown = magic->strangle_cooldown_ticks;
-						break;
-					default:
-						levels = &magic->summon_levels;
-						cooldown = magic->summon_cooldown_ticks;
-						break;
-					}
-				}
-				break;
-			}
-			case _shadowrun_spell_spirit_animal:
-			case _shadowrun_spell_smoke:
-			{
-				struct shadowrun_magic3_definition *magic = shadowrun_magic3_get(unit_index);
-
-				if (magic)
-				{
-					if (spell == _shadowrun_spell_spirit_animal)
-					{
-						levels = &magic->spirit_animal_levels;
-						cooldown = magic->spirit_animal_cooldown_ticks;
-					}
-					else
-					{
-						levels = &magic->smoke_levels;
-						cooldown = magic->smoke_cooldown_ticks;
-					}
-				}
-				break;
-			}
-			default:
-				/* (pillar of salt and the rest have none) */
-				break;
-			}
-			if (levels && shadowrun_unit->race_index >= 0 && shadowrun_unit->race_index < levels->count)
-			{
-				level = tag_block_get_element_with_size(levels, shadowrun_unit->race_index,
-					sizeof(struct shadowrun_spell_level));
-			}
 			if (level)
 			{
 				if (mana_cost)
@@ -1735,8 +1774,11 @@ void shadowrun_unit_set_race(
 				casts one now and then (shadowrun_actor_spell_update). A map that
 				gives the actor's srud no magic tag leaves it without */
 				shadowrun_actor_learn_magic(unit_index, definition);
-				error(_error_silent, "port: actor unit %ld, race %ld, now knows %ld spells",
-					(long)unit_index, (long)shadowrun_unit->race_index, (long)shadowrun_unit->known_power_count);
+				if (shadowrun_unit->known_power_count > 0)
+				{
+					error(_error_silent, "shadowrun: actor unit %08lx (an elite, race %ld) knows %ld spells",
+						(unsigned long)unit_index, (long)shadowrun_unit->race_index, (long)shadowrun_unit->known_power_count);
+				}
 			}
 		}
 	}
