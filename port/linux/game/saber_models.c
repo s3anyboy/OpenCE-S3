@@ -248,14 +248,14 @@ static struct
 
 /* ---------- private code */
 
-/* the package of the map `map_name`: in the folder display.anniversary_paks
-names (an absolute path, or one in the executable's folder) */
+/* the package of the map `map_name` in the folder `folder` (an absolute
+path, or one in the executable's folder) */
 static void pak_path(
+	char const *folder,
 	char const *map_name,
 	char *path,
 	size_t size)
 {
-	char const *folder = config_string("display.anniversary_paks");
 	char const *name = strrchr(map_name, '\\');
 	char executable_folder[512];
 
@@ -888,8 +888,20 @@ void saber_models_tags_loaded(
 	saber_models_tags_unloaded(FALSE);
 	if (!map_name || !*map_name || !config_boolean("display.anniversary_models"))
 		return;
-	pak_path(map_name, path, sizeof(path));
+	/* (in display.anniversary_paks's folder, else in paks next to the
+	executable: a config.toml written before paks was the default keeps
+	the data folder's anniversary) */
+	pak_path(config_string("display.anniversary_paks"), map_name, path, sizeof(path));
 	pak = saber_pak_open(path, &reason);
+	if (!pak)
+	{
+		char other[1024];
+		char const *other_reason;
+
+		pak_path(DEFAULT_PAKS_FOLDER, map_name, other, sizeof(other));
+		if (strcmp(other, path) && (pak = saber_pak_open(other, &other_reason)) != NULL)
+			strcpy(path, other);
+	}
 	if (!pak)
 	{
 		platform_log("anniversary: no models for %s: %s: %s", map_name, path, reason);

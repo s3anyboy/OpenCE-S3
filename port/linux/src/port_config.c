@@ -2681,6 +2681,58 @@ void config_executable_folder(char *path, size_t size)
 #endif
 }
 
+void *config_host_file_open(const char *path, unsigned long *size)
+{
+#ifdef HALO_ARM64_GUEST
+	FILE *file = fopen(path, "rb");
+	long length;
+
+	if (!file)
+		return NULL;
+	if (fseek(file, 0, SEEK_END) != 0 || (length = ftell(file)) < 0)
+	{
+		fclose(file);
+		return NULL;
+	}
+	*size = (unsigned long)length;
+	return file;
+#else
+	/* (SDL's, for UTF-8 paths on Windows) */
+	SDL_IOStream *file = SDL_IOFromFile(path, "rb");
+	Sint64 length;
+
+	if (!file)
+		return NULL;
+	length = SDL_GetIOSize(file);
+	if (length < 0 || (unsigned long long)length > 0xFFFFFFFFULL)
+	{
+		SDL_CloseIO(file);
+		return NULL;
+	}
+	*size = (unsigned long)length;
+	return file;
+#endif
+}
+
+int config_host_file_read(void *file, unsigned long offset, void *buffer, unsigned long size)
+{
+#ifdef HALO_ARM64_GUEST
+	return fseek((FILE *)file, (long)offset, SEEK_SET) == 0 && fread(buffer, 1, size, (FILE *)file) == size;
+#else
+	return SDL_SeekIO((SDL_IOStream *)file, (Sint64)offset, SDL_IO_SEEK_SET) >= 0 &&
+		SDL_ReadIO((SDL_IOStream *)file, buffer, size) == size;
+#endif
+}
+
+void config_host_file_close(void *file)
+{
+#ifdef HALO_ARM64_GUEST
+	fclose((FILE *)file);
+#else
+	SDL_CloseIO((SDL_IOStream *)file);
+#endif
+}
+
 void config_folder(char *path, size_t size)
 {
 	char file[1024];

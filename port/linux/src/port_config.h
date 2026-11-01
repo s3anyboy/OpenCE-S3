@@ -32,6 +32,13 @@ void config_folder(char *path, size_t size);
 /* the folder the executable is in, with its separator (Android's and the
 web's: the data folder) */
 void config_executable_folder(char *path, size_t size);
+/* a file of this machine's by its UTF-8 path, for the game's sources (whose
+fopen takes Xbox paths, a drive letter one of the Xbox's): opened with its
+size (NULL if it cannot be, or is 4 GB or more), read at an offset (1 if
+all of it was), closed */
+void *config_host_file_open(const char *path, unsigned long *size);
+int config_host_file_read(void *file, unsigned long offset, void *buffer, unsigned long size);
+void config_host_file_close(void *file);
 /* a whole file (a UTF-8 path), NUL terminated, or NULL; free() it (the Android
 guest has no SDL_LoadFile) */
 char *config_file_read(const char *path, size_t *size);

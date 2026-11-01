@@ -67,9 +67,14 @@ DXT5; the PC's 70, 73 and 76) are read.
 #include "rasterizer/rasterizer_model_types.h"
 #include "saber.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* the platform layer's (port_config.c): this machine's files, by their own
+paths (the game's fopen takes the Xbox's) */
+void *config_host_file_open(const char *path, unsigned long *size);
+int config_host_file_read(void *file, unsigned long offset, void *buffer, unsigned long size);
+void config_host_file_close(void *file);
 
 /* ---------- constants */
 
@@ -141,7 +146,7 @@ struct pak_entry
 
 struct saber_pak
 {
-	FILE *file;
+	void *file;
 	unsigned long file_size;
 	int compressed;
 	/* the blocks' offsets in the file, and in the stream (one more than
@@ -248,7 +253,7 @@ static boolean file_read(
 	unsigned long size)
 {
 	return offset <= pak->file_size && size <= pak->file_size - offset &&
-		!fseek(pak->file, (long)offset, SEEK_SET) && fread(buffer, 1, size, pak->file) == size;
+		(!size || config_host_file_read(pak->file, offset, buffer, size));
 }
 
 /* the size a block is uncompressed, by its chunks' headers, or -1 */
@@ -1154,23 +1159,21 @@ struct saber_pak *saber_pak_open(
 {
 	struct saber_pak *pak = malloc(sizeof(*pak));
 	unsigned char words[16];
-	long size;
 
 	*reason = "out of memory";
 	if (!pak)
 		return NULL;
 	csmemset(pak, 0, sizeof(*pak));
 	*reason = "there is no such file";
-	pak->file = fopen(path, "rb");
+	pak->file = config_host_file_open(path, &pak->file_size);
 	if (!pak->file)
 	{
 		free(pak);
 		return NULL;
 	}
 	*reason = "it cannot be read";
-	if (fseek(pak->file, 0, SEEK_END) || (size = ftell(pak->file)) < 16)
+	if (pak->file_size < 16)
 		goto refused;
-	pak->file_size = (unsigned long)size;
 	if (!file_read(pak, 0, words, 16))
 		goto refused;
 	/* (a compressed package's fourth word is a block's offset, or 0) */
@@ -1202,7 +1205,7 @@ void saber_pak_close(
 	if (!pak)
 		return;
 	if (pak->file)
-		fclose(pak->file);
+		config_host_file_close(pak->file);
 	if (pak->block_offsets)
 		free(pak->block_offsets);
 	if (pak->block_starts)
