@@ -61,6 +61,7 @@ definitions in place, and their own come back as the map goes.
 int config_boolean(const char *name);
 const char *config_string(const char *name);
 void config_executable_folder(char *path, size_t size);
+void platform_log(char const *format, ...);
 void halo_custom_edition_texels_channels(void const *texels, unsigned char channel_order);
 
 /* the game's (port) */
@@ -389,7 +390,7 @@ static real template_scale(
 			best_distance = distance;
 		}
 	}
-	error(_error_silent, "anniversary: %s's units are %f world units (its size is %f of the map's model's)",
+	platform_log("anniversary: %s's units are %f world units (its size is %f of the map's model's)",
 		template_name, best, 1.f / ratio);
 
 	return best;
@@ -781,7 +782,10 @@ static void model_play(
 	long index;
 
 	if (tag_index == NONE)
+	{
+		platform_log("anniversary: this map has no %s", model_name);
 		return;
+	}
 	definition = model_definition_get(tag_index);
 	for (made = saber_models_globals.models; made; made = made->next)
 	{
@@ -849,7 +853,7 @@ static void model_play(
 	*definition = made->model;
 	made->next = saber_models_globals.models;
 	saber_models_globals.models = made;
-	error(_error_silent, "anniversary: %s drawn as the template %s (%ld parts)", model_name, template_name,
+	platform_log("anniversary: %s drawn as the template %s (%ld parts)", model_name, template_name,
 		made->part_count);
 	saber_template_dispose(&template_);
 	free(bytes);
@@ -857,7 +861,7 @@ static void model_play(
 	return;
 
 refused:
-	error(_error_silent, "anniversary: %s is drawn as the map's: the template %s: %s", model_name, template_name,
+	platform_log("anniversary: %s is drawn as the map's: the template %s: %s", model_name, template_name,
 		reason);
 	for (index = 0; index < bitmap_count; index++)
 	{
@@ -888,9 +892,10 @@ void saber_models_tags_loaded(
 	pak = saber_pak_open(path, &reason);
 	if (!pak)
 	{
-		error(_error_silent, "anniversary: no models for %s: %s: %s", map_name, path, reason);
+		platform_log("anniversary: no models for %s: %s: %s", map_name, path, reason);
 		return;
 	}
+	platform_log("anniversary: %s's models from %s", map_name, path);
 	for (index = 0; index < NUMBEROF(saber_model_templates); index++)
 		model_play(pak, saber_model_templates[index].model_name, saber_model_templates[index].template_name);
 	saber_pak_close(pak);
