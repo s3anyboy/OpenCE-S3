@@ -32,6 +32,7 @@ back until mods_enable true, or until the map changes.
 #include "cseries.h"
 #include "main/console.h"
 #include "mods.h"
+#include "saber.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -256,6 +257,9 @@ void mods_tags_loaded(
 	{
 		mods_update(FALSE, TRUE);
 	}
+	/* (and Halo: Combat Evolved Anniversary's models, whose tags the mods'
+	are not) */
+	saber_models_tags_loaded(map_name);
 
 	return;
 }
@@ -265,6 +269,7 @@ their own definitions back if `give_back` (their tags are still there). */
 static void mods_let_go(
 	boolean give_back)
 {
+	saber_models_tags_unloaded(give_back);
 	mod_sounds_tags_unloaded();
 	mod_bitmaps_tags_unloaded();
 	mod_models_tags_unloaded(give_back);

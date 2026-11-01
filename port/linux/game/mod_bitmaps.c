@@ -65,6 +65,7 @@ a bitmap made is kept until the map goes, as anything may still hold it.
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
 #include "mods.h"
+#include "saber.h"
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -1231,6 +1232,11 @@ boolean mod_bitmaps_read(
 	unsigned long size;
 	unsigned long stamp[2];
 
+	/* (or one of Halo: Combat Evolved Anniversary's textures, saber_models.c) */
+	if (!made && saber_bitmaps_read(bitmap, buffer))
+	{
+		return TRUE;
+	}
 	if (!made)
 	{
 		/* (the renderer keeps each address's channel order until it is told

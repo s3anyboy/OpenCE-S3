@@ -1,0 +1,124 @@
+/*
+SABER.H
+
+Halo: Combat Evolved Anniversary's remastered models drawn over a map's
+(saber_models.c): its Saber3D packages (saber_paks.c, saber_lzx.c), their
+templates (models) and textures.
+*/
+
+#ifndef __SABER_H
+#define __SABER_H
+#pragma once
+
+/* ---------- headers */
+
+#include <stddef.h>
+
+/* ---------- constants */
+
+/* the types of a package's entries the models need (the package's own
+numbers) */
+enum
+{
+	_saber_entry_textures = 6,
+	_saber_entry_textures_mips64 = 7,
+	_saber_entry_templates = 12,
+};
+
+/* (saber_lzx_decompress's errors) */
+#define SABER_LZX_ERROR_ARGUMENTS (-1)
+#define SABER_LZX_ERROR_DATA (-2)
+#define SABER_LZX_ERROR_SPACE (-3)
+
+/* ---------- structures */
+
+struct saber_lzx_state;
+struct saber_pak;
+struct model_vertex_uncompressed;
+
+/* a template's mesh, made Halo's: its vertices in Halo's axes (not yet
+scaled to Halo's units) and its triangles (three indices each) as Halo
+draws them, a part for each of its submeshes with the material it is drawn
+with (its index in the template's materials) */
+struct saber_mesh_part
+{
+	long vertex_count;
+	struct model_vertex_uncompressed *vertices;
+	long triangle_count;
+	unsigned short *triangles;
+	short material_index;
+};
+
+struct saber_template
+{
+	long material_count;
+	char (*materials)[64];
+	long part_count;
+	struct saber_mesh_part *parts;
+};
+
+/* a texture of a package, as Halo's bitmaps keep it: its pixels (each
+mipmap after the one before), its size, its mipmaps after the first, and
+its format (bitmaps.c's: DXT1, DXT3 or DXT5) */
+struct saber_texture
+{
+	short width;
+	short height;
+	short mipmap_count;
+	short format;
+	unsigned char *pixels;
+	long pixels_size;
+};
+
+/* ---------- prototypes/SABER_LZX.C */
+
+size_t saber_lzx_state_size(void);
+/* (window: 1 << window_bits bytes, the caller's; window_bits 15 to 21) */
+int saber_lzx_initialize(struct saber_lzx_state *state, int window_bits, unsigned char *window);
+void saber_lzx_reset(struct saber_lzx_state *state);
+/* one XMemCompress stream: the bytes written, or a SABER_LZX_ERROR_ */
+long saber_lzx_decompress(struct saber_lzx_state *state, unsigned char const *in, size_t in_size,
+	unsigned char *out, size_t out_size);
+
+/* ---------- prototypes/SABER_PAKS.C */
+
+/* a package (a .s3dpak): NULL, with *reason saying why, when it is not
+one */
+struct saber_pak *saber_pak_open(char const *path, char const **reason);
+void saber_pak_close(struct saber_pak *pak);
+/* whether it is the Xbox 360's (compressed; its templates' texture
+coordinates big-endian), not the PC's (Halo: The Master Chief Collection's) */
+int saber_pak_xbox360(struct saber_pak const *pak);
+/* the entry of the name and type, or -1 */
+long saber_pak_find(struct saber_pak const *pak, char const *name, long type);
+/* the whole entry, in memory of malloc's (free() it), or NULL */
+unsigned char *saber_pak_read(struct saber_pak *pak, long entry, unsigned long *size);
+
+/* the template of the package's templates entry, or FALSE with *reason
+saying why not (saber_template_dispose lets go of what it made either way) */
+int saber_template_read(struct saber_template *template_, unsigned char const *bytes, unsigned long size,
+	int xbox360, char const **reason);
+void saber_template_dispose(struct saber_template *template_);
+
+/* the texture of a package's textures entry (its TexturesMips64 or
+Textures), DXT only, or FALSE (saber_texture_dispose lets go of it) */
+int saber_texture_read(struct saber_texture *texture, unsigned char const *bytes, unsigned long size);
+void saber_texture_dispose(struct saber_texture *texture);
+
+/* ---------- prototypes/SABER_MODELS.C */
+
+struct bitmap_data;
+
+/* the map's tags loaded (mods.c, mods_tags_loaded): the models of its
+package drawn over its own, if display.anniversary_models is on */
+void saber_models_tags_loaded(char const *map_name);
+/* before the tags go: the map's tags get their own definitions back
+(unless give_back is FALSE: the tags are gone already), and what was made
+for them is let go of */
+void saber_models_tags_unloaded(int give_back);
+/* (mod_bitmaps_read, mod_bitmaps_contain) whether a bitmap is one made of a
+package's texture, its pixels put in buffer */
+int saber_bitmaps_read(struct bitmap_data *bitmap, void *buffer);
+int saber_bitmaps_contain(struct bitmap_data const *bitmap);
+
+#endif

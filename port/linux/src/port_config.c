@@ -294,6 +294,16 @@ static const struct config_setting config_settings[] =
 		"Gulch's base) stay apart at any distance in place of flickering\n"
 		"through each other. false: 24 bits, as the Xbox's. Taken up when the\n"
 		"game starts." },
+	{ "display.anniversary_models", _config_boolean, "false", "HALO_ANNIVERSARY_MODELS", _environment_value, _platform_all,
+		"Draw the models of Halo: Combat Evolved Anniversary's remastered\n"
+		"graphics over the map's, from the map's Saber3D package (<map>.s3dpak,\n"
+		"the Xbox 360's paks360 or Halo: The Master Chief Collection's) in\n"
+		"anniversary_paks. Only what is drawn changes. So far, one: b30's boulder.\n"
+		"Read as a map loads." },
+	{ "display.anniversary_paks", _config_string, "\"anniversary\"", "HALO_ANNIVERSARY_PAKS", _environment_value, _platform_all,
+		"The folder of Halo: Combat Evolved Anniversary's packages (.s3dpak)\n"
+		"that anniversary_models draws from: a path, or a folder of the data\n"
+		"folder." },
 	{ "display.hdr", _config_boolean, "false", "HALO_HDR", _environment_value, _platform_all,
 		"Draw the 3D view into a floating-point back buffer, which keeps what\n"
 		"the game's additive effects (explosions, plasma, lights, the sun's\n"

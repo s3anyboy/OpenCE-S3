@@ -1,0 +1,957 @@
+/*
+SABER_MODELS.C
+
+Halo: Combat Evolved Anniversary's remastered models drawn over the map's
+(display.anniversary_models): as a map loads, its Saber3D package
+(<display.anniversary_paks>\<map>.s3dpak: the Xbox 360's paks360 or Halo:
+The Master Chief Collection's) is read for the templates of the models
+named in saber_model_templates, and each is drawn in place of the map's
+model, textured with the package's textures.
+
+This is the first of them: one object (b30's boulder), to see the way
+through. A template is drawn as a Custom Edition map's model is (mod_models.c
+does the same for the mods' models): its meshes made the vertices of the
+map's model's parts (saber_paks.c reads them, in Halo's axes), compressed
+by the game's own rasterizer_geometry_compress_vertices into the Xbox's
+contiguous memory and given buffers by rasterizer_vertex_buffer_new and
+rasterizer_triangle_buffer_new. Every vertex is the model's first node's.
+
+A template's units are not Halo's, nor all the same: the boulder's are
+metres, the weapons' tenths of a foot. Each is scaled to the map's model:
+the ratio of the two's sizes, across, taken to the nearest of the units
+templates are seen in.
+
+What is drawn changes, nothing else: the map's model keeps its nodes,
+markers and regions (what the machines of a network game agree on), and
+every permutation of every region draws the template. Each of the
+template's submeshes is drawn with one of the map's model's shaders (its
+material's place among the template's, of the shaders there are), whose
+base map becomes the package's texture of the submesh's base material
+(its TexturesMips64 for now: the full textures are in pak_stream.s3dpak).
+The shader loses its multipurpose and reflection maps, which are the
+classic model's. The map's model, shader and bitmap tags take the made
+definitions in place, and their own come back as the map goes.
+*/
+
+/* ---------- headers */
+
+#include "cseries.h"
+#include "errors.h"
+#include "bitmaps/bitmaps.h"
+#include "bitmaps/bitmap_group.h"
+#include "math/real_math.h"
+#include "models/model_definitions.h"
+#include "rasterizer/rasterizer.h"
+#include "rasterizer/rasterizer_geometry.h"
+#include "rasterizer/rasterizer_model_types.h"
+#include "rasterizer/rasterizer_swizzle.h"
+#include "shaders/shader_definitions.h"
+#include "shaders/shader_texture_animation.h"
+#include "tag_files/tag_groups.h"
+#include "cache_file_formats.h"
+#include "saber.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <xtl.h>
+
+/* the platform layer's (port_config.c, xbox_files.c, xbox_textures.c) */
+int config_boolean(const char *name);
+const char *config_string(const char *name);
+const char *platform_data_root(void);
+void halo_custom_edition_texels_channels(void const *texels, unsigned char channel_order);
+
+/* the game's (port) */
+char *tag_get_name(long tag_index);
+
+/* ---------- constants */
+
+/* the package's file, in the folder of display.anniversary_paks (by
+default the data folder's anniversary) */
+#define DEFAULT_PAKS_FOLDER "anniversary"
+#define PAK_EXTENSION ".s3dpak"
+
+/* models.c's shader types and model flags */
+#define SHADER_TYPE_MODEL 4
+#define MODEL_PARTS_HAVE_LOCAL_NODES_BIT 1
+
+/* bitmaps.c's types and flags */
+enum
+{
+	_bitmap_type_2d = 0,
+};
+
+enum
+{
+	_bitmap_has_power_of_two_dimensions_bit,
+	_bitmap_compressed_bit,
+	_bitmap_palettized_bit,
+	_bitmap_swizzled_bit,
+	_bitmap_linear_bit,
+	_bitmap_v16u16_bit,
+	_bitmap_allocated_bit,
+	_bitmap_cached_bit,
+};
+
+/* the units templates are seen in, in Halo's (world units, of 10 feet):
+metres, tenths of a foot, feet, Halo's own */
+static real const saber_units[] = { 1.f / 3.048f, 0.01f, 0.1f, 1.f };
+
+/* ---------- structures */
+
+/* this build's model geometry, part and shader reference (models.c's; no
+header declares them) */
+struct model_geometry
+{
+	byte reserved[0x24];
+	struct tag_block parts;
+};
+
+struct model_geometry_part
+{
+	unsigned long flags;
+	short shader_index;
+	char previous_part_index;
+	char next_part_index;
+	short centroid_primary_node_index;
+	short centroid_secondary_node_index;
+	real centroid_primary_node_weight;
+	real centroid_secondary_node_weight;
+	real_point3d centroid;
+	struct tag_block uncompressed_vertices;
+	struct tag_block compressed_vertices;
+	struct tag_block triangles;
+	struct triangle_buffer triangle_buffer;
+	struct vertex_buffer vertex_buffer;
+};
+
+struct model_shader_reference
+{
+	struct tag_reference shader;
+	short permutation_index;
+	word pad;
+	long unused[3];
+};
+
+/* a model shader (rasterizer_xbox_models.c's) */
+struct shader_model_properties
+{
+	word flags;
+	short type;
+	byte reserved04[0xC];
+	real translucency;
+	byte reserved14[0x10];
+	short change_color_source;
+	byte reserved26[0x1E];
+	word self_illumination_flags;
+	short pad46;
+	short self_illumination_color_source;
+	short self_illumination_animation_function;
+	real self_illumination_animation_period;
+	real_rgb_color self_illumination_animation_color_lower_bound;
+	real_rgb_color self_illumination_animation_color_upper_bound;
+	byte reserved68[0xC];
+	real map_u_scale;
+	real map_v_scale;
+	struct tag_reference base_map;
+	byte reserved8C[8];
+	struct tag_reference multipurpose_map;
+	byte reservedA4[8];
+	short detail_function;
+	short detail_mask;
+	real detail_map_scale;
+	struct tag_reference detail_map;
+	real detail_map_v_scale;
+	byte reservedC8[0xC];
+	struct shader_texture_animation texture_animation;
+	byte reserved10C[8];
+	real reflection_falloff_distance;
+	real reflection_cutoff_distance;
+	real perpendicular_brightness;
+	real_rgb_color perpendicular_tint_color;
+	real parallel_brightness;
+	real_rgb_color parallel_tint_color;
+	struct tag_reference reflection_cube_map;
+};
+
+struct shader_model_definition
+{
+	struct shader shader;
+	struct shader_model_properties model;
+};
+
+typedef char verify_model_geometry_size[sizeof(struct model_geometry) == 0x30 ? 1 : -1];
+typedef char verify_model_geometry_part_size[sizeof(struct model_geometry_part) == 0x68 ? 1 : -1];
+typedef char verify_model_shader_reference_size[sizeof(struct model_shader_reference) == 0x20 ? 1 : -1];
+typedef char verify_shader_model_properties_size[sizeof(struct shader_model_properties) == 0x14C ? 1 : -1];
+
+/* a model of the map and the template it is drawn as */
+struct saber_model_template
+{
+	char const *model_name;
+	char const *template_name;
+};
+
+/* a model made of a template, played over the map's model tag */
+struct saber_model
+{
+	struct saber_model *next;
+	long tag_index;
+	struct model map_model;
+	struct model model;
+	struct model_region *regions;
+	struct model_region_permutation *permutations;
+	struct model_geometry geometry;
+	struct model_geometry_part *parts;
+	long part_count;
+	byte *vertices;
+	unsigned long vertices_size;
+	boolean vertices_contiguous;
+};
+
+/* a shader of the map drawn with a texture of the package: its own
+definition, given back as the map goes */
+struct saber_shader
+{
+	struct saber_shader *next;
+	long tag_index;
+	struct shader_model_definition map_shader;
+};
+
+/* a bitmap of the map that is a texture of the package */
+struct saber_bitmap
+{
+	struct saber_bitmap *next;
+	long tag_index;
+	struct bitmap_group map_group;
+	struct bitmap_data bitmap;
+	struct saber_texture texture;
+};
+
+/* ---------- globals */
+
+/* the models drawn as templates: one, to begin with */
+static struct saber_model_template const saber_model_templates[] =
+{
+	{ "scenery\\rocks\\boulder\\boulder", "boulder__h" },
+};
+
+static struct
+{
+	struct saber_model *models;
+	struct saber_shader *shaders;
+	struct saber_bitmap *bitmaps;
+} saber_models_globals;
+
+/* ---------- private code */
+
+/* the package of the map `map_name`: in the folder display.anniversary_paks
+names (an absolute path, or one in the data folder) */
+static void pak_path(
+	char const *map_name,
+	char *path,
+	size_t size)
+{
+	char const *folder = config_string("display.anniversary_paks");
+	char const *name = strrchr(map_name, '\\');
+
+	name = name ? name + 1 : map_name;
+	if (!folder || !*folder)
+		folder = DEFAULT_PAKS_FOLDER;
+	if (folder[0] == '/' || folder[0] == '\\' || (folder[0] && folder[1] == ':'))
+		snprintf(path, size, "%s/%s%s", folder, name, PAK_EXTENSION);
+	else
+		snprintf(path, size, "%s/%s/%s%s", platform_data_root(), folder, name, PAK_EXTENSION);
+}
+
+/* The span across (x and y) of the map's model's vertices, as the game
+draws them (as object_mesh.c reads them); FALSE when it has none to read. */
+static boolean map_model_span(
+	struct model const *model,
+	real *span)
+{
+	real_point3d low = { 0.f, 0.f, 0.f };
+	real_point3d high = { 0.f, 0.f, 0.f };
+	boolean found = FALSE;
+	long geometry_index;
+
+	for (geometry_index = 0; geometry_index < model->geometries.count; geometry_index++)
+	{
+		struct model_geometry const *geometry = TAG_BLOCK_GET_ELEMENT(&model->geometries, geometry_index,
+			struct model_geometry);
+		long part_index;
+
+		for (part_index = 0; part_index < geometry->parts.count; part_index++)
+		{
+			struct model_geometry_part const *part = TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index,
+				struct model_geometry_part);
+			struct vertex_buffer const *vertex_buffer = &part->vertex_buffer;
+			byte *vertices = NULL;
+			long stride;
+			long index;
+
+			if (!vertex_buffer->hardware_format || vertex_buffer->count <= 0)
+				continue;
+			if (vertex_buffer->type == _rasterizer_vertex_type_model_compressed)
+				stride = sizeof(struct model_vertex_compressed);
+			else if (vertex_buffer->type == _rasterizer_vertex_type_model_uncompressed)
+				stride = sizeof(struct model_vertex_uncompressed);
+			else
+				continue;
+			IDirect3DVertexBuffer8_Lock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format, 0, 0, &vertices,
+				D3DLOCK_READONLY);
+			if (!vertices)
+				continue;
+			for (index = 0; index < vertex_buffer->count; index++)
+			{
+				/* (both kinds of vertex start with their position) */
+				real_point3d const *position = (real_point3d const *)(vertices + index * stride);
+
+				if (!found)
+				{
+					low = high = *position;
+					found = TRUE;
+				}
+				low.x = MIN(low.x, position->x);
+				low.y = MIN(low.y, position->y);
+				high.x = MAX(high.x, position->x);
+				high.y = MAX(high.y, position->y);
+			}
+			IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)vertex_buffer->hardware_format);
+		}
+	}
+	*span = (high.x - low.x) + (high.y - low.y);
+
+	/* (a model of a size no model has is not one read) */
+	return found && *span > 0.001f && *span < 10000.f;
+}
+
+/* the scale of the template's units to Halo's: of saber_units, the nearest
+to the ratio of the map's model's size to the template's (with no size of
+the map's to go by, metres for a scenery template, "__h", else tenths of a
+foot) */
+static real template_scale(
+	struct saber_template const *template_,
+	char const *template_name,
+	struct model const *map_model)
+{
+	real_point3d low = { 0.f, 0.f, 0.f };
+	real_point3d high = { 0.f, 0.f, 0.f };
+	boolean found = FALSE;
+	real map_span;
+	real ratio;
+	real best = 0.f;
+	real best_distance = 0.f;
+	long part_index;
+	long index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			real_point3d const *position = &part->vertices[index].position;
+
+			if (!found)
+			{
+				low = high = *position;
+				found = TRUE;
+			}
+			low.x = MIN(low.x, position->x);
+			low.y = MIN(low.y, position->y);
+			high.x = MAX(high.x, position->x);
+			high.y = MAX(high.y, position->y);
+		}
+	}
+	if (!found || (high.x - low.x) + (high.y - low.y) <= 0.f || !map_model_span(map_model, &map_span))
+	{
+		size_t length = strlen(template_name);
+
+		return length > 3 && !strcmp(template_name + length - 3, "__h") ? saber_units[0] : saber_units[1];
+	}
+	ratio = map_span / ((high.x - low.x) + (high.y - low.y));
+	for (index = 0; index < NUMBEROF(saber_units); index++)
+	{
+		real distance = ratio > saber_units[index] ? ratio / saber_units[index] : saber_units[index] / ratio;
+
+		if (!index || distance < best_distance)
+		{
+			best = saber_units[index];
+			best_distance = distance;
+		}
+	}
+	error(_error_silent, "anniversary: %s's units are %f world units (its size is %f of the map's model's)",
+		template_name, best, 1.f / ratio);
+
+	return best;
+}
+
+/* the strip of a part's triangles: each after the last, joined by
+triangles of no area, starting on an even index so it keeps its turn */
+static long part_strip(
+	struct saber_mesh_part const *part,
+	word *strip)
+{
+	long count = 0;
+	long index;
+
+	for (index = 0; index < part->triangle_count; index++)
+	{
+		word a = part->triangles[3 * index];
+
+		if (count)
+		{
+			strip[count] = strip[count - 1];
+			count++;
+			strip[count++] = a;
+			if (count & 1)
+				strip[count++] = a;
+		}
+		strip[count++] = a;
+		strip[count++] = part->triangles[3 * index + 1];
+		strip[count++] = part->triangles[3 * index + 2];
+	}
+
+	return count;
+}
+
+/* the memory the renderer draws a model's vertices and strips from: the
+Xbox's contiguous memory, as a map's (else the heap) */
+static void *geometry_allocate(
+	unsigned long size,
+	boolean *contiguous)
+{
+	void *geometry = XPhysicalAlloc(size, (unsigned long)-1, 0, PAGE_READWRITE);
+
+	*contiguous = geometry != NULL;
+	if (!geometry)
+		geometry = malloc(size);
+
+	return geometry;
+}
+
+static void saber_model_free(
+	struct saber_model *made)
+{
+	long index;
+
+	for (index = 0; made->parts && index < made->part_count; index++)
+	{
+		rasterizer_triangle_buffer_delete(&made->parts[index].triangle_buffer);
+		rasterizer_vertex_buffer_delete(&made->parts[index].vertex_buffer);
+	}
+	if (made->vertices)
+	{
+		if (made->vertices_contiguous)
+			XPhysicalFree(made->vertices);
+		else
+			free(made->vertices);
+	}
+	if (made->regions)
+		free(made->regions);
+	if (made->permutations)
+		free(made->permutations);
+	if (made->parts)
+		free(made->parts);
+	free(made);
+}
+
+/* The model the template makes of the map's model: the map's, its every
+permutation drawing the template's geometry (`shader_indices`, the shader
+each part is drawn with). NULL, with *reason saying why, when it cannot be
+made. */
+static struct saber_model *saber_model_new(
+	long tag_index,
+	struct model const *map_model,
+	struct saber_template const *template_,
+	short const *shader_indices,
+	real scale,
+	char const **reason)
+{
+	long compressed_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_compressed);
+	long uncompressed_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_uncompressed);
+	struct saber_model *made = malloc(sizeof(*made));
+	unsigned long size = 0;
+	long permutation_count = 0;
+	long region_index;
+	long part_index;
+	long next = 0;
+	struct model_vertex_compressed *vertices;
+	word *strips;
+
+	*reason = "out of memory";
+	if (!made)
+		return NULL;
+	csmemset(made, 0, sizeof(*made));
+	made->tag_index = tag_index;
+	made->map_model = *map_model;
+	made->model = *map_model;
+	made->model.flags &= ~FLAG(MODEL_PARTS_HAVE_LOCAL_NODES_BIT);
+	made->model.base_map_scale.i = 1.f;
+	made->model.base_map_scale.j = 1.f;
+
+	/* the map's regions and permutations, every one of them the template */
+	for (region_index = 0; region_index < map_model->regions.count; region_index++)
+	{
+		permutation_count += TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index, struct model_region)->permutations.count;
+	}
+	made->regions = malloc(sizeof(*made->regions) * ((size_t)map_model->regions.count + 1));
+	made->permutations = malloc(sizeof(*made->permutations) * ((size_t)permutation_count + 1));
+	made->parts = malloc(sizeof(*made->parts) * ((size_t)template_->part_count + 1));
+	if (!made->regions || !made->permutations || !made->parts)
+		goto refused;
+	csmemset(made->parts, 0, sizeof(*made->parts) * ((size_t)template_->part_count + 1));
+	for (region_index = 0; region_index < map_model->regions.count; region_index++)
+	{
+		struct model_region const *map_region = TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index,
+			struct model_region);
+		long permutation_index;
+
+		made->regions[region_index] = *map_region;
+		made->regions[region_index].permutations.address = made->permutations + next;
+		made->regions[region_index].permutations.definition = NULL;
+		for (permutation_index = 0; permutation_index < map_region->permutations.count; permutation_index++)
+		{
+			struct model_region_permutation *permutation = &made->permutations[next++];
+			long detail;
+
+			*permutation = *TAG_BLOCK_GET_ELEMENT(&map_region->permutations, permutation_index,
+				struct model_region_permutation);
+			for (detail = 0; detail < 5; detail++)
+				permutation->geometry_indices[detail] = 0;
+		}
+	}
+	made->model.regions.address = made->regions;
+	made->model.regions.definition = NULL;
+
+	/* its geometry: a part of each of the template's */
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+
+		size += (unsigned long)part->vertex_count * (unsigned long)compressed_size +
+			(unsigned long)part->triangle_count * 6 * sizeof(word);
+	}
+	made->vertices_size = size + 1;
+	made->vertices = geometry_allocate(made->vertices_size, &made->vertices_contiguous);
+	if (!made->vertices)
+		goto refused;
+	vertices = (struct model_vertex_compressed *)made->vertices;
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+		vertices += template_->parts[part_index].vertex_count;
+	strips = (word *)vertices;
+	vertices = (struct model_vertex_compressed *)made->vertices;
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *source = &template_->parts[part_index];
+		struct model_geometry_part *part = &made->parts[part_index];
+		struct model_vertex_uncompressed *scaled = malloc(sizeof(*scaled) * ((size_t)source->vertex_count + 1));
+		long strip_count;
+		long index;
+
+		*reason = "out of memory";
+		if (!scaled)
+			goto refused;
+		part->shader_index = shader_indices[part_index];
+		part->previous_part_index = NONE;
+		part->next_part_index = NONE;
+		part->centroid_primary_node_weight = 1.f;
+		for (index = 0; index < source->vertex_count; index++)
+		{
+			scaled[index] = source->vertices[index];
+			scaled[index].position.x *= scale;
+			scaled[index].position.y *= scale;
+			scaled[index].position.z *= scale;
+			part->centroid.x += scaled[index].position.x / (real)source->vertex_count;
+			part->centroid.y += scaled[index].position.y / (real)source->vertex_count;
+			part->centroid.z += scaled[index].position.z / (real)source->vertex_count;
+		}
+		rasterizer_geometry_compress_vertices(
+			_rasterizer_vertex_type_model_uncompressed,
+			source->vertex_count,
+			vertices,
+			source->vertex_count * compressed_size,
+			scaled,
+			source->vertex_count * uncompressed_size);
+		free(scaled);
+		strip_count = part_strip(source, strips);
+		made->part_count = part_index + 1;
+		*reason = "the renderer cannot make its buffers";
+		if (!rasterizer_vertex_buffer_new(&part->vertex_buffer, _rasterizer_vertex_type_model_compressed,
+				source->vertex_count, vertices, source->vertex_count * compressed_size) ||
+			!rasterizer_triangle_buffer_new(&part->triangle_buffer, _triangle_buffer_type_precompiled_strip,
+				strip_count - 2, strips))
+		{
+			goto refused;
+		}
+		vertices += source->vertex_count;
+		strips += strip_count;
+	}
+	made->geometry.parts.count = made->part_count;
+	made->geometry.parts.address = made->parts;
+	made->geometry.parts.definition = NULL;
+	made->model.geometries.count = 1;
+	made->model.geometries.address = &made->geometry;
+	made->model.geometries.definition = NULL;
+
+	return made;
+
+refused:
+	saber_model_free(made);
+
+	return NULL;
+}
+
+/* the model shader of the map's model's shader `shader_index`, or NONE */
+static long model_shader_tag(
+	struct model const *model,
+	short shader_index)
+{
+	struct model_shader_reference const *reference;
+	struct shader *shader;
+
+	if (shader_index < 0 || shader_index >= model->shaders.count)
+		return NONE;
+	reference = TAG_BLOCK_GET_ELEMENT(&model->shaders, shader_index, struct model_shader_reference);
+	if (reference->shader.index == NONE)
+		return NONE;
+	shader = shader_definition_get(reference->shader.index);
+
+	return shader && shader->base.type == SHADER_TYPE_MODEL ? reference->shader.index : NONE;
+}
+
+/* the bitmap of the package's texture `texture_name`, made to be played
+over the map's bitmap tag `bitmap_tag` as the texture cache draws a Custom
+Edition map's (not yet played), or NULL with *reason saying why not */
+static struct saber_bitmap *saber_bitmap_new(
+	struct saber_pak *pak,
+	long bitmap_tag,
+	char const *texture_name,
+	char const **reason)
+{
+	struct saber_bitmap *made;
+	unsigned char *bytes;
+	unsigned long size = 0;
+	long entry;
+
+	*reason = "the package has not got its texture";
+	entry = saber_pak_find(pak, texture_name, _saber_entry_textures_mips64);
+	if (entry == NONE)
+		entry = saber_pak_find(pak, texture_name, _saber_entry_textures);
+	if (entry == NONE)
+		return NULL;
+	*reason = "out of memory";
+	made = malloc(sizeof(*made));
+	if (!made)
+		return NULL;
+	csmemset(made, 0, sizeof(*made));
+	bytes = saber_pak_read(pak, entry, &size);
+	*reason = "its texture is not one this build draws (DXT)";
+	if (!bytes || !saber_texture_read(&made->texture, bytes, size))
+	{
+		if (bytes)
+			free(bytes);
+		free(made);
+		return NULL;
+	}
+	free(bytes);
+	made->tag_index = bitmap_tag;
+	made->bitmap.signature = BITMAP_GROUP_TAG;
+	made->bitmap.width = made->texture.width;
+	made->bitmap.height = made->texture.height;
+	made->bitmap.depth = 1;
+	made->bitmap.type = _bitmap_type_2d;
+	made->bitmap.format = made->texture.format;
+	made->bitmap.flags = FLAG(_bitmap_has_power_of_two_dimensions_bit) | FLAG(_bitmap_compressed_bit) |
+		FLAG(_bitmap_cached_bit);
+	made->bitmap.mipmap_count = made->texture.mipmap_count;
+	made->bitmap.pixels_offset = 0;
+	made->bitmap.pixels_size = bitmap_get_pixel_data_size(&made->bitmap);
+	made->bitmap.tag_index = bitmap_tag;
+	made->bitmap.cache_block_index = NONE;
+	*reason = "its texture's pixels are not all there";
+	if (made->bitmap.pixels_size <= 0 || made->bitmap.pixels_size > made->texture.pixels_size)
+	{
+		saber_texture_dispose(&made->texture);
+		free(made);
+		return NULL;
+	}
+
+	return made;
+}
+
+/* whether the shader or bitmap tag is already played over */
+static boolean shader_played(
+	long tag_index)
+{
+	struct saber_shader const *played;
+
+	for (played = saber_models_globals.shaders; played; played = played->next)
+	{
+		if (played->tag_index == tag_index)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+static boolean bitmap_played(
+	long tag_index)
+{
+	struct saber_bitmap const *played;
+
+	for (played = saber_models_globals.bitmaps; played; played = played->next)
+	{
+		if (played->tag_index == tag_index)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* Plays the bitmap made over its map's tag. */
+static void bitmap_plug(
+	struct saber_bitmap *made)
+{
+	struct bitmap_group *group = bitmap_group_get(made->tag_index);
+
+	made->map_group = *group;
+	group->sequences.count = 0;
+	group->bitmaps.count = 1;
+	group->bitmaps.address = &made->bitmap;
+	group->bitmaps.definition = NULL;
+	made->next = saber_models_globals.bitmaps;
+	saber_models_globals.bitmaps = made;
+}
+
+/* Has the map's model shader drawn as its base map alone (the classic
+model's other maps gone, its base map's scale none), FALSE when there is no
+memory for it. */
+static boolean shader_plug(
+	long shader_tag)
+{
+	struct shader_model_definition *shader = (struct shader_model_definition *)shader_definition_get(shader_tag);
+	struct saber_shader *played = malloc(sizeof(*played));
+
+	if (!played)
+		return FALSE;
+	played->tag_index = shader_tag;
+	played->map_shader = *shader;
+	played->next = saber_models_globals.shaders;
+	saber_models_globals.shaders = played;
+	shader->model.map_u_scale = 1.f;
+	shader->model.map_v_scale = 1.f;
+	shader->model.multipurpose_map.index = NONE;
+	shader->model.reflection_cube_map.index = NONE;
+
+	return TRUE;
+}
+
+/* Draws the map's model `model_name` as the package's template
+`template_name`: its textures read and its model made before any of the
+map's tags are played over, so that one that cannot be drawn is the map's
+as it was. */
+static void model_play(
+	struct saber_pak *pak,
+	char const *model_name,
+	char const *template_name)
+{
+	long tag_index = tag_loaded(MODELS_GROUP_TAG, model_name);
+	struct model *definition;
+	struct saber_template template_;
+	struct saber_model *made = NULL;
+	short shader_indices[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
+	long shader_tags[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
+	struct saber_bitmap *bitmaps[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
+	long bitmap_count = 0;
+	long shader_count = 0;
+	unsigned char *bytes;
+	unsigned long size = 0;
+	char const *reason = "the package has not got it";
+	long entry;
+	long index;
+
+	if (tag_index == NONE)
+		return;
+	definition = model_definition_get(tag_index);
+	for (made = saber_models_globals.models; made; made = made->next)
+	{
+		if (made->tag_index == tag_index)
+			return;
+	}
+	csmemset(&template_, 0, sizeof(template_));
+	entry = saber_pak_find(pak, template_name, _saber_entry_templates);
+	bytes = entry == NONE ? NULL : saber_pak_read(pak, entry, &size);
+	if (!bytes || !saber_template_read(&template_, bytes, size, saber_pak_xbox360(pak), &reason))
+		goto refused;
+	reason = "its template has more parts than a model's geometry can";
+	if (template_.part_count > MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+		goto refused;
+	reason = "the map's model has no shader";
+	if (definition->shaders.count <= 0)
+		goto refused;
+
+	/* each part's shader, by its material, and the shader's base map the
+	material's texture */
+	for (index = 0; index < template_.part_count; index++)
+	{
+		short material = template_.parts[index].material_index;
+		long shader_tag;
+		long bitmap_tag;
+		long other;
+
+		reason = "a part's material is not one of its template's";
+		if (material < 0 || material >= template_.material_count)
+			goto refused;
+		shader_indices[index] = (short)(material % definition->shaders.count);
+		shader_tag = model_shader_tag(definition, shader_indices[index]);
+		reason = "a shader of the map's model is not a model shader with a base map";
+		if (shader_tag == NONE)
+			goto refused;
+		bitmap_tag = ((struct shader_model_definition *)shader_definition_get(shader_tag))->model.base_map.index;
+		if (bitmap_tag == NONE)
+			goto refused;
+		for (other = 0; other < shader_count && shader_tags[other] != shader_tag; other++)
+		{
+		}
+		if (other < shader_count || shader_played(shader_tag))
+			continue;
+		shader_tags[shader_count++] = shader_tag;
+		for (other = 0; other < bitmap_count && bitmaps[other]->tag_index != bitmap_tag; other++)
+		{
+		}
+		if (other < bitmap_count || bitmap_played(bitmap_tag))
+			continue;
+		bitmaps[bitmap_count] = saber_bitmap_new(pak, bitmap_tag, template_.materials[material], &reason);
+		if (!bitmaps[bitmap_count])
+			goto refused;
+		bitmap_count++;
+	}
+	made = saber_model_new(tag_index, definition,
+		&template_, shader_indices, template_scale(&template_, template_name, definition), &reason);
+	if (!made)
+		goto refused;
+
+	/* (played) */
+	for (index = 0; index < bitmap_count; index++)
+		bitmap_plug(bitmaps[index]);
+	for (index = 0; index < shader_count; index++)
+		shader_plug(shader_tags[index]);
+	*definition = made->model;
+	made->next = saber_models_globals.models;
+	saber_models_globals.models = made;
+	error(_error_silent, "anniversary: %s drawn as the template %s (%ld parts)", model_name, template_name,
+		made->part_count);
+	saber_template_dispose(&template_);
+	free(bytes);
+
+	return;
+
+refused:
+	error(_error_silent, "anniversary: %s is drawn as the map's: the template %s: %s", model_name, template_name,
+		reason);
+	for (index = 0; index < bitmap_count; index++)
+	{
+		saber_texture_dispose(&bitmaps[index]->texture);
+		free(bitmaps[index]);
+	}
+	saber_template_dispose(&template_);
+	if (bytes)
+		free(bytes);
+}
+
+/* ---------- public code */
+
+void saber_models_tags_loaded(
+	char const *map_name)
+{
+	char path[1024];
+	struct saber_pak *pak;
+	char const *reason;
+	long index;
+
+	/* (what was made for a map whose tags went without its being let go of
+	is not written over this one's) */
+	saber_models_tags_unloaded(FALSE);
+	if (!map_name || !*map_name || !config_boolean("display.anniversary_models"))
+		return;
+	pak_path(map_name, path, sizeof(path));
+	pak = saber_pak_open(path, &reason);
+	if (!pak)
+	{
+		error(_error_silent, "anniversary: no models for %s: %s: %s", map_name, path, reason);
+		return;
+	}
+	for (index = 0; index < NUMBEROF(saber_model_templates); index++)
+		model_play(pak, saber_model_templates[index].model_name, saber_model_templates[index].template_name);
+	saber_pak_close(pak);
+}
+
+void saber_models_tags_unloaded(
+	int give_back)
+{
+	while (saber_models_globals.models)
+	{
+		struct saber_model *made = saber_models_globals.models;
+
+		saber_models_globals.models = made->next;
+		if (give_back)
+			*model_definition_get(made->tag_index) = made->map_model;
+		saber_model_free(made);
+	}
+	while (saber_models_globals.shaders)
+	{
+		struct saber_shader *shader = saber_models_globals.shaders;
+
+		saber_models_globals.shaders = shader->next;
+		if (give_back)
+			*(struct shader_model_definition *)shader_definition_get(shader->tag_index) = shader->map_shader;
+		free(shader);
+	}
+	while (saber_models_globals.bitmaps)
+	{
+		struct saber_bitmap *bitmap = saber_models_globals.bitmaps;
+
+		saber_models_globals.bitmaps = bitmap->next;
+		if (give_back)
+			*bitmap_group_get(bitmap->tag_index) = bitmap->map_group;
+		saber_texture_dispose(&bitmap->texture);
+		free(bitmap);
+	}
+}
+
+int saber_bitmaps_contain(
+	struct bitmap_data const *bitmap)
+{
+	struct saber_bitmap const *played;
+
+	for (played = saber_models_globals.bitmaps; played; played = played->next)
+	{
+		if (bitmap == &played->bitmap)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+int saber_bitmaps_read(
+	struct bitmap_data *bitmap,
+	void *buffer)
+{
+	struct saber_bitmap const *played;
+
+	for (played = saber_models_globals.bitmaps; played; played = played->next)
+	{
+		if (bitmap == &played->bitmap)
+		{
+			memcpy(buffer, played->texture.pixels, (size_t)bitmap->pixels_size);
+			halo_custom_edition_texels_channels(buffer, _custom_edition_channels_xbox);
+			rasterizer_xbox_bitmap_rebuild_hardware_format(bitmap);
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
