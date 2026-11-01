@@ -36,9 +36,6 @@ enum
 
 /* ---------- private prototypes */
 
-static boolean shadowrun_unit_melee_weapon(
-	long unit_index);
-
 /* ---------- public code */
 
 /* 0x118C30's: whether a player's unit is seen from behind: one holding a
@@ -92,23 +89,5 @@ short shadowrun_unit_camera_track(
 
 /* ---------- private code */
 
-/* 0x173E20, 0x173DD0: whether the weapon in the unit's hand is a melee
-weapon, or must be readied */
-static boolean shadowrun_unit_melee_weapon(
-	long unit_index)
-{
-	struct unit_datum *unit = unit_get(unit_index);
-	long weapon_index = unit->unit.current_weapon_index != NONE ?
-		unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index) : NONE;
-	boolean result = FALSE;
-
-	if (weapon_index != NONE)
-	{
-		struct weapon_definition *definition = weapon_definition_get(object_get(weapon_index)->definition_index);
-
-		result = TEST_FLAG(definition->weapon.flags, _shadowrun_weapon_melee_bit) ||
-			TEST_FLAG(definition->weapon.flags, _weapon_must_be_readied_bit);
-	}
-
-	return result;
-}
+/* (whether the weapon in the unit's hand is a melee weapon, or must be
+readied, is shadowrun_unit_melee_weapon: shadowrun_units.c, shadowrun.h) */

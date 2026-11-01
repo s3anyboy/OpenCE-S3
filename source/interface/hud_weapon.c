@@ -1347,9 +1347,14 @@ static void crosshairs_draw(
 										}
 									}
 									/* port: the Shadowrun prototype's accuracy reticle, about
-									the aim crosshair's point, in its colour (its weapon bloom,
-									game_engine.c's FUN_000EF590) */
-									if (state_index == _crosshair_state_aim && !accuracy_drawn)
+									the crosshair's point, in its colour (its weapon bloom,
+									game_engine.c's FUN_000EF590). It is drawn for every
+									crosshair state, not only the aim's (which aim assist
+									alone sets, and so only a scope's): a weapon whose bloom
+									the map gives none -- a melee weapon's -- has no
+									accuracy to draw, and shadowrun_hud_draw_accuracy says
+									so (its accuracy_active) */
+									if (!accuracy_drawn)
 									{
 										point2d point;
 
