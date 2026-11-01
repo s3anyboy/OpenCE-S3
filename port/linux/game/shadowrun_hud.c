@@ -368,6 +368,10 @@ void shadowrun_hud_draw_accuracy(
 		short far_gap = (short)(gap + SHADOWRUN_HUD_ACCURACY_LENGTH);
 		rectangle2d line;
 
+		/* port: a HUD colour's alpha is its transparency (0 is opaque: the
+		crosshairs' are 0), as hud_draw.c reads a meter's; a quad's is its
+		opacity */
+		color = ((pixel32)(UNSIGNED_CHAR_MAX - (color >> 24)) << 24) | (color & 0x00FFFFFF);
 		/* (right, left) */
 		line.y0 = y;
 		line.y1 = (short)(y + 1);
