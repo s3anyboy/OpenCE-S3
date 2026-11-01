@@ -2041,7 +2041,9 @@ short unit_get_grenade_count(
 		if (!VALID_INDEX(grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES))
 			return 0;
 
-		return unit->unit.grenade_counts[grenade_type];
+		/* port: a player's anti-magic grenades, when chosen, are the second
+		type's (port/linux/game/shadowrun_tech.c) */
+		return shadowrun_unit_grenade_count(unit_index, grenade_type, unit->unit.grenade_counts[grenade_type]);
 	}
 
 	return 0;
@@ -2079,7 +2081,9 @@ short unit_inventory_next_grenade(
 
 	do
 	{
-		if (unit->unit.grenade_counts[index]>0)
+		/* port: as unit_get_grenade_count counts them (a player's anti-magic
+		grenades) */
+		if (unit_get_grenade_count(unit_index, index)>0)
 		{
 			next_index = index;
 
@@ -2171,6 +2175,25 @@ boolean unit_add_grenade_to_inventory(
 		7282,
 		equipment_definition->equipment.powerup_type==_equipment_powerup_grenade);
 
+	/* port: the Shadowrun prototype's anti-magic grenade, a player's third
+	type of grenade (port/linux/game/shadowrun_tech.c) */
+	{
+		boolean taken;
+
+		if (shadowrun_unit_antimagic_grenade_pick_up(unit_index, equipment->definition_index, &taken))
+		{
+			if (taken)
+			{
+				if (player_index_from_unit_index(unit_index)!=NONE &&
+					player_get(player_index_from_unit_index(unit_index))->local_player_index!=NONE)
+				{
+					equipment_handle_pickup(equipment_index);
+				}
+				object_delete(equipment_index);
+			}
+			return taken;
+		}
+	}
 	/* port: only the types a unit carries (a map's type) */
 	if (!VALID_INDEX(equipment_definition->equipment.grenade_type, NUMBER_OF_UNIT_GRENADE_TYPES) &&
 		!grenade_type_reported)
@@ -5633,7 +5656,8 @@ boolean unit_update(
 		* Grenade throw button
 		* Primary weapon fire button
 		*/
-		if (cheat.jetpack &&
+		/* port: or the glider's jetpack (port/linux/game/shadowrun_tech.c) */
+		if ((cheat.jetpack || shadowrun_unit_jetpack(unit_index)) &&
 			TEST_FLAG(unit->unit.control_flags, _unit_control_weapon_primary_trigger_bit) &&
 			TEST_FLAG(unit->unit.control_flags, _unit_control_throw_grenade_bit))
 		{
@@ -7943,7 +7967,10 @@ static void unit_throw_grenade_move_to_hand(
 		unit->unit.player_index==NONE ||
 		!cheat.infinite_ammo && !game_engine_infinite_grenades(unit->unit.player_index)) &&
 		(unit->unit.actor_index==NONE ||
-		!actor_has_unlimited_grenades(unit->unit.actor_index)))
+		!actor_has_unlimited_grenades(unit->unit.actor_index)) &&
+		/* port: a player's anti-magic grenade, chosen, is taken from its own
+		count (port/linux/game/shadowrun_tech.c) */
+		!shadowrun_unit_antimagic_grenade_spend(unit_index))
 	{
 		match_assert("c:\\halo\\SOURCE\\units\\units.c", 7966, unit->unit.current_grenade_index>=0 && unit->unit.current_grenade_index<NUMBER_OF_UNIT_GRENADE_TYPES);
 		/* port: a distributed client's grenade counts are the host's (what
@@ -7963,7 +7990,12 @@ static void unit_throw_grenade_move_to_hand(
 	}
 
 	object_get_marker_by_name(unit_index, "left hand", &marker, 1);
-	object_placement_data_new(&placement_data, grenades->projectile.index, unit_index);
+	/* port: a player's second grenade on the Shadowrun prototype's maps is
+	the anti-magic grenade; an AI's is the map's (port/linux/game/
+	shadowrun_tech.c) */
+	object_placement_data_new(&placement_data,
+		shadowrun_unit_grenade_projectile(unit_index, unit->unit.current_grenade_index, grenades->projectile.index),
+		unit_index);
 	SET_FLAG(placement_data.flags, _new_object_never_automatically_delete_bit, TRUE);
 	placement_data.forward= unit_get(unit_index)->unit.aiming_vector;
 	normalize3d(perpendicular3d(&placement_data.forward, &placement_data.up));
@@ -10201,6 +10233,28 @@ static short unit_animation_update(
 			global_origin3d,
 			global_forward3d,
 			1.f);
+	}
+	/* port: the Shadowrun prototype's reflexes play a unit's animations 30%
+	faster: a frame more on the ticks they have gained one, after a frame
+	that was only a frame (0: running), so no key frame, restart or end the
+	caller acts on is passed over (port/linux/game/shadowrun_tech.c) */
+	if (result==0 && shadowrun_unit_animation_extra_frame(unit_index))
+	{
+		result = animation_update_internal(
+			1,
+			animation_graph_index,
+			animation,
+			&sound_index);
+		if (sound_index!=NONE)
+		{
+			object_impulse_sound_new(
+				unit_index,
+				sound_index,
+				0,
+				global_origin3d,
+				global_forward3d,
+				1.f);
+		}
 	}
 
 	return result;

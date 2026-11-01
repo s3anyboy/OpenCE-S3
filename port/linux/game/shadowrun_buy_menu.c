@@ -46,6 +46,7 @@ grenade, which this build has no grenade type for).
 #include "units/units.h"
 #include "shadowrun_units.h"
 #include "shadowrun_tech.h"
+#include "network_shadowrun.h" /* port: co-op purchases (network_shadowrun.c) */
 
 #include <math.h>
 #include <stdio.h>
@@ -362,6 +363,9 @@ static boolean shadowrun_shop_available(
 	struct shadowrun_unit_definition *definition,
 	short item);
 static short shadowrun_shop_tech_id(
+	short item);
+static boolean shadowrun_shop_item_shown(
+	short local_player_index,
 	short item);
 static boolean shadowrun_unit_has_weapon(
 	long unit_index,
@@ -763,12 +767,12 @@ static void shadowrun_shop_sound(
 /* 0x0FEAE0: an item's price, the srud's (0 for none). port: a map that gives
 the player no srud of its own (recomp.map) sells at the prototype's
 (shadowrun_shop_stock_prices) */
-static long shadowrun_shop_price(
-	short local_player_index,
+static long shadowrun_shop_price_for(
+	long player_index,
 	struct shadowrun_unit_definition *definition,
 	short price_index)
 {
-	struct player_datum *player = shadowrun_shop_player(local_player_index);
+	struct player_datum *player = player_index != NONE ? player_try_and_get(player_index) : NULL;
 
 	if (price_index < 0 || price_index >= NUMBER_OF_SHADOWRUN_PRICES)
 	{
@@ -780,6 +784,14 @@ static long shadowrun_shop_price(
 	}
 
 	return shadowrun_shop_stock_prices[price_index];
+}
+
+static long shadowrun_shop_price(
+	short local_player_index,
+	struct shadowrun_unit_definition *definition,
+	short price_index)
+{
+	return shadowrun_shop_price_for(local_player_get_player_index(local_player_index), definition, price_index);
 }
 
 /* port: the weapon definition the menu's weapon `weapon`
@@ -866,7 +878,7 @@ static void shadowrun_shop_set_page(
 	state->page = page;
 	for (item = 0; item < NUMBER_OF_SHADOWRUN_SHOP_ITEMS; item++)
 	{
-		if (shadowrun_shop_items[item].page == page)
+		if (shadowrun_shop_items[item].page == page && shadowrun_shop_item_shown(local_player_index, item))
 		{
 			state->selection = item;
 			return;
@@ -916,7 +928,8 @@ static void shadowrun_shop_move(
 			{
 				item = (short)((item + step + NUMBER_OF_SHADOWRUN_SHOP_ITEMS) % NUMBER_OF_SHADOWRUN_SHOP_ITEMS);
 			}
-			while (shadowrun_shop_items[item].page != page);
+			while (item != state->selection &&
+				(shadowrun_shop_items[item].page != page || !shadowrun_shop_item_shown(local_player_index, item)));
 			state->selection = item;
 		}
 		shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cursor);
@@ -930,6 +943,383 @@ opened, a grenade (up to two), a spell learned, a weapon (the one in hand
 dropped for it, if the player's hands are full), a gift to a teammate; what
 cannot be bought (one the player has, tech) is not paid for. Purchases wait
 a second after the last */
+/* port: a purchase of the player's (an item of the menu, or a gift of money
+to the teammate gift_player_index when item is NONE), made if `apply`, else
+only judged: the sound it makes, and *made whether it was (or would be)
+made. A network client judges its own player's (its menu's sound), and the
+host, which alone keeps what a player has, makes it (network_shadowrun.c) */
+static short shadowrun_shop_purchase(
+	long player_index,
+	short item_index,
+	long gift_player_index,
+	boolean apply,
+	boolean *made)
+{
+	struct player_datum *player = player_index != NONE ? player_try_and_get(player_index) : NULL;
+	struct shadowrun_player *shadowrun_player = shadowrun_player_get(player_index);
+	struct shadowrun_unit_definition *definition = player && player->unit_index != NONE ?
+		shadowrun_unit_definition_shop(player->unit_index) : NULL;
+	long unit_index = player ? player->unit_index : NONE;
+	short sound = NONE;
+
+	*made = FALSE;
+	if (!player || !shadowrun_player || !definition || unit_index == NONE)
+	{
+		return NONE;
+	}
+	if (item_index == NONE)
+	{
+		struct player_datum *teammate_player = gift_player_index != NONE ? player_try_and_get(gift_player_index) : NULL;
+		struct shadowrun_player *teammate = shadowrun_player_get(gift_player_index);
+
+		if (shadowrun_player->money < SHADOWRUN_SHOP_GIFT)
+		{
+			sound = _shadowrun_shop_sound_cannot_afford;
+		}
+		else if (teammate && teammate_player && gift_player_index != player_index &&
+			teammate_player->team_index == player->team_index)
+		{
+			if (apply)
+			{
+				shadowrun_player->money -= SHADOWRUN_SHOP_GIFT;
+				teammate->money += SHADOWRUN_SHOP_GIFT;
+			}
+			*made = TRUE;
+		}
+	}
+	else if (item_index >= 0 && item_index < NUMBER_OF_SHADOWRUN_SHOP_ITEMS)
+	{
+		struct shadowrun_shop_item const *item = &shadowrun_shop_items[item_index];
+		long price = shadowrun_shop_price_for(player_index, definition, item->price_index);
+		short action = item->action;
+
+		if (shadowrun_player->money < price && price > 0)
+		{
+			sound = _shadowrun_shop_sound_cannot_afford;
+		}
+		else if (action == _shadowrun_shop_grenade || action == _shadowrun_shop_anti_magic_grenade)
+		{
+			struct unit_datum *unit = unit_get(unit_index);
+			/* port: the anti-magic grenade is the unit's third type of grenade,
+			counted apart (shadowrun_tech.c) */
+			boolean bought;
+
+			if (action == _shadowrun_shop_anti_magic_grenade)
+			{
+				bought = apply ? shadowrun_unit_antimagic_grenade_add(unit_index) :
+					shadowrun_unit_antimagic_grenades(unit_index) < SHADOWRUN_ANTIMAGIC_GRENADE_MAXIMUM;
+			}
+			else
+			{
+				bought = unit->unit.grenade_counts[_shadowrun_shop_grenade_type] < SHADOWRUN_SHOP_MAXIMUM_GRENADES;
+				if (bought && apply)
+				{
+					unit->unit.grenade_counts[_shadowrun_shop_grenade_type]++;
+				}
+			}
+			if (bought)
+			{
+				sound = _shadowrun_shop_sound_bought;
+				if (apply)
+				{
+					shadowrun_player->money -= price;
+				}
+				*made = TRUE;
+			}
+			else
+			{
+				sound = _shadowrun_shop_sound_cannot_buy;
+			}
+		}
+		else if (action >= _shadowrun_shop_first_magic && action <= _shadowrun_shop_last_magic)
+		{
+			short spell = shadowrun_shop_spells[action - _shadowrun_shop_first_magic];
+			struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+
+			if (shadowrun_shop_owned(NONE, unit_index, definition, item_index))
+			{
+				/* port: had: the removal's price forgets it (as a tech's takes it
+				off), so the player may buy another in its place */
+				long removal_price = shadowrun_shop_price_for(player_index, definition, item->removal_price_index);
+
+				if (shadowrun_player->money < removal_price)
+				{
+					sound = _shadowrun_shop_sound_cannot_afford;
+				}
+				else
+				{
+					sound = _shadowrun_shop_sound_known;
+					if (apply)
+					{
+						shadowrun_unit_forget_power(unit_index, spell);
+						shadowrun_player->money -= removal_price;
+					}
+					*made = TRUE;
+				}
+			}
+			else if (apply ? shadowrun_unit_learn_power(unit_index, spell) :
+				shadowrun_unit && spell >= 0 && spell < MAXIMUM_SHADOWRUN_POWERS &&
+					shadowrun_player_known_spell_count(shadowrun_player) < MAXIMUM_SHADOWRUN_PLAYER_SPELLS)
+			{
+				/* port: paid for when it is learned: a map whose unit has no srud
+				to learn it from (recomp.map's, its unit definitions stripped) sells
+				no spell, and takes no money for one */
+				sound = _shadowrun_shop_sound_learned;
+				if (apply)
+				{
+					shadowrun_player->money -= price;
+				}
+				*made = TRUE;
+			}
+			else
+			{
+				sound = _shadowrun_shop_sound_cannot_buy;
+			}
+		}
+		else if (action == _shadowrun_shop_razorclaws || action == _shadowrun_shop_katana ||
+			(action >= _shadowrun_shop_first_weapon && action <= _shadowrun_shop_last_weapon))
+		{
+			short weapon = action == _shadowrun_shop_razorclaws ? _shadowrun_shop_weapon_razorclaws :
+				action == _shadowrun_shop_katana ? _shadowrun_shop_weapon_katana :
+				shadowrun_shop_weapons[action - _shadowrun_shop_first_weapon];
+			long weapon_definition_index = weapon >= 0 && weapon < NUMBER_OF_SHADOWRUN_SHOP_WEAPONS ?
+				definition->shop_weapons[weapon].index : NONE;
+
+			if (weapon_definition_index != NONE && !shadowrun_unit_has_weapon(unit_index, weapon_definition_index))
+			{
+				sound = _shadowrun_shop_sound_bought;
+				if (apply)
+				{
+					shadowrun_unit_give_weapon(unit_index, weapon_definition_index);
+					shadowrun_player->money -= price;
+				}
+				*made = TRUE;
+			}
+			else
+			{
+				sound = _shadowrun_shop_sound_cannot_buy;
+			}
+		}
+		else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
+		{
+			/* port: a tech the port plays is learned (the executable's shop gives
+			the unit the tech's pointers, its code's place) */
+			short tech = shadowrun_shop_tech_id(item_index);
+
+			if (tech != NONE)
+			{
+				if (shadowrun_player_has_tech(shadowrun_player, tech))
+				{
+					/* (had: the removal's price takes it off, as the menu says;
+					the techs it also has stay) */
+					long removal_price = shadowrun_shop_price_for(player_index, definition, item->removal_price_index);
+
+					if (shadowrun_player->money < removal_price)
+					{
+						sound = _shadowrun_shop_sound_cannot_afford;
+					}
+					else
+					{
+						sound = _shadowrun_shop_sound_tech_owned;
+						if (apply)
+						{
+							shadowrun_player_remove_tech(shadowrun_player, unit_index, tech);
+							shadowrun_player->money -= removal_price;
+						}
+						*made = TRUE;
+					}
+				}
+				else
+				{
+					sound = _shadowrun_shop_sound_tech;
+					if (apply)
+					{
+						shadowrun_player_buy_tech(shadowrun_player, unit_index, tech);
+						shadowrun_player->money -= price;
+					}
+					*made = TRUE;
+				}
+			}
+			else
+			{
+				sound = _shadowrun_shop_sound_cannot_buy;
+			}
+		}
+		else
+		{
+			/* (an item the menu has no way to sell) */
+			sound = _shadowrun_shop_sound_cannot_buy;
+		}
+	}
+
+	return sound;
+}
+
+/* 0x0FE790: a magazine for the weapon in the player's hand, if the menu sells
+one for it and it has room (a magazine's rounds, a shotgun's four): made if
+`apply`, else judged, as shadowrun_shop_purchase. NONE if the menu sells
+none for it (no sound) */
+static short shadowrun_shop_purchase_magazine(
+	long player_index,
+	boolean apply,
+	boolean *made)
+{
+	struct player_datum *player = player_index != NONE ? player_try_and_get(player_index) : NULL;
+	struct shadowrun_player *shadowrun_player = shadowrun_player_get(player_index);
+	struct shadowrun_unit_definition *definition = player && player->unit_index != NONE ?
+		shadowrun_unit_definition_shop(player->unit_index) : NULL;
+	short sound = NONE;
+
+	*made = FALSE;
+	if (definition && player && shadowrun_player)
+	{
+		struct unit_datum *unit = unit_get(player->unit_index);
+		long weapon_index = unit->unit.current_weapon_index != NONE ?
+			unit_inventory_get_weapon(player->unit_index, unit->unit.current_weapon_index) : NONE;
+		long price = NONE;
+		short weapon;
+
+		if (weapon_index != NONE)
+		{
+			long definition_index = object_get(weapon_index)->definition_index;
+
+			for (weapon = 0; weapon < NUMBER_OF_SHADOWRUN_SHOP_WEAPONS; weapon++)
+			{
+				if (definition->shop_weapons[weapon].index == definition_index &&
+					shadowrun_shop_magazine_prices[weapon] != NONE)
+				{
+					price = shadowrun_shop_price_for(player_index, definition, shadowrun_shop_magazine_prices[weapon]);
+					break;
+				}
+			}
+		}
+		if (price >= 0)
+		{
+			if (shadowrun_player->money < price)
+			{
+				sound = _shadowrun_shop_sound_magazine_failed;
+			}
+			else
+			{
+				struct weapon_datum *weapon_datum = weapon_get(weapon_index);
+				struct weapon_definition *weapon_definition = weapon_definition_get(weapon_datum->definition_index);
+				boolean added = FALSE;
+
+				/* 0x1772A0 */
+				if (weapon_definition->weapon.magazines.count > 0)
+				{
+					struct weapon_magazine_definition *magazine_definition = TAG_BLOCK_GET_ELEMENT(
+						&weapon_definition->weapon.magazines, 0, struct weapon_magazine_definition);
+					struct weapon_magazine *magazine = &weapon_datum->weapon.magazines[0];
+
+					if (magazine->rounds_total != magazine_definition->rounds_total_maximum)
+					{
+						short rounds = magazine_definition->rounds_reloaded;
+
+						if (weapon_definition->weapon.weapon_type == 1)
+						{
+							rounds *= 4;
+						}
+						if (apply)
+						{
+							magazine->rounds_total = (short)MIN(magazine->rounds_total + rounds,
+								magazine_definition->rounds_total_maximum);
+						}
+						added = TRUE;
+					}
+				}
+				if (added)
+				{
+					sound = _shadowrun_shop_sound_magazine;
+					if (apply)
+					{
+						shadowrun_player->money -= price;
+					}
+					*made = TRUE;
+				}
+				else
+				{
+					sound = _shadowrun_shop_sound_magazine_failed;
+				}
+			}
+		}
+	}
+
+	return sound;
+}
+
+/* port: a purchase of the local player's, from its menu: made here, or, on a
+network client, judged here (its sound) and asked of the host, which makes
+it and sends back what the player has (network_shadowrun.c). kind: an item,
+a gift, or a magazine */
+static void shadowrun_shop_purchase_local(
+	short local_player_index,
+	short kind,
+	short item_index,
+	long gift_player_index)
+{
+	struct shadowrun_shop_state *state = &shadowrun_shop_states[local_player_index];
+	long player_index = local_player_get_player_index(local_player_index);
+	boolean client = game_connection() == _game_connection_network_client;
+	boolean made = FALSE;
+	short sound;
+
+	if (kind == _shadowrun_purchase_magazine)
+	{
+		sound = shadowrun_shop_purchase_magazine(player_index, !client, &made);
+	}
+	else
+	{
+		sound = shadowrun_shop_purchase(player_index, kind == _shadowrun_purchase_gift ? NONE : item_index,
+			gift_player_index, !client, &made);
+	}
+	if (sound != NONE)
+	{
+		shadowrun_shop_sound(local_player_index, sound);
+	}
+	if (made)
+	{
+		state->purchase_time = game_time_get();
+		if (client)
+		{
+			network_shadowrun_send_purchase(player_index, kind, item_index, gift_player_index);
+		}
+	}
+
+	return;
+}
+
+/* port: a purchase a network client asked of the host for its player
+(network_shadowrun.c): made here, as its menu would have */
+void shadowrun_buy_menu_network_purchase(
+	long player_index,
+	short kind,
+	short item_index,
+	long gift_player_index)
+{
+	boolean made;
+
+	if (kind == _shadowrun_purchase_magazine)
+	{
+		shadowrun_shop_purchase_magazine(player_index, TRUE, &made);
+	}
+	else if (kind == _shadowrun_purchase_gift)
+	{
+		shadowrun_shop_purchase(player_index, NONE, gift_player_index, TRUE, &made);
+	}
+	else if (item_index >= 0 && item_index < NUMBER_OF_SHADOWRUN_SHOP_ITEMS)
+	{
+		shadowrun_shop_purchase(player_index, item_index, NONE, TRUE, &made);
+	}
+
+	return;
+}
+
+/* 0x0FD0C0: the chosen item bought, if the player can afford it: a page
+opened, a grenade (up to two), a spell learned, a weapon (the one in hand
+dropped for it, if the player's hands are full), a gift to a teammate; what
+cannot be bought (one the player has, tech) is not paid for. Purchases wait
+a second after the last (shadowrun_shop_purchase makes them) */
 static void shadowrun_shop_buy(
 	short local_player_index)
 {
@@ -955,22 +1345,14 @@ static void shadowrun_shop_buy(
 		}
 		else if (!waiting && count > 0)
 		{
-			struct shadowrun_player *teammate =
-				shadowrun_player_get(list[((state->selection % count) + count) % count]);
-
-			if (teammate)
-			{
-				shadowrun_player->money -= SHADOWRUN_SHOP_GIFT;
-				teammate->money += SHADOWRUN_SHOP_GIFT;
-				state->purchase_time = game_time_get();
-			}
+			shadowrun_shop_purchase_local(local_player_index, _shadowrun_purchase_gift, NONE,
+				list[((state->selection % count) + count) % count]);
 		}
 	}
 	else
 	{
 		struct shadowrun_shop_item const *item = &shadowrun_shop_items[state->selection];
 		long price = shadowrun_shop_price(local_player_index, definition, item->price_index);
-		long unit_index = player->unit_index;
 		short action = item->action;
 
 		if (shadowrun_player->money < price && price > 0)
@@ -1012,211 +1394,24 @@ static void shadowrun_shop_buy(
 		{
 			/* (another purchase so soon is not made) */
 		}
-		else if (action == _shadowrun_shop_grenade || action == _shadowrun_shop_anti_magic_grenade)
-		{
-			struct unit_datum *unit = unit_get(unit_index);
-			/* port: the anti-magic grenade is the unit's second type of grenade
-			(shadowrun_tech.h): it is carried and thrown as one */
-			short type = action == _shadowrun_shop_anti_magic_grenade ?
-				SHADOWRUN_ANTIMAGIC_GRENADE_TYPE : _shadowrun_shop_grenade_type;
-
-			if (unit->unit.grenade_counts[type] < SHADOWRUN_SHOP_MAXIMUM_GRENADES)
-			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_bought);
-				unit->unit.grenade_counts[type]++;
-				shadowrun_player->money -= price;
-				state->purchase_time = game_time_get();
-			}
-			else
-			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
-			}
-		}
-		else if (action >= _shadowrun_shop_first_magic && action <= _shadowrun_shop_last_magic)
-		{
-			short spell = shadowrun_shop_spells[action - _shadowrun_shop_first_magic];
-
-			if (shadowrun_shop_owned(local_player_index, unit_index, definition, state->selection))
-			{
-				/* port: had: the removal's price forgets it (as a tech's takes it
-				off), so the player may buy another in its place */
-				long removal_price = shadowrun_shop_price(local_player_index, definition,
-					shadowrun_shop_items[state->selection].removal_price_index);
-
-				if (shadowrun_player->money < removal_price)
-				{
-					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_afford);
-				}
-				else
-				{
-					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_known);
-					shadowrun_unit_forget_power(unit_index, spell);
-					shadowrun_player->money -= removal_price;
-					state->purchase_time = game_time_get();
-				}
-			}
-			else if (shadowrun_unit_learn_power(unit_index, spell))
-			{
-				/* port: paid for when it is learned: a map whose unit has no srud
-				to learn it from (recomp.map's, its unit definitions stripped) sells
-				no spell, and takes no money for one */
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_learned);
-				shadowrun_player->money -= price;
-				state->purchase_time = game_time_get();
-			}
-			else
-			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
-			}
-		}
-		else if (action == _shadowrun_shop_razorclaws || action == _shadowrun_shop_katana ||
-			(action >= _shadowrun_shop_first_weapon && action <= _shadowrun_shop_last_weapon))
-		{
-			short weapon = action == _shadowrun_shop_razorclaws ? _shadowrun_shop_weapon_razorclaws :
-				action == _shadowrun_shop_katana ? _shadowrun_shop_weapon_katana :
-				shadowrun_shop_weapons[action - _shadowrun_shop_first_weapon];
-			long weapon_definition_index = shadowrun_shop_weapon_definition(local_player_index, weapon);
-
-			if (weapon_definition_index != NONE && !shadowrun_unit_has_weapon(unit_index, weapon_definition_index))
-			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_bought);
-				shadowrun_unit_give_weapon(unit_index, weapon_definition_index);
-				shadowrun_player->money -= price;
-				state->purchase_time = game_time_get();
-			}
-			else
-			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
-			}
-		}
-		else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
-		{
-			/* port: a tech the port plays is learned (the executable's shop gives
-			the unit the tech's pointers, its code's place) */
-			short tech = shadowrun_shop_tech_id(state->selection);
-
-			if (tech != NONE)
-			{
-				if (shadowrun_player_has_tech(shadowrun_player, tech))
-				{
-					/* (had: the removal's price takes it off, as the menu says;
-					the techs it also has stay) */
-					long removal_price = shadowrun_shop_price(local_player_index, definition,
-						shadowrun_shop_items[state->selection].removal_price_index);
-
-					if (shadowrun_player->money < removal_price)
-					{
-						shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_afford);
-					}
-					else
-					{
-						shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech_owned);
-						shadowrun_player_remove_tech(shadowrun_player, unit_index, tech);
-						shadowrun_player->money -= removal_price;
-						state->purchase_time = game_time_get();
-					}
-				}
-				else
-				{
-					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_tech);
-					shadowrun_player_buy_tech(shadowrun_player, unit_index, tech);
-					shadowrun_player->money -= price;
-					state->purchase_time = game_time_get();
-				}
-			}
-			else
-			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
-			}
-		}
 		else
 		{
-			/* (an item the menu has no way to sell) */
-			shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_cannot_buy);
+			shadowrun_shop_purchase_local(local_player_index, _shadowrun_purchase_item, state->selection, NONE);
 		}
 	}
 
 	return;
 }
 
-/* 0x0FE790: a magazine for the weapon in hand, if the menu sells one for it
-and it has room (a magazine's rounds, a shotgun's four) */
+/* 0x0FE790: a magazine for the weapon in hand (shadowrun_shop_purchase_magazine) */
 static void shadowrun_shop_buy_magazine(
 	short local_player_index)
 {
 	struct shadowrun_shop_state *state = &shadowrun_shop_states[local_player_index];
-	struct shadowrun_unit_definition *definition = shadowrun_shop_unit_definition(local_player_index);
-	struct player_datum *player = shadowrun_shop_player(local_player_index);
-	struct shadowrun_player *shadowrun_player =
-		shadowrun_player_get(local_player_get_player_index(local_player_index));
 
-	if (definition && player && shadowrun_player &&
-		game_time_get() >= state->purchase_time + SHADOWRUN_SHOP_PURCHASE_WAIT)
+	if (game_time_get() >= state->purchase_time + SHADOWRUN_SHOP_PURCHASE_WAIT)
 	{
-		struct unit_datum *unit = unit_get(player->unit_index);
-		long weapon_index = unit->unit.current_weapon_index != NONE ?
-			unit_inventory_get_weapon(player->unit_index, unit->unit.current_weapon_index) : NONE;
-		long price = NONE;
-		short weapon;
-
-		if (weapon_index != NONE)
-		{
-			long definition_index = object_get(weapon_index)->definition_index;
-
-			for (weapon = 0; weapon < NUMBER_OF_SHADOWRUN_SHOP_WEAPONS; weapon++)
-			{
-				if (shadowrun_shop_weapon_definition(local_player_index, weapon) == definition_index &&
-					shadowrun_shop_magazine_prices[weapon] != NONE)
-				{
-					price = shadowrun_shop_price(local_player_index, definition, shadowrun_shop_magazine_prices[weapon]);
-					break;
-				}
-			}
-		}
-		if (price >= 0)
-		{
-			if (shadowrun_player->money < price)
-			{
-				shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_magazine_failed);
-			}
-			else
-			{
-				struct weapon_datum *weapon_datum = weapon_get(weapon_index);
-				struct weapon_definition *weapon_definition = weapon_definition_get(weapon_datum->definition_index);
-				boolean added = FALSE;
-
-				/* 0x1772A0 */
-				if (weapon_definition->weapon.magazines.count > 0)
-				{
-					struct weapon_magazine_definition *magazine_definition = TAG_BLOCK_GET_ELEMENT(
-						&weapon_definition->weapon.magazines, 0, struct weapon_magazine_definition);
-					struct weapon_magazine *magazine = &weapon_datum->weapon.magazines[0];
-
-					if (magazine->rounds_total != magazine_definition->rounds_total_maximum)
-					{
-						short rounds = magazine_definition->rounds_reloaded;
-
-						if (weapon_definition->weapon.weapon_type == 1)
-						{
-							rounds *= 4;
-						}
-						magazine->rounds_total = (short)MIN(magazine->rounds_total + rounds,
-							magazine_definition->rounds_total_maximum);
-						added = TRUE;
-					}
-				}
-				if (added)
-				{
-					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_magazine);
-					shadowrun_player->money -= price;
-					state->purchase_time = game_time_get();
-				}
-				else
-				{
-					shadowrun_shop_sound(local_player_index, _shadowrun_shop_sound_magazine_failed);
-				}
-			}
-		}
+		shadowrun_shop_purchase_local(local_player_index, _shadowrun_purchase_magazine, NONE, NONE);
 	}
 
 	return;
@@ -1255,7 +1450,8 @@ static short shadowrun_shop_list(
 
 		for (item = 0; item < NUMBER_OF_SHADOWRUN_SHOP_ITEMS && count < MAXIMUM_SHADOWRUN_SHOP_LIST; item++)
 		{
-			if (shadowrun_shop_items[item].page == state->page)
+			if (shadowrun_shop_items[item].page == state->page &&
+				shadowrun_shop_item_shown(local_player_index, item))
 			{
 				list[count++] = item;
 			}
@@ -1263,6 +1459,40 @@ static short shadowrun_shop_list(
 	}
 
 	return count;
+}
+
+/* port: whether the menu shows the item: all but the gift to a teammate,
+which a player with no teammate (a singleplayer map played alone) is not
+shown */
+static boolean shadowrun_shop_item_shown(
+	short local_player_index,
+	short item)
+{
+	boolean result = TRUE;
+
+	if (shadowrun_shop_items[item].action == _shadowrun_shop_open_gift)
+	{
+		long player_index = local_player_get_player_index(local_player_index);
+		struct player_datum *player = player_index != NONE ? player_try_and_get(player_index) : NULL;
+		struct data_iterator iterator;
+		struct player_datum *teammate;
+
+		result = FALSE;
+		if (player)
+		{
+			data_iterator_new(&iterator, player_data);
+			while ((teammate = data_iterator_next(&iterator)) != NULL)
+			{
+				if (iterator.datum_index != player_index && teammate->team_index == player->team_index)
+				{
+					result = TRUE;
+					break;
+				}
+			}
+		}
+	}
+
+	return result;
 }
 
 /* 0x0FF3A0: whether the player has the item: grenades of its kind, the
@@ -1283,8 +1513,8 @@ static boolean shadowrun_shop_owned(
 	}
 	else if (action == _shadowrun_shop_anti_magic_grenade)
 	{
-		/* port: the unit's second type of grenade */
-		result = unit_get_grenade_count(unit_index, SHADOWRUN_ANTIMAGIC_GRENADE_TYPE) > 0;
+		/* port: the unit's third type of grenade */
+		result = shadowrun_unit_antimagic_grenades(unit_index) > 0;
 	}
 	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
 	{
@@ -1307,8 +1537,10 @@ static boolean shadowrun_shop_owned(
 			action == _shadowrun_shop_katana ? _shadowrun_shop_weapon_katana :
 			shadowrun_shop_weapons[action - _shadowrun_shop_first_weapon];
 
-		result = shadowrun_shop_weapon_definition(local_player_index, weapon) != NONE &&
-			shadowrun_unit_has_weapon(unit_index, shadowrun_shop_weapon_definition(local_player_index, weapon));
+		/* (the definition's weapon: the one the menu sells by) */
+		(void)local_player_index;
+		result = definition && definition->shop_weapons[weapon].index != NONE &&
+			shadowrun_unit_has_weapon(unit_index, definition->shop_weapons[weapon].index);
 	}
 
 	return result;
@@ -1343,8 +1575,7 @@ static boolean shadowrun_shop_available(
 	else if (action == _shadowrun_shop_anti_magic_grenade)
 	{
 		/* port: up to two, as a grenade's kind is */
-		result = unit_get_grenade_count(unit_index, SHADOWRUN_ANTIMAGIC_GRENADE_TYPE) <
-			SHADOWRUN_SHOP_MAXIMUM_GRENADES;
+		result = shadowrun_unit_antimagic_grenades(unit_index) < SHADOWRUN_ANTIMAGIC_GRENADE_MAXIMUM;
 	}
 	else if (action >= _shadowrun_shop_first_tech && action <= _shadowrun_shop_last_tech)
 	{

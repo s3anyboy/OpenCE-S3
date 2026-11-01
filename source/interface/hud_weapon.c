@@ -664,14 +664,17 @@ static void render_grenade_hud(
 
 	if (definition->overlays.bitmap.index != NONE)
 	{
+		/* port: counted as unit_get_grenade_count counts them (a player's
+		anti-magic grenades, chosen, on the Shadowrun prototype's maps) */
+		short grenade_count = unit_get_grenade_count(unit_index, unit_get_current_grenade_type(unit_index));
 		short overlay_flags =
-			unit->unit.grenade_counts[unit->unit.current_grenade_index] <=
+			grenade_count <=
 			definition->grenade_count_panel.flash_cutoff;
 
 		SET_FLAG(
 			overlay_flags,
 			_grenade_overlay_on_empty_bit,
-			unit->unit.grenade_counts[unit->unit.current_grenade_index] == 0);
+			grenade_count == 0);
 		SET_FLAG(overlay_flags, _grenade_overlay_on_default_bit, overlay_flags == 0);
 		SET_FLAG(overlay_flags, _grenade_overlay_on_always_bit, TRUE);
 		hud_draw_weapon_overlays(

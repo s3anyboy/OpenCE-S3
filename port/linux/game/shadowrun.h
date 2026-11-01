@@ -54,6 +54,42 @@ waits and spells; and the right bumper casts its spell, if it has one */
 void shadowrun_unit_update(
 	long unit_index);
 /* a unit dead for good (unit_died), and deleted (unit_delete) */
+/* port: the projectile a unit's grenade of the type is: the globals' (the
+map's), but a player's second type on these maps is the anti-magic grenade
+(shadowrun_tech.c). An AI's is the globals' (b30sr.map's grunts throw its
+plasma grenades) */
+long shadowrun_unit_grenade_projectile(
+	long unit_index,
+	short grenade_type,
+	long projectile_index);
+/* port: the anti-magic grenade, a player's third type of grenade on these maps
+(shadowrun_tech.c): the count of a type (the second's is the anti-magic
+grenades' while they are chosen); the grenade control's choice among frag,
+plasma and anti-magic (TRUE if it chose, *grenade_index the type's place);
+a throw's grenade taken from the anti-magic ones (TRUE if it was); and a
+pickup of the map's anti-magic grenade (TRUE if it was one: *taken whether
+the unit took it) */
+/* port: whether the unit has the jetpack the glider gives (cheat_jetpack's,
+its own: bipeds.c, units.c ask it with the cheat) */
+boolean shadowrun_unit_jetpack(
+	long unit_index);
+/* port: whether the unit's animations take a frame more this tick (reflexes'
+are 30% faster: units.c) */
+boolean shadowrun_unit_animation_extra_frame(
+	long unit_index);
+short shadowrun_unit_grenade_count(
+	long unit_index,
+	short grenade_type,
+	short count);
+boolean shadowrun_unit_rotate_grenade(
+	long unit_index,
+	short *grenade_index);
+boolean shadowrun_unit_antimagic_grenade_spend(
+	long unit_index);
+boolean shadowrun_unit_antimagic_grenade_pick_up(
+	long unit_index,
+	long equipment_definition_index,
+	boolean *taken);
 void shadowrun_unit_died(
 	long unit_index);
 void shadowrun_unit_delete(

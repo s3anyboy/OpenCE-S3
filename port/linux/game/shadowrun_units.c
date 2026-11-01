@@ -597,6 +597,138 @@ struct shadowrun_unit_definition *shadowrun_unit_definition_player(
 	return result;
 }
 
+boolean shadowrun_player_purchases_get(
+	long player_index,
+	struct shadowrun_player_purchases *purchases)
+{
+	struct shadowrun_player *shadowrun_player = shadowrun_player_get(player_index);
+	struct player_datum *player = shadowrun_player ? player_try_and_get(player_index) : NULL;
+	short index;
+
+	csmemset(purchases, 0, sizeof(*purchases));
+	if (!shadowrun_player || !player)
+	{
+		return FALSE;
+	}
+	purchases->money = shadowrun_player->money;
+	purchases->known_tech_count = (short)PIN(shadowrun_player->known_tech_count, 0, MAXIMUM_SHADOWRUN_PLAYER_TECHS);
+	for (index = 0; index < MAXIMUM_SHADOWRUN_PLAYER_TECHS; index++)
+	{
+		purchases->known_techs[index] = index < purchases->known_tech_count ? shadowrun_player->known_techs[index] : NONE;
+	}
+	purchases->mana_capacity_bonus = shadowrun_player->mana_capacity_bonus;
+	purchases->given_money = shadowrun_player->given_money ? TRUE : FALSE;
+	for (index = 0; index < MAXIMUM_SHADOWRUN_POWERS; index++)
+	{
+		purchases->known_powers[index] = (byte)PIN(shadowrun_player->known_powers[index], 0, 255);
+	}
+	{
+		struct shadowrun_unit *shadowrun_unit = player->unit_index != NONE ? shadowrun_unit_get(player->unit_index) : NULL;
+
+		purchases->antimagic_grenades = shadowrun_unit ? shadowrun_unit->antimagic_grenade_count : 0;
+	}
+
+	return TRUE;
+}
+
+void shadowrun_player_purchases_set(
+	long player_index,
+	struct shadowrun_player_purchases const *purchases)
+{
+	struct shadowrun_player *shadowrun_player = shadowrun_player_get(player_index);
+	struct player_datum *player = shadowrun_player ? player_try_and_get(player_index) : NULL;
+	struct shadowrun_unit *shadowrun_unit;
+	short index;
+	boolean chosen_known = FALSE;
+
+	if (!shadowrun_player || !player)
+	{
+		return;
+	}
+	shadowrun_player->money = purchases->money;
+	shadowrun_player->given_money = purchases->given_money;
+	shadowrun_player->mana_capacity_bonus = purchases->mana_capacity_bonus;
+	shadowrun_player->known_tech_count = (short)PIN(purchases->known_tech_count, 0, MAXIMUM_SHADOWRUN_PLAYER_TECHS);
+	for (index = 0; index < MAXIMUM_SHADOWRUN_PLAYER_TECHS; index++)
+	{
+		shadowrun_player->known_techs[index] = index < shadowrun_player->known_tech_count ?
+			purchases->known_techs[index] : NONE;
+		if (index < shadowrun_player->known_tech_count && shadowrun_player->known_techs[index] == shadowrun_player->chosen_tech)
+		{
+			chosen_known = TRUE;
+		}
+	}
+	for (index = 0; index < MAXIMUM_SHADOWRUN_POWERS; index++)
+	{
+		shadowrun_player->known_powers[index] = purchases->known_powers[index];
+	}
+	shadowrun_unit = player->unit_index != NONE ? shadowrun_unit_get(player->unit_index) : NULL;
+	if (!shadowrun_unit)
+	{
+		return;
+	}
+	/* its unit's spells, as the host's player's (a spell learned with none
+	chosen is chosen, as the menu's learning does: shadowrun_unit_learn_power) */
+	shadowrun_unit->known_power_count = 0;
+	for (index = 0; index < MAXIMUM_SHADOWRUN_POWERS; index++)
+	{
+		shadowrun_unit->known_powers[index] = purchases->known_powers[index];
+		if (purchases->known_powers[index] != 0)
+		{
+			shadowrun_unit->known_power_count++;
+		}
+	}
+	if (shadowrun_unit->current_spell > 0 && shadowrun_unit->current_spell <= NUMBER_OF_SHADOWRUN_SPELLS &&
+		shadowrun_unit->known_powers[shadowrun_unit->current_spell - 1] == 0)
+	{
+		shadowrun_unit->current_spell = 0;
+	}
+	if (shadowrun_unit->current_spell == 0)
+	{
+		for (index = 0; index < NUMBER_OF_SHADOWRUN_SPELLS; index++)
+		{
+			if (shadowrun_unit->known_powers[index] != 0)
+			{
+				shadowrun_unit->current_spell = index + 1;
+				shadowrun_unit->desired_spell = index + 1;
+				break;
+			}
+		}
+	}
+	/* its tech: the one chosen if it still has it, else the first it has */
+	if (!chosen_known)
+	{
+		shadowrun_player->chosen_tech = shadowrun_player->known_tech_count > 0 ?
+			(short)shadowrun_player->known_techs[0] : _shadowrun_tech_none;
+		shadowrun_unit_set_tech(player->unit_index, shadowrun_player->chosen_tech);
+	}
+	shadowrun_unit->antimagic_grenade_count = (char)PIN(purchases->antimagic_grenades, 0, SHADOWRUN_ANTIMAGIC_GRENADE_MAXIMUM);
+
+	return;
+}
+
+void shadowrun_unit_antimagic_grenade_choose(
+	long unit_index,
+	boolean chosen)
+{
+	struct shadowrun_unit *shadowrun_unit = unit_index != NONE ? shadowrun_unit_get(unit_index) : NULL;
+
+	if (shadowrun_unit)
+	{
+		shadowrun_unit->antimagic_grenade_chosen = chosen ? TRUE : FALSE;
+	}
+
+	return;
+}
+
+boolean shadowrun_unit_antimagic_grenade_chosen(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = unit_index != NONE ? shadowrun_unit_get(unit_index) : NULL;
+
+	return shadowrun_unit && shadowrun_unit->antimagic_grenade_chosen;
+}
+
 /* port: what the unit's biped names, whether or not the map has it (0x0FD0C0's,
 which observed a unit's srud by its name) */
 long shadowrun_unit_definition_index(
@@ -1105,6 +1237,8 @@ void shadowrun_unit_update(
 	{
 		short index;
 
+		/* port: a player's anti-magic grenades, its third type (shadowrun_tech.c) */
+		shadowrun_unit_grenades_update(unit_index);
 		if (shadowrun_unit->undead)
 		{
 			shadowrun_undead_update(unit_index);

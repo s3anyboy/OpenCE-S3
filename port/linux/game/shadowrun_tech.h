@@ -84,6 +84,21 @@ anti-magic grenade's projectile (no flag of its own: it is found by its name) */
 #define SHADOWRUN_ANTIMAGIC_GRENADE_PROJECTILE "shadowrunstuff\\antimagic grenade\\antimagic grenade"
 /* port: the grenade type it takes (units.h's second: the Covenant's plasma) */
 #define SHADOWRUN_ANTIMAGIC_GRENADE_TYPE 1
+/* port: the most anti-magic grenades a unit carries (the buy menu's two) */
+#define SHADOWRUN_ANTIMAGIC_GRENADE_MAXIMUM 2
+/* port: how long the glider's jetpack lasts (twenty seconds) */
+#define SHADOWRUN_GLIDER_JETPACK_TICKS (20 * 30)
+/* port: how much faster reflexes' animations play */
+#define SHADOWRUN_REFLEXES_ANIMATION_SCALE 1.3f
+/* port: a unit's anti-magic grenades (its third type: shadowrun_tech.c) */
+short shadowrun_unit_antimagic_grenades(
+	long unit_index);
+boolean shadowrun_unit_antimagic_grenade_add(
+	long unit_index);
+/* each tick of a player's unit: the anti-magic grenades chosen when they are
+all it has, and not when it has none */
+void shadowrun_unit_grenades_update(
+	long unit_index);
 
 /* port: anti-magic: the zones standing at once, and the most zones one
 player's grenades keep (units.c, FUN_0026FCA0: a global list) */

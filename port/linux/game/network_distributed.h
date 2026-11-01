@@ -140,6 +140,14 @@ enum
 	/* the host's shield effects (network_shield_effects.c), to every client,
 	reliably, when it is ready and when they change */
 	_distributed_message_shield_effects = 91,
+	/* the Shadowrun prototype's buy menu in a network game
+	(network_shadowrun.c): a client's purchase for its player, and its
+	anti-magic grenades chosen, to the host, reliably, which takes it only
+	from the player's own machine's stream; and what each player has bought
+	(money, spells, techs, anti-magic grenades), the host's, to every client,
+	reliably, when it changes and when the client is ready */
+	_distributed_message_shadowrun_purchase = 92,
+	_distributed_message_shadowrun_players = 93,
 
 	NUMBER_OF_DISTRIBUTED_MESSAGES
 };

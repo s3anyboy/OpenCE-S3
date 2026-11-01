@@ -245,6 +245,23 @@ definition (0x10F0) */
 	long regeneration_delay_ticks;
 	/* an actor's change colours, as its variant gave them (0x614) */
 	real_rgb_color actor_change_colors[NUMBER_OF_OBJECT_CHANGE_COLORS];
+	/* port: its anti-magic grenades, a third type of grenade this build's
+	units have no count of (units.h's two are pinned to the Xbox's layout),
+	and whether they are the grenade chosen: then the second type's place
+	(the Covenant's) is theirs: its count, its throw, its projectile
+	(shadowrun_tech.c) */
+	char antimagic_grenade_count;
+	boolean antimagic_grenade_chosen;
+	byte pad_antimagic[2];
+	/* port: the ticks left of the jetpack the glider gives (the cheat's,
+	cheat_jetpack, for this unit alone: shadowrun_tech.c) */
+	long jetpack_ticks;
+	/* port: reflexes' animations, 30% faster: the part of a frame gained each
+	tick, and whether this tick's animations take a frame more
+	(shadowrun_tech.c, units.c's unit_animation_update) */
+	real reflexes_animation_fraction;
+	boolean reflexes_animation_extra_frame;
+	byte pad_reflexes[3];
 };
 
 /* a player's (in its datum) */
@@ -274,7 +291,47 @@ struct shadowrun_player
 	byte pad3[2];
 };
 
+/* port: what a player has bought, as the host sends it to its clients
+(network_shadowrun.c): its money, its powers (spells: each known_powers'
+value), its techs, its bought mana and its unit's anti-magic grenades */
+struct shadowrun_player_purchases
+{
+	long money;
+	long known_techs[MAXIMUM_SHADOWRUN_PLAYER_TECHS];
+	short known_tech_count;
+	byte mana_capacity_bonus;
+	boolean given_money;
+	byte known_powers[MAXIMUM_SHADOWRUN_POWERS];
+	char antimagic_grenades;
+	byte pad[1];
+};
+
 /* ---------- prototypes/SHADOWRUN_UNITS.C */
+
+/* port: a player's purchases (FALSE: none to tell, not a Shadowrun map's
+player), and a client's player given the host's: its unit learns or forgets
+the spells, takes a tech it has bought if it has none chosen, and carries the
+anti-magic grenades (network_shadowrun.c) */
+boolean shadowrun_player_purchases_get(
+	long player_index,
+	struct shadowrun_player_purchases *purchases);
+void shadowrun_player_purchases_set(
+	long player_index,
+	struct shadowrun_player_purchases const *purchases);
+/* port: a client's choice of its anti-magic grenades, on the host's copy of
+its player's unit (network_shadowrun.c), and the local choice to send */
+void shadowrun_unit_antimagic_grenade_choose(
+	long unit_index,
+	boolean chosen);
+boolean shadowrun_unit_antimagic_grenade_chosen(
+	long unit_index);
+/* port: a purchase a network client asked of the host for its player
+(shadowrun_buy_menu.c): kind as network_shadowrun.h's */
+void shadowrun_buy_menu_network_purchase(
+	long player_index,
+	short kind,
+	short item_index,
+	long gift_player_index);
 
 /* a unit's Shadowrun state, or NULL (not a unit of a Shadowrun map) */
 struct shadowrun_unit *shadowrun_unit_get(

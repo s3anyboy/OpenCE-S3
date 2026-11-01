@@ -173,6 +173,9 @@ the least; and its turn's bound (the executable's, 3.14) */
 #define STRANGLE_STARTING_SCALE 0.1f
 #define STRANGLE_MINIMUM_SCALE 0.01f
 #define STRANGLE_PI 3.14f
+/* port: a thorn withers twenty seconds after it grows (the executable kept
+them until the most kept, the definition's, pushed the oldest out) */
+#define STRANGLE_THORN_LIFETIME_TICKS (20 * 30)
 
 /* summon elemental: cast again this soon after, it dismisses its summons */
 #define SUMMON_DISMISS_TICKS 30
@@ -232,6 +235,8 @@ struct shadowrun_fire
 static struct shadowrun_magic_globals
 {
 	long thorn_indices[MAXIMUM_SHADOWRUN_THORNS];
+	/* port: when each withers (STRANGLE_THORN_LIFETIME_TICKS) */
+	long thorn_end_times[MAXIMUM_SHADOWRUN_THORNS];
 	long thorn_count;
 	struct shadowrun_standing_tree trees[MAXIMUM_SHADOWRUN_STANDING_TREES];
 	long tree_count;
@@ -314,6 +319,8 @@ static void shadowrun_strangle_cull_thorns(
 	long maximum_count);
 static void shadowrun_strangle_update(
 	long unit_index);
+static void shadowrun_thorns_wither(
+	void);
 static void shadowrun_summons_update(
 	long unit_index);
 static long shadowrun_summon_elemental_variant(
@@ -398,6 +405,7 @@ void shadowrun_magic_update(
 {
 	shadowrun_trees_heal();
 	shadowrun_fires_update();
+	shadowrun_thorns_wither();
 
 	return;
 }
@@ -1407,7 +1415,10 @@ static void shadowrun_strangle_cast(
 						thorn->object.owner_team_index = unit->object.owner_team_index;
 						if (shadowrun_magic_globals->thorn_count < MAXIMUM_SHADOWRUN_THORNS)
 						{
-							shadowrun_magic_globals->thorn_indices[shadowrun_magic_globals->thorn_count++] = thorn_index;
+							shadowrun_magic_globals->thorn_indices[shadowrun_magic_globals->thorn_count] = thorn_index;
+							shadowrun_magic_globals->thorn_end_times[shadowrun_magic_globals->thorn_count] =
+								game_time_get() + STRANGLE_THORN_LIFETIME_TICKS;
+							shadowrun_magic_globals->thorn_count++;
 						}
 					}
 				}
@@ -1463,7 +1474,9 @@ static void shadowrun_strangle_cull_thorns(
 	{
 		if (object_try_and_get_and_verify_type(globals->thorn_indices[index], NONE))
 		{
-			globals->thorn_indices[kept++] = globals->thorn_indices[index];
+			globals->thorn_indices[kept] = globals->thorn_indices[index];
+			globals->thorn_end_times[kept] = globals->thorn_end_times[index];
+			kept++;
 		}
 	}
 	globals->thorn_count = kept;
@@ -1474,8 +1487,42 @@ static void shadowrun_strangle_cull_thorns(
 		object_delete_immediately(globals->thorn_indices[0]);
 		csmemmove(&globals->thorn_indices[0], &globals->thorn_indices[1],
 			(globals->thorn_count - 1) * sizeof(globals->thorn_indices[0]));
+		csmemmove(&globals->thorn_end_times[0], &globals->thorn_end_times[1],
+			(globals->thorn_count - 1) * sizeof(globals->thorn_end_times[0]));
 		globals->thorn_count--;
 	}
+
+	return;
+}
+
+/* port: the thorns whose time is up wither (are deleted), and those gone are
+forgotten (STRANGLE_THORN_LIFETIME_TICKS) */
+static void shadowrun_thorns_wither(
+	void)
+{
+	struct shadowrun_magic_globals *globals = shadowrun_magic_globals;
+	long now = game_time_get();
+	long kept = 0;
+	long index;
+
+	for (index = 0; index < globals->thorn_count; index++)
+	{
+		long thorn_index = globals->thorn_indices[index];
+
+		if (!object_try_and_get_and_verify_type(thorn_index, NONE))
+		{
+			continue;
+		}
+		if (now >= globals->thorn_end_times[index])
+		{
+			object_delete(thorn_index);
+			continue;
+		}
+		globals->thorn_indices[kept] = thorn_index;
+		globals->thorn_end_times[kept] = globals->thorn_end_times[index];
+		kept++;
+	}
+	globals->thorn_count = kept;
 
 	return;
 }

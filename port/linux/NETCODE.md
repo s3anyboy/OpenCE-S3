@@ -279,7 +279,16 @@ and a troll rages; and the map's units and the enemy actors have their races.
 An older build cannot read those maps as these do, so it cannot join.Then version 41
 has Shadowrun's players buy from the map's buy menu (`shadowrun_buy_menu.c`):
 their purchases are the host's, which sends each player's money, the weapons
-and grenades they carry, and the spell they have chosen.
+and grenades they carry, and the spell they have chosen. Then version 42
+sends them (distributed messages 92 and 93, `network_shadowrun.c`): a
+client's menu asks the host for each purchase (an item, a gift of money, a
+magazine), reliably, which the host makes for that client's own player only;
+the host sends every client what each player has bought (money, spells,
+techs, bought mana and the anti-magic grenades, a player's third type of
+grenade) reliably when it changes and when the client is ready; and a client
+sends its anti-magic grenades chosen when that changes, which the host's copy
+of its unit throws. A version 41 build would ignore them, its clients buying
+nothing, so it cannot join.
 
 `port/linux/network_format.txt` records the wire format of the current
 version (`tools/network_format.py`): `test_linux_port.py` fails when the

@@ -828,7 +828,9 @@ static void biped_falling_damage(
 		shadowrun_tech_no_falling_damage(biped_index);
 	real falling_velocity = biped->object.translational_velocity.k;
 
-	if (!cheat.jetpack || biped->unit.player_index == NONE)
+	/* port: or the jetpack the Shadowrun prototype's glider gives the unit
+	(port/linux/game/shadowrun_tech.c) */
+	if (!(cheat.jetpack || shadowrun_unit_jetpack(biped_index)) || biped->unit.player_index == NONE)
 	{
 		if (collision_velocity > falling_damage->runtime_minimum_damage_velocity)
 		{
@@ -2233,7 +2235,9 @@ static void biped_update_jumping(
 		}
 	}
 
-	if (cheat.jetpack && biped->unit.player_index != NONE)
+	/* port: or the jetpack the Shadowrun prototype's glider gives the unit
+	(port/linux/game/shadowrun_tech.c) */
+	if ((cheat.jetpack || shadowrun_unit_jetpack(biped_index)) && biped->unit.player_index != NONE)
 	{
 		struct player_datum *player = player_get(biped->unit.player_index);
 		/* inferred, descriptive names (not recovered Bungie identifiers): no PDB records the locals of this block */

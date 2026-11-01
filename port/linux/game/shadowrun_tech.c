@@ -21,6 +21,7 @@ marked with the port's navpoints.
 #include "tag_files/tag_files.h"
 #include "effects/effects.h"
 #include "items/projectile_definitions.h"
+#include "items/equipment_definitions.h" /* port: the anti-magic grenade's equipment */
 #include "objects/damage.h"
 #include "objects/object_definitions.h"
 #include "math/real_math.h"
@@ -279,6 +280,10 @@ boolean shadowrun_tech_cast(
 		}
 		shadowrun_glider_begin(unit_index);
 		shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_WEAR_TICKS;
+		/* port: and twenty seconds of the jetpack (cheat_jetpack's: the fire
+		and grenade controls together fly it), whether the glider is put away
+		before then or not */
+		shadowrun_unit->jetpack_ticks = SHADOWRUN_GLIDER_JETPACK_TICKS;
 		return TRUE;
 
 	case _shadowrun_tech_hologram_id:
@@ -367,6 +372,7 @@ static long shadowrun_antimagic_definition_index = NONE;
 /* (defined with the anti-magic grenade's and the glider's code, below:
 shadowrun_antimagic_initialize_for_new_map resets them) */
 static long shadowrun_antimagic_grenade_index;
+static long shadowrun_antimagic_equipment_index;
 static long shadowrun_glider_scenery_index;
 
 /* the map's t3ed: the Shadowrun unit's tech3, of the unit that threw it (the
@@ -403,15 +409,16 @@ static struct shadowrun_tech3_definition *shadowrun_antimagic_definition(
 	return (struct shadowrun_tech3_definition *)tag_get(SHADOWRUN_TECH3_DEFINITION_TAG, definition_index);
 }
 
-/* port: the map's second grenade (the second type of grenade a unit has, the
-Covenant's plasma: units.h) made the anti-magic grenade: its projectile is the
-map's anti-magic grenade, and its count the unit's own. A unit carrying two
-throws it as it throws any grenade (the left trigger) */
+/* port: a player's second grenade (the second type of grenade a unit has, the
+Covenant's plasma: units.h) is the anti-magic grenade: its projectile is the
+map's anti-magic grenade (shadowrun_unit_grenade_projectile, as it is thrown),
+and its count the unit's own. A unit carrying two throws it as it throws any
+grenade (the left trigger). The globals' grenade is left the map's: an AI
+throws it (b30sr.map's grunts, its plasma grenades), as it aims by it
+(actor_combat.c) */
 void shadowrun_antimagic_initialize_for_new_map(
 	void)
 {
-	struct game_globals_grenade *grenade;
-
 	shadowrun_antimagic_zone_count = 0;
 	shadowrun_antimagic_definition_index = NONE;
 	/* port: the tags looked for once a map are looked for anew in this one:
@@ -419,18 +426,242 @@ void shadowrun_antimagic_initialize_for_new_map(
 	(0xE23B00C7) made b30sr.map's second grenade whatever tag of b30sr.map
 	has that handle (its dust's effect: the grenade was never made) */
 	shadowrun_antimagic_grenade_index = NONE;
+	shadowrun_antimagic_equipment_index = NONE;
 	shadowrun_glider_scenery_index = NONE;
 	if (!shadowrun_map_loaded())
 	{
 		return;
 	}
-	if (SHADOWRUN_ANTIMAGIC_GRENADE_TYPE >= scenario_get_game_globals()->grenades.count)
+	/* (looked for now, so the log says at once if the map has none) */
+	shadowrun_antimagic_grenade_projectile();
+
+	return;
+}
+
+boolean shadowrun_unit_animation_extra_frame(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_map_loaded() && unit_index != NONE ?
+		shadowrun_unit_get(unit_index) : NULL;
+
+	return shadowrun_unit && shadowrun_unit->reflexes_animation_extra_frame;
+}
+
+boolean shadowrun_unit_jetpack(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_map_loaded() && unit_index != NONE ?
+		shadowrun_unit_get(unit_index) : NULL;
+
+	return shadowrun_unit && shadowrun_unit->jetpack_ticks > 0;
+}
+
+/* the unit's Shadowrun state if it is a player's on these maps (only a
+player's carries anti-magic grenades), else NULL */
+static struct shadowrun_unit *shadowrun_grenade_unit(
+	long unit_index)
+{
+	struct unit_datum *unit = unit_index != NONE ? unit_try_and_get(unit_index) : NULL;
+
+	return shadowrun_map_loaded() && unit && unit->unit.player_index != NONE ? shadowrun_unit_get(unit_index) : NULL;
+}
+
+long shadowrun_unit_grenade_projectile(
+	long unit_index,
+	short grenade_type,
+	long projectile_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_grenade_unit(unit_index);
+	long result = projectile_index;
+
+	if (shadowrun_unit && shadowrun_unit->antimagic_grenade_chosen &&
+		grenade_type == SHADOWRUN_ANTIMAGIC_GRENADE_TYPE && shadowrun_antimagic_grenade_projectile() != NONE)
+	{
+		result = shadowrun_antimagic_grenade_projectile();
+	}
+
+	return result;
+}
+
+short shadowrun_unit_grenade_count(
+	long unit_index,
+	short grenade_type,
+	short count)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_grenade_unit(unit_index);
+
+	return shadowrun_unit && shadowrun_unit->antimagic_grenade_chosen &&
+		grenade_type == SHADOWRUN_ANTIMAGIC_GRENADE_TYPE ? shadowrun_unit->antimagic_grenade_count : count;
+}
+
+short shadowrun_unit_antimagic_grenades(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_grenade_unit(unit_index);
+
+	return shadowrun_unit ? shadowrun_unit->antimagic_grenade_count : 0;
+}
+
+boolean shadowrun_unit_antimagic_grenade_add(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_grenade_unit(unit_index);
+	boolean result = FALSE;
+
+	if (shadowrun_unit && shadowrun_unit->antimagic_grenade_count < SHADOWRUN_ANTIMAGIC_GRENADE_MAXIMUM)
+	{
+		shadowrun_unit->antimagic_grenade_count++;
+		result = TRUE;
+	}
+
+	return result;
+}
+
+/* the grenade control goes round the kinds the unit carries: frag, plasma,
+anti-magic (the last the second type's place, chosen). FALSE (the game's
+own turn) for a unit with no anti-magic grenades */
+boolean shadowrun_unit_rotate_grenade(
+	long unit_index,
+	short *grenade_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_grenade_unit(unit_index);
+	struct unit_datum *unit = unit_try_and_get(unit_index);
+	short choices[3];
+	boolean antimagic[3];
+	short count = 0;
+	short current = NONE;
+	short index;
+
+	if (!shadowrun_unit || !unit || shadowrun_unit->antimagic_grenade_count <= 0)
+	{
+		return FALSE;
+	}
+	if (unit->unit.grenade_counts[0] > 0)
+	{
+		choices[count] = 0;
+		antimagic[count++] = FALSE;
+	}
+	if (unit->unit.grenade_counts[SHADOWRUN_ANTIMAGIC_GRENADE_TYPE] > 0)
+	{
+		choices[count] = SHADOWRUN_ANTIMAGIC_GRENADE_TYPE;
+		antimagic[count++] = FALSE;
+	}
+	choices[count] = SHADOWRUN_ANTIMAGIC_GRENADE_TYPE;
+	antimagic[count++] = TRUE;
+	for (index = 0; index < count; index++)
+	{
+		if (choices[index] == *grenade_index &&
+			antimagic[index] == (shadowrun_unit->antimagic_grenade_chosen && *grenade_index == SHADOWRUN_ANTIMAGIC_GRENADE_TYPE))
+		{
+			current = index;
+		}
+	}
+	index = current == NONE ? 0 : (short)((current + 1) % count);
+	*grenade_index = choices[index];
+	shadowrun_unit->antimagic_grenade_chosen = antimagic[index];
+
+	return TRUE;
+}
+
+boolean shadowrun_unit_antimagic_grenade_spend(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_grenade_unit(unit_index);
+	struct unit_datum *unit = unit_try_and_get(unit_index);
+	boolean result = FALSE;
+
+	if (shadowrun_unit && unit && shadowrun_unit->antimagic_grenade_chosen &&
+		unit->unit.current_grenade_index == SHADOWRUN_ANTIMAGIC_GRENADE_TYPE)
+	{
+		if (shadowrun_unit->antimagic_grenade_count > 0)
+		{
+			shadowrun_unit->antimagic_grenade_count--;
+		}
+		result = TRUE;
+	}
+
+	return result;
+}
+
+/* port: the map's anti-magic grenade equipment, looked for once a map (its
+grenade type is 2, the prototype's third, which the validator makes 0: a
+frag) */
+static long shadowrun_antimagic_equipment_index = NONE;
+
+boolean shadowrun_unit_antimagic_grenade_pick_up(
+	long unit_index,
+	long equipment_definition_index,
+	boolean *taken)
+{
+	boolean result = FALSE;
+
+	*taken = FALSE;
+	if (shadowrun_grenade_unit(unit_index))
+	{
+		if (shadowrun_antimagic_equipment_index == NONE)
+		{
+			shadowrun_antimagic_equipment_index = tag_loaded(EQUIPMENT_DEFINITION_TAG, SHADOWRUN_ANTIMAGIC_GRENADE_PROJECTILE);
+		}
+		if (shadowrun_antimagic_equipment_index != NONE && equipment_definition_index == shadowrun_antimagic_equipment_index)
+		{
+			result = TRUE;
+			*taken = shadowrun_unit_antimagic_grenade_add(unit_index);
+		}
+	}
+
+	return result;
+}
+
+void shadowrun_unit_grenades_update(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_grenade_unit(unit_index);
+	struct unit_datum *unit = unit_try_and_get(unit_index);
+
+	/* (the glider's jetpack runs out, any unit's) */
+	{
+		struct shadowrun_unit *any = shadowrun_map_loaded() ? shadowrun_unit_get(unit_index) : NULL;
+
+		if (any && any->jetpack_ticks > 0)
+		{
+			any->jetpack_ticks--;
+		}
+		/* (and reflexes' animations gain the part of a frame more they play,
+		a frame more each tick it comes to one) */
+		if (any)
+		{
+			any->reflexes_animation_extra_frame = FALSE;
+			if (shadowrun_reflexes_active(unit_index))
+			{
+				any->reflexes_animation_fraction += SHADOWRUN_REFLEXES_ANIMATION_SCALE - 1.f;
+				if (any->reflexes_animation_fraction >= 1.f)
+				{
+					any->reflexes_animation_fraction -= 1.f;
+					any->reflexes_animation_extra_frame = TRUE;
+				}
+			}
+			else
+			{
+				any->reflexes_animation_fraction = 0.f;
+			}
+		}
+	}
+	if (!shadowrun_unit || !unit)
 	{
 		return;
 	}
-	grenade = TAG_BLOCK_GET_ELEMENT(&scenario_get_game_globals()->grenades,
-		SHADOWRUN_ANTIMAGIC_GRENADE_TYPE, struct game_globals_grenade);
-	grenade->projectile.index = shadowrun_antimagic_grenade_projectile();
+	/* (none left: the plasma grenades' place is theirs again; all it has:
+	chosen, so the grenade control need not be pressed for them) */
+	if (shadowrun_unit->antimagic_grenade_chosen && shadowrun_unit->antimagic_grenade_count <= 0)
+	{
+		shadowrun_unit->antimagic_grenade_chosen = FALSE;
+	}
+	else if (!shadowrun_unit->antimagic_grenade_chosen && shadowrun_unit->antimagic_grenade_count > 0 &&
+		unit->unit.grenade_counts[0] <= 0 && unit->unit.grenade_counts[SHADOWRUN_ANTIMAGIC_GRENADE_TYPE] <= 0)
+	{
+		shadowrun_unit->antimagic_grenade_chosen = TRUE;
+		unit->unit.desired_grenade_index = SHADOWRUN_ANTIMAGIC_GRENADE_TYPE;
+	}
 
 	return;
 }

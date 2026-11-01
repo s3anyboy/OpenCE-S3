@@ -302,6 +302,36 @@ text changes). Bright while it runs, grey otherwise */
 		}
 	}
 
+	/* port: the anti-magic grenades a player carries (its third type of
+	grenade, shadowrun_tech.c), above the spell's line: bright while they are
+	the grenade chosen. The game's grenade panel counts them then, but shows
+	the plasma grenade's picture */
+	{
+		short antimagic_grenades = shadowrun_unit_antimagic_grenades(unit_index);
+
+		if (antimagic_grenades > 0)
+		{
+			char grenade_text[64];
+			real_argb_color grenade_color;
+
+			if (shadowrun_unit->antimagic_grenade_chosen)
+			{
+				shadowrun_hud_set_color(&grenade_color, 1.0f, 0.55f, 0.75f, 1.0f);
+			}
+			else
+			{
+				shadowrun_hud_set_color(&grenade_color, 0.9f, 0.55f, 0.55f, 0.6f);
+			}
+			snprintf(grenade_text, sizeof(grenade_text), "Anti-Magic Grenade x%d", (int)antimagic_grenades);
+			bounds.x0 = left;
+			bounds.x1 = (short)(left + 400);
+			bounds.y0 = (short)(top - line_height);
+			bounds.y1 = top;
+			draw_string_set_draw_mode(font_index, NONE, _shadowrun_hud_text_left, 0, &grenade_color);
+			rasterizer_draw_string(&bounds, NULL, NULL, 0, grenade_text);
+		}
+	}
+
 	/* the buy menu, if it is open (shadowrun_buy_menu.c) */
 	shadowrun_buy_menu_draw(local_player_index);
 

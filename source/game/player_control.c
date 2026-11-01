@@ -610,6 +610,11 @@ static void player_action_clear(
 menu, which pauses nothing): its controller drives the menu, not the player,
 whose D-pad and sticks would otherwise move them as they move about it. The
 buttons still held as it closes are let go of first (ui_widget_delete). */
+/* port: the d-pad's down pressed this tick by each local player, on the
+Shadowrun prototype's maps: it turns the grenades (frag, plasma, anti-magic)
+as the d-pad's right turns the spells (handle_one_player_input) */
+static boolean player_control_shadowrun_grenade_pressed[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+
 static boolean player_control_port_menu_has_controller(
 	short local_player_index)
 {
@@ -734,6 +739,20 @@ static void handle_one_player_input(
 		spell the right bumper casts (port/linux/game/shadowrun_units.c) */
 		if (TEST_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit) &&
 			shadowrun_unit_rotate_selection(player->unit_index, player->desired_grenade_index))
+		{
+			SET_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit, FALSE);
+		}
+		/* port: and goes round the player's anti-magic grenades too, a third
+		type (port/linux/game/shadowrun_tech.c); on those maps the d-pad's down
+		turns the grenades whatever spells the player knows */
+		if (VALID_INDEX(local_player_index, MAXIMUM_NUMBER_OF_LOCAL_PLAYERS) &&
+			player_control_shadowrun_grenade_pressed[local_player_index])
+		{
+			player_control_shadowrun_grenade_pressed[local_player_index] = FALSE;
+			SET_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit, TRUE);
+		}
+		if (TEST_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit) &&
+			shadowrun_unit_rotate_grenade(player->unit_index, &player->desired_grenade_index))
 		{
 			SET_FLAG(input.player_control_flags, _player_control_rotate_grenades_bit, FALSE);
 		}
@@ -1507,6 +1526,9 @@ static void get_local_player_input_blob(
 				if (shadowrun_map_loaded())
 				{
 					unsigned int dpad = halo_linux_gamepad_dpad(gamepad_index);
+					/* (the presses seen this tick: asked once, as asking marks them
+					seen) */
+					int shadowrun_dpad_pressed = 0;
 
 					SET_FLAG(
 						input->unit_control_flags,
@@ -1517,6 +1539,8 @@ static void get_local_player_input_blob(
 					the same press, so both are asked once) */
 					{
 						int dpad_pressed = halo_linux_gamepad_dpad_pressed(dpad);
+
+						shadowrun_dpad_pressed = dpad_pressed;
 
 						SET_FLAG(
 							input->player_control_flags,
@@ -1554,6 +1578,14 @@ static void get_local_player_input_blob(
 						input->primary_trigger = 0.f;
 						input->throttle.i = 0.f;
 						input->throttle.j = 0.f;
+					}
+					/* port: with the buy menu shut, the d-pad's down turns the
+					grenades: frag, plasma and the anti-magic grenades
+					(handle_one_player_input, shadowrun_tech.c) */
+					else if ((shadowrun_dpad_pressed & HALO_LINUX_DPAD_DOWN) &&
+						VALID_INDEX(local_player_index, MAXIMUM_NUMBER_OF_LOCAL_PLAYERS))
+					{
+						player_control_shadowrun_grenade_pressed[local_player_index] = TRUE;
 					}
 				}
 				else

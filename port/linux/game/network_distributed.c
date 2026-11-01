@@ -79,6 +79,7 @@ machine (their datum identifiers need not be).
 #include "network_voice.h"
 #include "network_aim_assist.h"
 #include "network_shield_effects.h"
+#include "network_shadowrun.h"
 #include "map_share.h"
 #include "latency_meter.h"
 #include "profile_sections.h"
@@ -3813,6 +3814,7 @@ void network_distributed_new_game(
 	network_coop_new_game();
 	network_aim_assist_reset();
 	network_shield_effects_reset();
+	network_shadowrun_reset();
 	network_votekick_new_game();
 }
 
@@ -4494,6 +4496,12 @@ void network_distributed_handle_message(
 		network_shield_effects_handle_message(machine_index, message, size);
 		return;
 	}
+	/* (the Shadowrun prototype's buy menu: network_shadowrun.c) */
+	if (network_shadowrun_handles_message(message, size))
+	{
+		network_shadowrun_handle_message(machine_index, message, size);
+		return;
+	}
 	if (network_voice_handles_message(message, size))
 	{
 		network_voice_handle_message(machine_index, message, size);
@@ -4818,6 +4826,7 @@ void network_distributed_handle_message(
 		the host's objects) */
 		network_aim_assist_send_policy(machine_index);
 		network_shield_effects_send(machine_index);
+		network_shadowrun_send(machine_index);
 		network_objects_client_asked(machine_index, header.count != 0);
 		/* (a machine new at its index, which may have joined the game in
 		progress: every player's statistics and the game type's state, after
