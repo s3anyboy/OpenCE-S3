@@ -300,10 +300,10 @@ static const struct config_setting config_settings[] =
 		"the Xbox 360's paks360 or Halo: The Master Chief Collection's) in\n"
 		"anniversary_paks. Only what is drawn changes. So far, one: b30's boulder.\n"
 		"Read as a map loads." },
-	{ "display.anniversary_paks", _config_string, "\"anniversary\"", "HALO_ANNIVERSARY_PAKS", _environment_value, _platform_all,
+	{ "display.anniversary_paks", _config_string, "\"paks\"", "HALO_ANNIVERSARY_PAKS", _environment_value, _platform_all,
 		"The folder of Halo: Combat Evolved Anniversary's packages (.s3dpak)\n"
-		"that anniversary_models draws from: a path, or a folder of the data\n"
-		"folder." },
+		"that anniversary_models draws from: a path, or a folder next to the\n"
+		"game's executable (on Android, of the data folder)." },
 	{ "display.hdr", _config_boolean, "false", "HALO_HDR", _environment_value, _platform_all,
 		"Draw the 3D view into a floating-point back buffer, which keeps what\n"
 		"the game's additive effects (explosions, plasma, lights, the sun's\n"
@@ -2664,6 +2664,21 @@ int config_text(const char *name, char *text, size_t size)
 		break;
 	}
 	return 1;
+}
+
+/* the folder the executable is in, with its separator (on Android and the
+web, which have none of their own, the data folder) */
+void config_executable_folder(char *path, size_t size)
+{
+#if defined(HALO_ANDROID) || defined(HALO_WEB)
+	const char *root = getenv("HALO_DATA_ROOT");
+
+	snprintf(path, size, "%s/", root && *root ? root : ".");
+#else
+	const char *base = SDL_GetBasePath();
+
+	snprintf(path, size, "%s", base ? base : "");
+#endif
 }
 
 void config_folder(char *path, size_t size)

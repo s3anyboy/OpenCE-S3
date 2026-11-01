@@ -3,7 +3,8 @@ SABER_MODELS.C
 
 Halo: Combat Evolved Anniversary's remastered models drawn over the map's
 (display.anniversary_models): as a map loads, its Saber3D package
-(<display.anniversary_paks>\<map>.s3dpak: the Xbox 360's paks360 or Halo:
+(<display.anniversary_paks>\<map>.s3dpak, by default paks\ next to the
+game's executable: the Xbox 360's paks360 or Halo:
 The Master Chief Collection's) is read for the templates of the models
 named in saber_model_templates, and each is drawn in place of the map's
 model, textured with the package's textures.
@@ -59,7 +60,7 @@ definitions in place, and their own come back as the map goes.
 /* the platform layer's (port_config.c, xbox_files.c, xbox_textures.c) */
 int config_boolean(const char *name);
 const char *config_string(const char *name);
-const char *platform_data_root(void);
+void config_executable_folder(char *path, size_t size);
 void halo_custom_edition_texels_channels(void const *texels, unsigned char channel_order);
 
 /* the game's (port) */
@@ -68,8 +69,8 @@ char *tag_get_name(long tag_index);
 /* ---------- constants */
 
 /* the package's file, in the folder of display.anniversary_paks (by
-default the data folder's anniversary) */
-#define DEFAULT_PAKS_FOLDER "anniversary"
+default paks, next to the executable) */
+#define DEFAULT_PAKS_FOLDER "paks"
 #define PAK_EXTENSION ".s3dpak"
 
 /* models.c's shader types and model flags */
@@ -247,7 +248,7 @@ static struct
 /* ---------- private code */
 
 /* the package of the map `map_name`: in the folder display.anniversary_paks
-names (an absolute path, or one in the data folder) */
+names (an absolute path, or one in the executable's folder) */
 static void pak_path(
 	char const *map_name,
 	char *path,
@@ -255,14 +256,20 @@ static void pak_path(
 {
 	char const *folder = config_string("display.anniversary_paks");
 	char const *name = strrchr(map_name, '\\');
+	char executable_folder[512];
 
 	name = name ? name + 1 : map_name;
 	if (!folder || !*folder)
 		folder = DEFAULT_PAKS_FOLDER;
 	if (folder[0] == '/' || folder[0] == '\\' || (folder[0] && folder[1] == ':'))
+	{
 		snprintf(path, size, "%s/%s%s", folder, name, PAK_EXTENSION);
+	}
 	else
-		snprintf(path, size, "%s/%s/%s%s", platform_data_root(), folder, name, PAK_EXTENSION);
+	{
+		config_executable_folder(executable_folder, sizeof(executable_folder));
+		snprintf(path, size, "%s%s/%s%s", executable_folder, folder, name, PAK_EXTENSION);
+	}
 }
 
 /* The span across (x and y) of the map's model's vertices, as the game

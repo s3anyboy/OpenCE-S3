@@ -345,6 +345,8 @@ SCREENS["video_settings/fov_viewmodels"] = {
          "The energy shield's flare on your first-person\narms too, as on your body.", None),
         ("LEGS:", "display.first_person_legs", ON_OFF,
          "Your legs in first person, seen looking down,\nmoving as you run. Your body as others see it.", None),
+        ("ANNIVERSARY MODELS:", "display.anniversary_models", ON_OFF,
+         "Halo CE Anniversary's remastered models (from\nthe map's .s3dpak). Applies when a map loads.", None),
         ("SHIELD COLOR:", "display.shield_color", [("DEFAULT", "default")] + [(c.upper(), c) for c in SHIELD_COLORS],
          "Your shield's flare in an armor color, whatever\nyour armor. Only you see it. Default: its own.", None),
     ],
