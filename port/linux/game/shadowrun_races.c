@@ -180,33 +180,24 @@ void shadowrun_damage_material(
 }
 
 /* 0x2541D0's: a player's biped moves at its race's speed with its weapon
-(scaled by its rage), and gets there at its race's acceleration; 0 or less
-leaves either be. (The executable halves the speed in a state of the biped's
-that Shadowrun's tech sets: not played.) */
+(scaled by its rage), and gets there at its race's acceleration. port: the
+weapon's speeds (its srwd's, each race's: the sniper rifle's 0.5 to 0.8, the
+rocket launcher's 0.4 to 0.8) are not used: a weapon slows no one, and the
+unit moves at its rage's speed alone. (The executable halves the speed in a
+state of the biped's that Shadowrun's tech sets: not played.) */
 void shadowrun_biped_movement_scales(
 	long biped_index,
 	real *movement_scale,
 	real *acceleration_scale)
 {
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(biped_index);
-	struct shadowrun_weapon_data *data = shadowrun_unit ? shadowrun_unit_weapon_data_get(biped_index) : NULL;
 
 	*movement_scale = 1.f;
 	*acceleration_scale = 1.f;
-	if (data && shadowrun_unit->race_index >= 0 && shadowrun_unit->race_index < data->races.count)
+	if (shadowrun_unit && shadowrun_unit->rage_movement_scale > 0.f)
 	{
-		struct shadowrun_weapon_data_race *race = tag_block_get_element_with_size(&data->races,
-			shadowrun_unit->race_index, sizeof(struct shadowrun_weapon_data_race));
-
-		if (race->movement_scale > 0.f)
-		{
-			/* 0x264B00 */
-			*movement_scale = shadowrun_unit->rage_movement_scale * race->movement_scale;
-		}
-		if (race->acceleration_scale > 0.f)
-		{
-			*acceleration_scale = race->acceleration_scale;
-		}
+		/* 0x264B00 */
+		*movement_scale = shadowrun_unit->rage_movement_scale;
 	}
 	/* port: the Shadowrun prototype's reflexes, which move the unit faster
 	(port/linux/game/shadowrun_tech.c) */

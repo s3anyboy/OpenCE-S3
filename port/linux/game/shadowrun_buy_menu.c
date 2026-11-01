@@ -373,6 +373,13 @@ static boolean shadowrun_unit_has_weapon(
 static void shadowrun_unit_give_weapon(
 	long unit_index,
 	long weapon_definition_index);
+static boolean shadowrun_weapon_fill(
+	long weapon_index,
+	boolean apply);
+static boolean shadowrun_unit_refill_weapon(
+	long unit_index,
+	long weapon_definition_index,
+	boolean apply);
 
 /* ---------- public code */
 
@@ -1095,6 +1102,19 @@ static short shadowrun_shop_purchase(
 				}
 				*made = TRUE;
 			}
+			/* port: one the unit has already is filled, for its price, if it is
+			short of rounds (a full one is not sold again) */
+			else if (weapon_definition_index != NONE &&
+				shadowrun_unit_refill_weapon(unit_index, weapon_definition_index, FALSE))
+			{
+				sound = _shadowrun_shop_sound_magazine;
+				if (apply)
+				{
+					shadowrun_unit_refill_weapon(unit_index, weapon_definition_index, TRUE);
+					shadowrun_player->money -= price;
+				}
+				*made = TRUE;
+			}
 			else
 			{
 				sound = _shadowrun_shop_sound_cannot_buy;
@@ -1557,8 +1577,9 @@ static short shadowrun_shop_tech_id(
 }
 
 /* 0x101F70: whether the player may buy the item: fewer than two grenades
-of its kind, a spell it does not know, a weapon it does not have (port: and
-not tech, nor an anti-magic grenade) */
+of its kind, a spell it does not know, a weapon it does not have (port: or
+one it has that is short of rounds; and not tech, nor an anti-magic
+grenade) */
 static boolean shadowrun_shop_available(
 	short local_player_index,
 	long unit_index,
@@ -1599,6 +1620,18 @@ static boolean shadowrun_shop_available(
 	else if (action < _shadowrun_shop_grenade)
 	{
 		result = TRUE;
+	}
+	else if (action == _shadowrun_shop_razorclaws || action == _shadowrun_shop_katana ||
+		(action >= _shadowrun_shop_first_weapon && action <= _shadowrun_shop_last_weapon))
+	{
+		/* port: a weapon it has, if it is short of rounds: it is filled */
+		short weapon = action == _shadowrun_shop_razorclaws ? _shadowrun_shop_weapon_razorclaws :
+			action == _shadowrun_shop_katana ? _shadowrun_shop_weapon_katana :
+			shadowrun_shop_weapons[action - _shadowrun_shop_first_weapon];
+
+		result = !shadowrun_shop_owned(local_player_index, unit_index, definition, item) ||
+			(definition && unit_index != NONE && definition->shop_weapons[weapon].index != NONE &&
+				shadowrun_unit_refill_weapon(unit_index, definition->shop_weapons[weapon].index, FALSE));
 	}
 	else
 	{
@@ -1670,21 +1703,68 @@ static void shadowrun_unit_give_weapon(
 		}
 		else
 		{
-			/* port: a weapon bought is full: each magazine loaded, and as many
-			rounds again as it carries (the executable's came with the
+			/* port: a weapon bought is full (the executable's came with the
 			definition's starting rounds) */
-			struct weapon_datum *weapon = weapon_get(weapon_index);
-
-			for (index = 0; index < definition->weapon.magazines.count && index < NUMBEROF(weapon->weapon.magazines); index++)
-			{
-				struct weapon_magazine_definition *magazine_definition = TAG_BLOCK_GET_ELEMENT(
-					&definition->weapon.magazines, index, struct weapon_magazine_definition);
-
-				weapon->weapon.magazines[index].rounds_loaded = magazine_definition->rounds_loaded_maximum;
-				weapon->weapon.magazines[index].rounds_total = magazine_definition->rounds_total_maximum;
-			}
+			shadowrun_weapon_fill(weapon_index, TRUE);
 		}
 	}
 
 	return;
+}
+
+/* port: a weapon filled: each magazine loaded, and as many rounds again as
+it carries. TRUE if it was short of any (with apply, it is filled) */
+static boolean shadowrun_weapon_fill(
+	long weapon_index,
+	boolean apply)
+{
+	struct weapon_datum *weapon = weapon_get(weapon_index);
+	struct weapon_definition *definition = weapon_definition_get(weapon->definition_index);
+	boolean short_of_rounds = FALSE;
+	short index;
+
+	for (index = 0; index < definition->weapon.magazines.count && index < NUMBEROF(weapon->weapon.magazines); index++)
+	{
+		struct weapon_magazine_definition *magazine_definition = TAG_BLOCK_GET_ELEMENT(
+			&definition->weapon.magazines, index, struct weapon_magazine_definition);
+		struct weapon_magazine *magazine = &weapon->weapon.magazines[index];
+
+		if (magazine->rounds_loaded < magazine_definition->rounds_loaded_maximum ||
+			magazine->rounds_total < magazine_definition->rounds_total_maximum)
+		{
+			short_of_rounds = TRUE;
+		}
+		if (apply)
+		{
+			magazine->rounds_loaded = magazine_definition->rounds_loaded_maximum;
+			magazine->rounds_total = magazine_definition->rounds_total_maximum;
+		}
+	}
+
+	return short_of_rounds;
+}
+
+/* port: the unit's weapons of the definition filled (shadowrun_weapon_fill):
+TRUE if any was short of rounds */
+static boolean shadowrun_unit_refill_weapon(
+	long unit_index,
+	long weapon_definition_index,
+	boolean apply)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+	boolean result = FALSE;
+	short index;
+
+	for (index = 0; index < MAXIMUM_WEAPONS_PER_UNIT; index++)
+	{
+		long weapon_index = unit->unit.weapon_object_indices[index];
+
+		if (weapon_index != NONE && object_get(weapon_index)->definition_index == weapon_definition_index &&
+			shadowrun_weapon_fill(weapon_index, apply))
+		{
+			result = TRUE;
+		}
+	}
+
+	return result;
 }
