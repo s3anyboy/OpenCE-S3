@@ -974,6 +974,32 @@ finished:
 	return;
 }
 
+/* port: where a crosshair just drawn sits, for the Shadowrun prototype's
+accuracy reticle (port/linux/game/shadowrun_hud.c), and its colour: the
+pixel its middle is in as it was drawn (its sprite's registration, its
+clip and display.fov's scale move it off the placement's point), else that
+point */
+static void crosshair_accuracy_place(
+	struct player_datum const *player,
+	struct hud_absolute_placement_definition const *absolute_placement,
+	struct hud_placement_definition const *placement,
+	boolean in_multiplayer,
+	real scale,
+	pixel32 color,
+	point2d *point,
+	pixel32 *accuracy_color)
+{
+	hud_calculate_point(player->local_player_index, absolute_placement, placement, NULL, in_multiplayer, scale, point);
+	if (hud_draw_last_left != SHORT_MAX)
+	{
+		point->x = (short)hud_draw_last_center_x;
+		point->y = (short)hud_draw_last_center_y;
+	}
+	*accuracy_color = color;
+
+	return;
+}
+
 static void crosshairs_draw(
 	struct player_datum *player,
 	long weapon_index,
@@ -1253,6 +1279,9 @@ static void crosshairs_draw(
 										crosshair_index,
 										item_index,
 										strip_path_name(tag_get_name(definition_indices[definition_index]))));
+								/* port: nothing drawn yet (hud_draw_last_left: the
+								accuracy reticle's crosshair, below) */
+								hud_draw_last_left = SHORT_MAX;
 								{
 									struct bitmap_group *bitmap_group = bitmap_group_get(verify_tag_reference(&element->crosshairs.bitmap));
 									short bitmap_index = sequence ?
@@ -1324,9 +1353,8 @@ static void crosshairs_draw(
 											accuracy reticle drawn about it */
 											if (!accuracy_placed)
 											{
-												hud_calculate_point(player->local_player_index, &absolute_placement,
-													&item->placement, NULL, in_multiplayer, scale, &accuracy_point);
-												accuracy_color = color;
+												crosshair_accuracy_place(player, &absolute_placement, &item->placement,
+													in_multiplayer, scale, color, &accuracy_point, &accuracy_color);
 												accuracy_placed = TRUE;
 											}
 										}
@@ -1356,6 +1384,13 @@ static void crosshairs_draw(
 												place */
 												state_index != _crosshair_state_zoom &&
 												!custom_edition_hud_warning(state_index));
+											/* port: and this one's, for the accuracy reticle */
+											if (!accuracy_placed && !custom_edition_hud_warning(state_index))
+											{
+												crosshair_accuracy_place(player, &absolute_placement, &placement,
+													in_multiplayer, scale, color, &accuracy_point, &accuracy_color);
+												accuracy_placed = TRUE;
+											}
 										}
 									}
 

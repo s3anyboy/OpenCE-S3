@@ -1548,6 +1548,9 @@ void hud_draw_static_element(
 
 /* port: the left of the last picture drawn (hud_draw.h) */
 short hud_draw_last_left;
+/* port: and its middle (hud_draw.h) */
+real hud_draw_last_center_x;
+real hud_draw_last_center_y;
 
 static void hud_draw_bitmap_internal(
 	void *meter_parameters,
@@ -1611,6 +1614,15 @@ static void hud_draw_bitmap_internal(
 			vertices[vertex_index].position.y = center_y +
 				(vertices[vertex_index].position.y - center_y) * reticle_scale;
 		}
+	}
+
+	/* port: its middle, as drawn (hud_draw_last_center_x) */
+	hud_draw_last_center_x = 0.f;
+	hud_draw_last_center_y = 0.f;
+	for (vertex_index = 0; vertex_index < 4; vertex_index++)
+	{
+		hud_draw_last_center_x += vertices[vertex_index].position.x / 4.f;
+		hud_draw_last_center_y += vertices[vertex_index].position.y / 4.f;
 	}
 
 	csmemset(&parameters, 0, sizeof(parameters));

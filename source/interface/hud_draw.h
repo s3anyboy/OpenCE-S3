@@ -149,6 +149,11 @@ void hud_draw_numbers(
 (hud_unit.c: the motion sensor's, which the text chat goes above:
 port/linux/game/network_chat.c) */
 extern short hud_draw_last_left;
+/* port: the middle of the last picture drawn, where it is on the screen (its
+reticle's scale applied): the Shadowrun prototype's bloom reticle is drawn
+about the crosshair's (port/linux/game/shadowrun_hud.c) */
+extern real hud_draw_last_center_x;
+extern real hud_draw_last_center_y;
 
 /* ---------- public code */
 
