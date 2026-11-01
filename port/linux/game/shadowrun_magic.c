@@ -1512,6 +1512,38 @@ static void shadowrun_strangle_cull_thorns(
 	return;
 }
 
+/* port: a unit strangle's thorns hold is stunned, as a plasma rifle's bolt
+stuns it (the map's bolt and strangle bolt: a stun of 1, its most 1, for
+0.15 seconds), its stun lasting the players' least stun time at the least,
+for as long as the thorns hold it and as long again after. Any unit (the
+game's own stuns only players, and only in multiplayer) */
+#define STRANGLE_STUN 1.f
+#define STRANGLE_STUN_SECONDS 0.15f
+
+static void shadowrun_strangle_stun(
+	long unit_index)
+{
+	struct unit_datum *unit = unit_try_and_get(unit_index);
+	struct game_globals *globals = scenario_get_game_globals();
+	short ticks = (short)(STRANGLE_STUN_SECONDS * TICKS_PER_SECOND + 0.5f);
+
+	if (!unit)
+	{
+		return;
+	}
+	if (globals && globals->player_information.count > 0)
+	{
+		struct game_globals_player_information *player_information = TAG_BLOCK_GET_ELEMENT(
+			&globals->player_information, 0, struct game_globals_player_information);
+
+		ticks = (short)MAX(ticks, (short)(player_information->minimum_stun_time * TICKS_PER_SECOND));
+	}
+	unit->unit.body_stun = MIN(unit->unit.body_stun + STRANGLE_STUN, 1.f);
+	unit->unit.body_stun_ticks = MAX(unit->unit.body_stun_ticks, ticks);
+
+	return;
+}
+
 /* 0x25C0B0: a biped out of a vehicle that a thorn touches (the thorn's sphere
 within the biped's, and the definition's reach past it) is hurt by the
 definition's damage, from the thorn (an enemy's, if one touches it), once
@@ -1557,6 +1589,11 @@ static void shadowrun_strangle_hurt(
 				break;
 			}
 		}
+	}
+	/* port: one the thorns hold is stunned, each tick they do */
+	if (thorn_index != NONE)
+	{
+		shadowrun_strangle_stun(unit_index);
 	}
 	if (thorn_index == NONE)
 	{

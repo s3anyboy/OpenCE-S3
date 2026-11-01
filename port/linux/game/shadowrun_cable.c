@@ -528,9 +528,9 @@ boolean shadowrun_cable_reeling(
 }
 
 /* FUN_0025B7D0: the cable fires, from the unit's body the way it aims, or,
-pressed while it is out (and a second after), lets go, keeping the tag's
-part of its velocity. (The executable also put the glider away: this
-build's glider is a tech of its own, which a unit has instead) */
+pressed while it is out, lets go, keeping the tag's part of its velocity.
+(The executable also put the glider away: this build's glider is a tech of
+its own, which a unit has instead) */
 boolean shadowrun_cable_fire(
 	long unit_index)
 {
@@ -549,9 +549,16 @@ boolean shadowrun_cable_fire(
 	{
 		return FALSE;
 	}
-	if (cable->cooldown_ticks > 0)
+	/* port: while it is out (travelling, reeling, hanging, pulling), the
+	button lets it go, and only a press after that fires it again: the
+	executable let go only within a second of its last pull, and fired
+	again from where the unit hung after that */
+	if (cable->state != _shadowrun_cable_state_none)
 	{
-		shadowrun_cable_stop(unit_index, definition->snap_distance);
+		if (cable->state != _shadowrun_cable_state_pulled)
+		{
+			shadowrun_cable_stop(unit_index, definition->snap_distance);
+		}
 		return TRUE;
 	}
 	shadowrun_cable_effect(&definition->fire_effect, unit_index);

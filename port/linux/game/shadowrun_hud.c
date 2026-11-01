@@ -450,6 +450,11 @@ static void shadowrun_hud_draw_accuracy_reticle(
 		crosshairs' are 0), as hud_draw.c reads a meter's; a quad's is its
 		opacity */
 		color = ((pixel32)(UNSIGNED_CHAR_MAX - (color >> 24)) << 24) | (color & 0x00FFFFFF);
+		/* port: the lines one pixel up and to the left of the point: the
+		crosshairs' own centre lines are drawn there (its sprite's
+		registration point is the pixel after its centre) */
+		x--;
+		y--;
 		/* (right, left) */
 		line.y0 = y;
 		line.y1 = (short)(y + 1);

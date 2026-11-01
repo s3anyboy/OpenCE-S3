@@ -157,14 +157,10 @@ void shadowrun_tech_update(
 		{
 			continue;
 		}
-		/* port: the glider stays out until the button is pressed again, as the
-		cable's toggle does (shadowrun_tech_cast): its ticks are not counted
-		down, so its 15 minutes do not take it off the unit */
-		if (shadowrun_unit->tech == _shadowrun_tech_glider_id)
-		{
-			shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_WEAR_TICKS;
-		}
-		else if (--shadowrun_unit->tech_ticks <= 0)
+		/* port: the glider, as the other techs, runs out (its twenty seconds of
+		flight: shadowrun_tech_cast), and is taken off the unit, which is seen
+		in first person again */
+		if (--shadowrun_unit->tech_ticks <= 0)
 		{
 			shadowrun_vision_clear(iterator.index);
 			shadowrun_gecko_end(iterator.index);
@@ -288,10 +284,9 @@ boolean shadowrun_tech_cast(
 			return TRUE;
 		}
 		shadowrun_glider_begin(unit_index);
-		shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_WEAR_TICKS;
-		/* port: and twenty seconds of flight, as a banshee flies
-		(shadowrun_glider_flight), whether the glider is put away before then
-		or not */
+		shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_JETPACK_TICKS;
+		/* port: and its twenty seconds of flight, as a banshee flies
+		(shadowrun_glider_flight), which end as it is put away or runs out */
 		shadowrun_unit->jetpack_ticks = SHADOWRUN_GLIDER_JETPACK_TICKS;
 		return TRUE;
 
@@ -1213,12 +1208,23 @@ static long shadowrun_glider_begin(
 	return scenery_index;
 }
 
-/* it taken off, and deleted */
+/* it taken off, and deleted: its flight ends, and the unit is no longer
+seen from behind (shadowrun_glider_worn) */
 static void shadowrun_glider_end(
 	long unit_index)
 {
 	struct object_iterator iterator;
 	struct object_datum *object;
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+
+	if (shadowrun_unit)
+	{
+		shadowrun_unit->jetpack_ticks = 0;
+		if (shadowrun_unit->tech == _shadowrun_tech_glider_id)
+		{
+			shadowrun_unit->tech_ticks = 0;
+		}
+	}
 
 	object_iterator_new(&iterator, _object_mask_scenery, 0);
 	while ((object = object_iterator_next(&iterator)) != NULL)
