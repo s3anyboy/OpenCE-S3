@@ -1917,6 +1917,9 @@ static boolean biped_jump(
 
 		if (jumped)
 		{
+			/* port: the Shadowrun prototype's jump worsens its accuracy (its
+			weapon bloom: port/linux/game/shadowrun_units.c) */
+			shadowrun_unit_accuracy_jump(biped_index);
 			biped->object.translational_velocity = jump_velocity;
 			SET_FLAG(biped->biped.flags, _biped_airborne_bit, TRUE);
 			biped->biped.jump_recovery_timer = 0;
@@ -3961,6 +3964,13 @@ static void biped_update_moving(
 				crouch_delta = -crouch_transition_velocity;
 				biped->biped.crouch -= crouch_transition_velocity;
 			}
+		}
+
+		/* port: and on the ground crouched, each tick, it betters it
+		(port/linux/game/shadowrun_units.c) */
+		if (biped->biped.crouch == 1.f && !TEST_FLAG(biped->biped.flags, _biped_airborne_bit))
+		{
+			shadowrun_unit_accuracy_crouch(biped_index);
 		}
 
 		if (fabs(crouch_delta) > 0.01f &&

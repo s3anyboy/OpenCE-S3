@@ -4575,6 +4575,112 @@ static int shadowrun_raw_unit_definition_convert(
 	return compiled ? 1 : -1;
 }
 
+/* port: an srwd (Shadowrun's weapon data) a map holds uncompiled, as it does
+an srud (above): the tag file's 0x600 bytes big-endian, its races' block with
+no address and its references with no tag (b30sr.map's, which invader built
+as opaque data), followed by its races' elements and its references' names.
+Compiled where it is: its references given their tags by name, its races
+their address, and every number made little-endian (it has no fields of
+fewer than four bytes the game reads: its accuracy, shadowrun_definitions.h,
+and its races' speeds). Returns 1 when it was compiled, 0 when it was not
+uncompiled, -1 when its bytes were not a tag file's (its references and
+races then emptied) */
+#define SHADOWRUN_WEAPON_DATA_GROUP_TAG 'srwd'
+#define SHADOWRUN_WEAPON_DATA_GROUP_TAG_BYTES 0x64777273UL
+#define SHADOWRUN_WEAPON_DATA_BYTES 0x600
+#define SHADOWRUN_WEAPON_DATA_RACES_OFFSET 0x500
+#define SHADOWRUN_WEAPON_DATA_SMARTLINKED_OFFSET 0x50C
+#define SHADOWRUN_WEAPON_DATA_RACE_BYTES 0x600
+static uint16_t const shadowrun_weapon_data_reference_offsets[] = { 0x200, 0x210 };
+
+static int shadowrun_raw_weapon_data_convert(
+	uint8_t *tag_data,
+	uint32_t tag_data_bytes,
+	uint32_t tag_data_address,
+	uint32_t definition_offset)
+{
+	uint8_t *definition;
+	uint32_t position;
+	uint32_t races_offset = 0;
+	int32_t race_count;
+	int compiled = 1;
+	size_t field;
+	uint32_t word;
+
+	if (!range_fits(definition_offset, SHADOWRUN_WEAPON_DATA_BYTES, tag_data_bytes))
+	{
+		return 0;
+	}
+	definition = tag_data + definition_offset;
+	/* (uncompiled: its smartlinked reference names its group the tag file's
+	way round, and has no tag) */
+	if (!(read_u32(definition + SHADOWRUN_WEAPON_DATA_SMARTLINKED_OFFSET) == SHADOWRUN_WEAPON_DATA_GROUP_TAG_BYTES &&
+		read_u32(definition + SHADOWRUN_WEAPON_DATA_SMARTLINKED_OFFSET + 12) == 0xFFFFFFFFUL))
+	{
+		return 0;
+	}
+	position = definition_offset + SHADOWRUN_WEAPON_DATA_BYTES;
+	/* its references, its races (then their names, of which they have none),
+	and its smartlinked reference, in the tag file's order */
+	for (field = 0; compiled && field < sizeof(shadowrun_weapon_data_reference_offsets) / sizeof(shadowrun_weapon_data_reference_offsets[0]); field++)
+	{
+		compiled = shadowrun_raw_reference_convert(tag_data, tag_data_bytes, tag_data_address,
+			definition + shadowrun_weapon_data_reference_offsets[field], &position);
+	}
+	race_count = (int32_t)swap_u32(read_u32(definition + SHADOWRUN_WEAPON_DATA_RACES_OFFSET));
+	if (compiled)
+	{
+		if (race_count < 0 || race_count > SHADOWRUN_MAXIMUM_RACES ||
+			!range_fits(position, (uint32_t)race_count * SHADOWRUN_WEAPON_DATA_RACE_BYTES, tag_data_bytes))
+		{
+			compiled = 0;
+		}
+		else
+		{
+			races_offset = position;
+			position += (uint32_t)race_count * SHADOWRUN_WEAPON_DATA_RACE_BYTES;
+			compiled = shadowrun_raw_reference_convert(tag_data, tag_data_bytes, tag_data_address,
+				definition + SHADOWRUN_WEAPON_DATA_SMARTLINKED_OFFSET, &position);
+		}
+	}
+	if (compiled)
+	{
+		/* its numbers (all but its references and its races' block), and its
+		races' */
+		for (word = 0; word < SHADOWRUN_WEAPON_DATA_RACES_OFFSET; word += 4)
+		{
+			if (word >= shadowrun_weapon_data_reference_offsets[0] && word < shadowrun_weapon_data_reference_offsets[1] + 16)
+			{
+				continue;
+			}
+			write_u32(definition + word, swap_u32(read_u32(definition + word)));
+		}
+		for (word = 0; word < (uint32_t)race_count * SHADOWRUN_WEAPON_DATA_RACE_BYTES; word += 4)
+		{
+			write_u32(tag_data + races_offset + word, swap_u32(read_u32(tag_data + races_offset + word)));
+		}
+		write_u32(definition + SHADOWRUN_WEAPON_DATA_RACES_OFFSET, (uint32_t)race_count);
+		write_u32(definition + SHADOWRUN_WEAPON_DATA_RACES_OFFSET + 4, race_count ? tag_data_address + races_offset : 0);
+		write_u32(definition + SHADOWRUN_WEAPON_DATA_RACES_OFFSET + 8, 0);
+	}
+	else
+	{
+		/* (not a tag file's bytes: no references, no races, no accuracy: its
+		flags, at 0xFC) */
+		for (field = 0; field < sizeof(shadowrun_weapon_data_reference_offsets) / sizeof(shadowrun_weapon_data_reference_offsets[0]); field++)
+		{
+			memset(definition + shadowrun_weapon_data_reference_offsets[field], 0, 12);
+			write_u32(definition + shadowrun_weapon_data_reference_offsets[field] + 12, 0xFFFFFFFFUL);
+		}
+		memset(definition + SHADOWRUN_WEAPON_DATA_RACES_OFFSET, 0, 12);
+		memset(definition + SHADOWRUN_WEAPON_DATA_SMARTLINKED_OFFSET, 0, 12);
+		write_u32(definition + SHADOWRUN_WEAPON_DATA_SMARTLINKED_OFFSET + 12, 0xFFFFFFFFUL);
+		write_u32(definition + 0xFC, 0);
+	}
+
+	return compiled ? 1 : -1;
+}
+
 enum cache_file_status shadowrun_cache_convert(
 	uint8_t *tag_data,
 	uint32_t tag_data_bytes,
@@ -4634,6 +4740,21 @@ enum cache_file_status shadowrun_cache_convert(
 					weapon_offset - tag_data_address) > 0)
 			{
 				report->weapons_converted++;
+			}
+			continue;
+		}
+		/* port: an srwd the map holds uncompiled, likewise */
+		if (read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) == SHADOWRUN_WEAPON_DATA_GROUP_TAG ||
+			read_u32(instance + TAG_INSTANCE_GROUP_OFFSET) == SHADOWRUN_WEAPON_DATA_GROUP_TAG_BYTES)
+		{
+			uint32_t data_offset = read_u32(instance + TAG_INSTANCE_ADDRESS_OFFSET);
+			int result = data_offset >= tag_data_address ?
+				shadowrun_raw_weapon_data_convert(tag_data, tag_data_bytes, tag_data_address,
+					data_offset - tag_data_address) : 0;
+
+			if (result > 0)
+			{
+				report->weapon_data_compiled++;
 			}
 			continue;
 		}

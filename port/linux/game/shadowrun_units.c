@@ -47,6 +47,9 @@ enum
 	has as unused, after its heat illumination (the reference's index,
 	0x370) */
 	SHADOWRUN_WEAPON_DATA_OFFSET = 0x364,
+	/* the ticks a unit's accuracy waits before it comes back, reset or
+	worsened by a jump, a crouch or a reload */
+	SHADOWRUN_ACCURACY_WAIT_TICKS = 7,
 };
 
 typedef char shadowrun_weapon_data_offset_assert[
@@ -102,6 +105,31 @@ static void shadowrun_unit_delete_head(
 	long unit_index);
 static void shadowrun_unit_head_update(
 	long unit_index);
+
+/* port: the srwd each of the prototype's weapons names (missionlet.map's),
+for a map's weapon of the same name that names none */
+static struct
+{
+	char const *weapon;
+	char const *data;
+} const shadowrun_weapon_data_names[] =
+{
+	{ "weapons\\assault rifle\\assault rifle", "shadowrunstuff\\weapondata\\assault" },
+	{ "weapons\\sniper rifle\\sniper rifle", "shadowrunstuff\\weapondata\\sniper" },
+	{ "weapons\\minigun\\minigun", "shadowrunstuff\\weapondata\\minigun" },
+	{ "weapons\\rocket launcher\\rocket launcher", "shadowrunstuff\\weapondata\\rocket" },
+	{ "weapons\\fletcher\\fletcher", "shadowrunstuff\\weapondata\\fletcher" },
+	{ "weapons\\shotgun\\shotgun", "shadowrunstuff\\weapondata\\shotgun" },
+	{ "shadowrunstuff\\razorclaws\\razorclaws", "shadowrunstuff\\weapondata\\razorclaws" },
+	{ "shadowrunstuff\\katana\\katana", "shadowrunstuff\\weapondata\\katana" },
+	{ "weapons\\rifle\\rifle", "shadowrunstuff\\weapondata\\rifle" },
+	{ "weapons\\pistol\\pistol", "shadowrunstuff\\weapondata\\pistol" },
+	{ "weapons\\troll minigun\\minigun", "shadowrunstuff\\weapondata\\troll minigun" },
+	{ "weapons\\spirit animal\\spirit animal", "weapons\\spirit animal\\spirit animal" },
+	{ "shadowrunstuff\\katana\\ninja_katana", "shadowrunstuff\\weapondata\\ninja_katana" },
+	{ "weapons\\fireball\\fireball", "shadowrunstuff\\weapondata\\default" },
+};
+#define NUMBER_OF_SHADOWRUN_WEAPON_DATA_NAMES ((short)(sizeof(shadowrun_weapon_data_names) / sizeof(shadowrun_weapon_data_names[0])))
 
 /* ---------- public code */
 
@@ -184,6 +212,7 @@ void shadowrun_tags_loaded(
 		struct tag_iterator iterator;
 		long tag_index;
 		long corrected = 0;
+		long linked = 0;
 
 		/* port: the map's group tags as this build reads one. A map stores a
 		group as the bytes of its name ('srud' is s r u d, 0x64757273 read
@@ -249,10 +278,38 @@ void shadowrun_tags_loaded(
 				reference->index = NONE;
 				corrected++;
 			}
+			/* port: one that names none is given the srwd the prototype's
+			own weapon of its name names (b30sr.map's weapons name none: its
+			guns would have no accuracy, its katanas no melee) */
+			if (reference->index == NONE)
+			{
+				char const *weapon_name = tag_get_name(tag_index);
+				short entry;
+
+				for (entry = 0; entry < NUMBER_OF_SHADOWRUN_WEAPON_DATA_NAMES; entry++)
+				{
+					if (weapon_name && !strcmp(weapon_name, shadowrun_weapon_data_names[entry].weapon))
+					{
+						long data_index = tag_loaded(SHADOWRUN_WEAPON_DATA_TAG, shadowrun_weapon_data_names[entry].data);
+
+						if (data_index != NONE)
+						{
+							reference->group_tag = SHADOWRUN_WEAPON_DATA_TAG;
+							reference->index = data_index;
+							linked++;
+						}
+						break;
+					}
+				}
+			}
 		}
 		if (corrected)
 		{
 			error(_error_silent, "shadowrun: %ld weapons named no Shadowrun weapon data", corrected);
+		}
+		if (linked)
+		{
+			error(_error_silent, "shadowrun: %ld weapons given the prototype's Shadowrun weapon data by name", linked);
 		}
 	}
 
@@ -357,6 +414,8 @@ void shadowrun_unit_new(
 		shadowrun_unit->rage_damage_scale = 1.f;
 		shadowrun_unit->rage_movement_scale = 1.f;
 		shadowrun_unit->rage_turning_scale = 1.f;
+		/* its accuracy reset (FUN_0025F120, as unit_new's) */
+		shadowrun_unit->accuracy_wait_ticks = SHADOWRUN_ACCURACY_WAIT_TICKS;
 		/* port: the cable's state (bipeds.c's 0x10B8: the executable keeps it
 		in the biped's datum) */
 		shadowrun_cable_new(unit_index);
@@ -1226,6 +1285,190 @@ void shadowrun_unit_cast_feedback(
 	return;
 }
 
+/* ---------- the prototype's weapon bloom */
+
+/* the srwd of the unit's weapon if it has accuracy, or NULL */
+static struct shadowrun_weapon_data *shadowrun_unit_accuracy_data(
+	long unit_index)
+{
+	struct shadowrun_weapon_data *data = shadowrun_unit_weapon_data_get(unit_index);
+
+	return data && TEST_FLAG(data->flags, SHADOWRUN_WEAPON_DATA_ACCURACY_BIT) ? data : NULL;
+}
+
+/* port: a melee weapon is one whose own srwd has no accuracy (the katanas',
+razorclaws', the spirit animal's: their srwds name none; every gun's do) */
+boolean shadowrun_unit_melee_weapon(
+	long unit_index)
+{
+	struct unit_datum *unit = shadowrun_globals.map_loaded ? unit_try_and_get(unit_index) : NULL;
+	long weapon_index = unit && unit->unit.current_weapon_index != NONE ?
+		unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index) : NONE;
+	struct object_datum *weapon = weapon_index != NONE ? object_try_and_get_and_verify_type(weapon_index, _object_mask_weapon) : NULL;
+	long data_index = weapon ?
+		shadowrun_weapon_data_reference(weapon_definition_get(weapon->definition_index))->index : NONE;
+	struct shadowrun_weapon_data *data = data_index != NONE ? tag_get(SHADOWRUN_WEAPON_DATA_TAG, data_index) : NULL;
+
+	return data && !TEST_FLAG(data->flags, SHADOWRUN_WEAPON_DATA_ACCURACY_BIT);
+}
+
+/* 0x25F120: a unit's accuracy reset (a weapon picked up, players.c; and
+unit_new's), the least, waiting before it comes back */
+void shadowrun_unit_accuracy_reset(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+
+	if (shadowrun_unit)
+	{
+		shadowrun_unit->accuracy = 0.f;
+		shadowrun_unit->accuracy_unitized = 0.f;
+		shadowrun_unit->accuracy_wait_ticks = SHADOWRUN_ACCURACY_WAIT_TICKS;
+	}
+
+	return;
+}
+
+/* what an event adds to the unit's accuracy (its srwd's), and its wait */
+static void shadowrun_unit_accuracy_add(
+	long unit_index,
+	short field)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct shadowrun_weapon_data *data = shadowrun_unit ? shadowrun_unit_accuracy_data(unit_index) : NULL;
+
+	if (data)
+	{
+		switch (field)
+		{
+		case 0: shadowrun_unit->accuracy += data->accuracy_jump; break;
+		case 1: shadowrun_unit->accuracy += data->accuracy_crouch; break;
+		default: shadowrun_unit->accuracy += data->accuracy_reload; break;
+		}
+		shadowrun_unit->accuracy_wait_ticks = SHADOWRUN_ACCURACY_WAIT_TICKS;
+	}
+
+	return;
+}
+
+/* 0x25F210: a jump (bipeds.c, biped_jump) */
+void shadowrun_unit_accuracy_jump(
+	long unit_index)
+{
+	shadowrun_unit_accuracy_add(unit_index, 0);
+	return;
+}
+
+/* 0x25F2D0: each tick a biped on the ground is crouched (bipeds.c) */
+void shadowrun_unit_accuracy_crouch(
+	long unit_index)
+{
+	shadowrun_unit_accuracy_add(unit_index, 1);
+	return;
+}
+
+/* 0x25F390: a reload (weapons.c's, of the weapon's holder) */
+void shadowrun_unit_accuracy_reload(
+	long unit_index)
+{
+	if (unit_index != NONE)
+	{
+		shadowrun_unit_accuracy_add(unit_index, 2);
+	}
+	return;
+}
+
+/* weapons.c's fire (0x176700): the error of a shot (a trigger's error
+picks between the lower and upper bound, as it does a trigger's own), its
+bounds the inaccurate ones and the accurate ones as the unit's accuracy is
+unitized (as it was last tick: 0x188460's lerps); the shot worsens it
+(0x25F170). FALSE where the unit's weapon has no accuracy (the trigger's
+own error is used) */
+boolean shadowrun_unit_accuracy_error(
+	long unit_index,
+	real fraction,
+	real *error)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct shadowrun_weapon_data *data = shadowrun_unit ? shadowrun_unit_accuracy_data(unit_index) : NULL;
+	boolean result = FALSE;
+
+	if (data)
+	{
+		real unitized = shadowrun_unit->accuracy_unitized;
+		real lower_bound = unitized * data->accurate_error_angle_lower_bound +
+			(1.f - unitized) * data->inaccurate_error_angle_lower_bound;
+		real upper_bound = unitized * data->accurate_error_angle_upper_bound +
+			(1.f - unitized) * data->inaccurate_error_angle_upper_bound;
+
+		shadowrun_unit->accuracy += data->accuracy_per_shot;
+		*error = (1.f - fraction) * lower_bound + fraction * upper_bound;
+		result = TRUE;
+	}
+
+	return result;
+}
+
+/* each tick, before the unit's update (units.c's unit update): its
+accuracy comes back, less while it moves (no lower than the moving
+minimum, no more than the moving maximum), its glider scaling each; then
+unitized for its shots and the reticle */
+static void shadowrun_unit_accuracy_update(
+	long unit_index)
+{
+	struct unit_datum *unit = unit_get(unit_index);
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct shadowrun_weapon_data *data = shadowrun_unit_accuracy_data(unit_index);
+
+	if (!data)
+	{
+		shadowrun_unit->accuracy_active = FALSE;
+	}
+	else
+	{
+		struct shadowrun_unit_definition *definition = shadowrun_unit_definition_player(unit_index);
+		struct shadowrun_tech2_definition *tech2 = definition && definition->tech2.index != NONE ?
+			tag_get(SHADOWRUN_TECH2_DEFINITION_TAG, definition->tech2.index) : NULL;
+		/* (FUN_0025BAE0: the biped glides) */
+		boolean gliding = tech2 && unit->object.type == _object_type_biped && shadowrun_unit_jetpack(unit_index);
+		real speed = magnitude3d(&unit->object.translational_velocity) * TICKS_PER_SECOND;
+		real range = data->accuracy_maximum - data->accuracy_minimum;
+
+		shadowrun_unit->accuracy_active = TRUE;
+		if (speed > 0.01f)
+		{
+			if (shadowrun_unit->accuracy > data->accuracy_moving_maximum)
+			{
+				shadowrun_unit->accuracy = data->accuracy_moving_maximum;
+			}
+			if (shadowrun_unit->accuracy > data->accuracy_moving_minimum)
+			{
+				real change = speed * data->accuracy_movement_scale;
+
+				if (gliding)
+				{
+					change *= tech2->glider_accuracy_movement_scale;
+				}
+				shadowrun_unit->accuracy = MAX(shadowrun_unit->accuracy + change, data->accuracy_moving_minimum);
+			}
+		}
+		if (shadowrun_unit->accuracy_wait_ticks < 1)
+		{
+			shadowrun_unit->accuracy += data->accuracy_recovery *
+				(gliding ? tech2->glider_accuracy_recovery_scale : 1.f);
+		}
+		else
+		{
+			shadowrun_unit->accuracy_wait_ticks--;
+		}
+		shadowrun_unit->accuracy = PIN(shadowrun_unit->accuracy, data->accuracy_minimum, data->accuracy_maximum);
+		shadowrun_unit->accuracy_unitized = range != 0.f ?
+			(shadowrun_unit->accuracy - data->accuracy_minimum) / range : 1.f;
+	}
+
+	return;
+}
+
 /* each tick (0x2604A0, unit_update's): mana, the spells and the waits */
 void shadowrun_unit_update(
 	long unit_index)
@@ -1237,6 +1480,8 @@ void shadowrun_unit_update(
 	{
 		short index;
 
+		/* port: its weapon's bloom */
+		shadowrun_unit_accuracy_update(unit_index);
 		/* port: a player's anti-magic grenades, its third type (shadowrun_tech.c) */
 		shadowrun_unit_grenades_update(unit_index);
 		if (shadowrun_unit->undead)

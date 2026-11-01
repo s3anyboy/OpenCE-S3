@@ -84,7 +84,16 @@ struct shadowrun_hologram
 	/* the actor's own orders before the port's: a hologram plays at fighting,
 	and deals no damage (shadowrun_hologram_active) */
 	boolean playfighting;
+	/* port: the blue nav point over its head, its caster's team's (NONE: none
+	shown), and the unit it is over */
+	short nav_point_team_index;
+	long unit_index;
 };
+
+/* port: the hologram's nav point: the HUD globals' blue one ("default"; its
+red is "default_red"), this high over the unit's origin (world units) */
+#define SHADOWRUN_HOLOGRAM_NAV_POINT "default"
+#define SHADOWRUN_HOLOGRAM_NAV_POINT_OFFSET 0.6f
 
 static struct shadowrun_hologram shadowrun_holograms[MAXIMUM_SHADOWRUN_HOLOGRAMS];
 static short shadowrun_hologram_count;
@@ -104,7 +113,7 @@ static void shadowrun_holograms_clear(
 static void shadowrun_holograms_update(
 	void);
 static void shadowrun_hologram_remove(
-	long *actor_index);
+	struct shadowrun_hologram *hologram);
 static void shadowrun_vision_clear(
 	long unit_index);
 static void shadowrun_vision_mark(
@@ -325,10 +334,25 @@ boolean shadowrun_tech_cast(
 				if (shadowrun_hologram_count < MAXIMUM_SHADOWRUN_HOLOGRAMS)
 				{
 					struct shadowrun_hologram *hologram = &shadowrun_holograms[shadowrun_hologram_count++];
+					struct actor_datum *actor = actor_try_and_get(actor_index);
 
 					hologram->actor_index = actor_index;
 					hologram->owner_unit_index = unit_index;
 					hologram->end_time = game_time_get() + SHADOWRUN_HOLOGRAM_TICKS;
+					hologram->unit_index = actor ? actor->meta.unit_index : NONE;
+					hologram->nav_point_team_index = NONE;
+					/* port: a blue nav point over its head, for its caster's team */
+					if (hologram->unit_index != NONE)
+					{
+						short nav_index = find_nav_point(SHADOWRUN_HOLOGRAM_NAV_POINT);
+
+						if (nav_index != NONE)
+						{
+							hologram->nav_point_team_index = object_get(unit_index)->object.owner_team_index;
+							hud_activate_team_nav_point_with_object(nav_index, hologram->nav_point_team_index,
+								hologram->unit_index, SHADOWRUN_HOLOGRAM_NAV_POINT_OFFSET);
+						}
+					}
 				}
 			}
 			shadowrun_unit->tech_ticks = SHADOWRUN_HOLOGRAM_TICKS;
@@ -1539,10 +1563,17 @@ boolean shadowrun_hologram_active(
 /* a hologram taken out of the world: its actor and its unit deleted (not
 killed: a kill leaves a body, and a hologram leaves nothing) */
 static void shadowrun_hologram_remove(
-	long *actor_index)
+	struct shadowrun_hologram *hologram)
 {
+	long *actor_index = &hologram->actor_index;
 	struct actor_datum *actor = actor_try_and_get(*actor_index);
 
+	/* port: and its nav point taken down */
+	if (hologram->nav_point_team_index != NONE && hologram->unit_index != NONE)
+	{
+		hud_deactivate_team_nav_point_with_object(hologram->nav_point_team_index, hologram->unit_index);
+		hologram->nav_point_team_index = NONE;
+	}
 	if (actor)
 	{
 		long unit_index = actor->meta.unit_index;
@@ -1578,8 +1609,12 @@ static void shadowrun_holograms_update(
 		}
 		if (gone)
 		{
+			/* port: removed before its place is given the last one (the
+			pointer is that place: it removed the last one's actor) */
+			struct shadowrun_hologram removed = *hologram;
+
 			shadowrun_holograms[index] = shadowrun_holograms[--shadowrun_hologram_count];
-			shadowrun_hologram_remove(&hologram->actor_index);
+			shadowrun_hologram_remove(&removed);
 		}
 	}
 
@@ -1598,10 +1633,10 @@ static void shadowrun_holograms_clear(
 
 		if (hologram->owner_unit_index == unit_index)
 		{
-			long actor_index = hologram->actor_index;
+			struct shadowrun_hologram removed = *hologram;
 
 			shadowrun_holograms[index] = shadowrun_holograms[--shadowrun_hologram_count];
-			shadowrun_hologram_remove(&actor_index);
+			shadowrun_hologram_remove(&removed);
 		}
 	}
 

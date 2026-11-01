@@ -77,6 +77,36 @@ boolean shadowrun_unit_jetpack(
 are 30% faster: units.c) */
 boolean shadowrun_unit_animation_extra_frame(
 	long unit_index);
+/* port: the prototype's weapon bloom, by the srwd of the unit's weapon
+(shadowrun_units.c): its accuracy reset (a weapon picked up: players.c),
+worsened by a jump, a crouch (each tick it is crouched: bipeds.c) and a
+reload (weapons.c); and a shot's error (weapons.c: TRUE if the unit's
+weapon has accuracy, *error its angle, the shot's worsening it), given the
+trigger's error fraction */
+/* port: whether the unit holds a melee weapon (its katanas', razorclaws',
+the spirit animal's: a weapon whose own srwd has no accuracy), whose fire
+control strikes as the melee control does (player_control.c) */
+boolean shadowrun_unit_melee_weapon(
+	long unit_index);
+void shadowrun_unit_accuracy_reset(
+	long unit_index);
+void shadowrun_unit_accuracy_jump(
+	long unit_index);
+void shadowrun_unit_accuracy_crouch(
+	long unit_index);
+void shadowrun_unit_accuracy_reload(
+	long unit_index);
+boolean shadowrun_unit_accuracy_error(
+	long unit_index,
+	real fraction,
+	real *error);
+/* port: the accuracy's reticle (shadowrun_hud.c): four lines about the
+crosshair's point, apart as the local player's unit is inaccurate */
+void shadowrun_hud_draw_accuracy(
+	long unit_index,
+	short x,
+	short y,
+	pixel32 color);
 short shadowrun_unit_grenade_count(
 	long unit_index,
 	short grenade_type,

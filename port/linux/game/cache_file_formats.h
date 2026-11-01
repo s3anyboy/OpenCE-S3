@@ -611,6 +611,8 @@ struct shadowrun_conversion_report
 	file's, left with no references and no races */
 	int32_t unit_definitions_compiled;
 	int32_t unit_definitions_emptied;
+	/* port: the uncompiled srwds compiled (shadowrun_cache_convert) */
+	int32_t weapon_data_compiled;
 };
 
 /* Whether a Shadowrun prototype map's tag data is `tag_header`'s: its tag

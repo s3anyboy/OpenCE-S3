@@ -61,6 +61,7 @@ symbols in this file:
 #include "game/game_globals.h"
 #include "game/players.h"
 #include "interface/hud_draw.h"
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_hud.c */
 #include "interface/hud.h"
 #include "interface/hud_definitions.h"
 #include "interface/hud_weapon.h"
@@ -982,6 +983,9 @@ static void crosshairs_draw(
 	long return_eip = get_return_eip();
 	long stack_buffer[STACK_BUFFER_LENGTH];
 	boolean firing_active = FALSE;
+	/* port: the Shadowrun prototype's accuracy reticle, drawn once about the
+	aim crosshair (port/linux/game/shadowrun_hud.c) */
+	boolean accuracy_drawn = FALSE;
 
 	/* port: project the passenger's shot once for all pieces of its reticle */
 	if (!passenger_camera_reticle_begin(player->local_player_index, weapon_index))
@@ -1341,6 +1345,18 @@ static void crosshairs_draw(
 												state_index != _crosshair_state_zoom &&
 												!custom_edition_hud_warning(state_index));
 										}
+									}
+									/* port: the Shadowrun prototype's accuracy reticle, about
+									the aim crosshair's point, in its colour (its weapon bloom,
+									game_engine.c's FUN_000EF590) */
+									if (state_index == _crosshair_state_aim && !accuracy_drawn)
+									{
+										point2d point;
+
+										accuracy_drawn = TRUE;
+										hud_calculate_point(player->local_player_index, &absolute_placement, &item->placement,
+											NULL, in_multiplayer, scale, &point);
+										shadowrun_hud_draw_accuracy(unit_index, point.x, point.y, color);
 									}
 								}
 							}

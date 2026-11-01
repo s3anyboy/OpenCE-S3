@@ -28,6 +28,7 @@ srud's: this is a plainer one, of the same facts.
 #include "units/units.h"
 #include "shadowrun_units.h"
 #include "shadowrun_tech.h"
+#include "shadowrun.h"
 
 #include <stdio.h>
 
@@ -47,6 +48,10 @@ enum
 	SHADOWRUN_HUD_FAILURE_TICKS = 30,
 	/* the gap between the tech and the spell on the one line */
 	SHADOWRUN_HUD_TECH_GAP = 12,
+	/* the accuracy reticle's lines' length, and their gap from the
+	crosshair's point at the least accuracy (FUN_000EF590's 15 and 20) */
+	SHADOWRUN_HUD_ACCURACY_LENGTH = 15,
+	SHADOWRUN_HUD_ACCURACY_SPREAD = 20,
 	/* draw_string.c's justifications (its enum is its own) */
 	_shadowrun_hud_text_left = 0,
 	_shadowrun_hud_text_right,
@@ -334,6 +339,53 @@ text changes). Bright while it runs, grey otherwise */
 
 	/* the buy menu, if it is open (shadowrun_buy_menu.c) */
 	shadowrun_buy_menu_draw(local_player_index);
+
+	return;
+}
+
+/* game_engine.c FUN_000EF590: the prototype's accuracy, about the aim
+crosshair's point (x, y) in its colour: four lines of 15 pixels, right, left,
+below and above it, apart by 20 pixels as the unit is least accurate (none
+as it is most), and its weapon's srwd's gap more. A biped's alone, with an
+srud, whose weapon has accuracy */
+void shadowrun_hud_draw_accuracy(
+	long unit_index,
+	short x,
+	short y,
+	pixel32 color)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct unit_datum *unit = shadowrun_unit ? unit_get(unit_index) : NULL;
+
+	if (unit && unit->object.type == _object_type_biped && shadowrun_unit->accuracy_active &&
+		shadowrun_unit_definition_player(unit_index))
+	{
+		struct shadowrun_weapon_data *data = shadowrun_unit_weapon_data_get(unit_index);
+		real gap = (1.f - PIN(shadowrun_unit->accuracy_unitized, 0.f, 1.f)) * SHADOWRUN_HUD_ACCURACY_SPREAD +
+			(data ? data->accuracy_reticle_gap : 0.f);
+		short near_gap = (short)gap;
+		short far_gap = (short)(gap + SHADOWRUN_HUD_ACCURACY_LENGTH);
+		rectangle2d line;
+
+		/* (right, left) */
+		line.y0 = y;
+		line.y1 = (short)(y + 1);
+		line.x0 = (short)(x + near_gap);
+		line.x1 = (short)(x + far_gap);
+		draw_quad(&line, color);
+		line.x0 = (short)(x - far_gap);
+		line.x1 = (short)(x - near_gap);
+		draw_quad(&line, color);
+		/* (below, above) */
+		line.x0 = x;
+		line.x1 = (short)(x + 1);
+		line.y0 = (short)(y + near_gap);
+		line.y1 = (short)(y + far_gap);
+		draw_quad(&line, color);
+		line.y0 = (short)(y - far_gap);
+		line.y1 = (short)(y - near_gap);
+		draw_quad(&line, color);
+	}
 
 	return;
 }

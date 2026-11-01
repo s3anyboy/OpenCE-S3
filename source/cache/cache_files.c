@@ -470,6 +470,12 @@ static byte *cache_files_tags_place(
 					scenario_name, (long)(conversion.unit_definitions_compiled + conversion.unit_definitions_emptied),
 					(long)conversion.unit_definitions_compiled, (long)conversion.unit_definitions_emptied);
 			}
+			/* port: and its Shadowrun weapon data (shadowrun_raw_weapon_data_convert) */
+			if (conversion.weapon_data_compiled)
+			{
+				error(_error_silent, "'%s' held %ld Shadowrun weapon data uncompiled, compiled where they are",
+					scenario_name, (long)conversion.weapon_data_compiled);
+			}
 		}
 	}
 

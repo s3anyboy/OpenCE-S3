@@ -3815,6 +3815,9 @@ static boolean player_handle_weapon_swap(
 				player->local_player_index,
 				weapon->definition_index);
 			player_network_picked_up(player, player_index, _network_pickup_weapon, weapon->definition_index, 0);
+			/* port: a weapon picked up resets its accuracy (the Shadowrun
+			prototype's bloom: port/linux/game/shadowrun_units.c) */
+			shadowrun_unit_accuracy_reset(player->unit_index);
 			player_control_unzoom(player->unit_index);
 		}
 		result = TRUE;
@@ -3831,6 +3834,9 @@ static boolean player_handle_weapon_swap(
 				player->local_player_index,
 				weapon->definition_index);
 			player_network_picked_up(player, player_index, _network_pickup_weapon, weapon->definition_index, 0);
+			/* port: a weapon picked up resets its accuracy (the Shadowrun
+			prototype's bloom: port/linux/game/shadowrun_units.c) */
+			shadowrun_unit_accuracy_reset(player->unit_index);
 		}
 		break;
 	}

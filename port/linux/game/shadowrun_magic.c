@@ -321,6 +321,8 @@ static void shadowrun_strangle_update(
 	long unit_index);
 static void shadowrun_thorns_wither(
 	void);
+static void shadowrun_strangle_hurt(
+	long unit_index);
 static void shadowrun_summons_update(
 	long unit_index);
 static long shadowrun_summon_elemental_variant(
@@ -741,6 +743,7 @@ void shadowrun_spells_update(
 	shadowrun_resurrection_update(unit_index);
 	shadowrun_summons_update(unit_index);
 	shadowrun_strangle_update(unit_index);
+	shadowrun_strangle_hurt(unit_index);
 	shadowrun_trees_update(unit_index);
 	shadowrun_smoke_update(unit_index);
 	shadowrun_spirit_animal_update(unit_index);
@@ -1490,6 +1493,88 @@ static void shadowrun_strangle_cull_thorns(
 		csmemmove(&globals->thorn_end_times[0], &globals->thorn_end_times[1],
 			(globals->thorn_count - 1) * sizeof(globals->thorn_end_times[0]));
 		globals->thorn_count--;
+	}
+
+	return;
+}
+
+/* 0x25C0B0: a biped out of a vehicle that a thorn touches (the thorn's sphere
+within the biped's, and the definition's reach past it) is hurt by the
+definition's damage, from the thorn (an enemy's, if one touches it), once
+each the definition's ticks. port: the thorns are strangle's own list (the
+executable asked each scenery near it whether its definition's flag made it
+one); the definition is the biped's, as the executable's, which a unit of a
+map that names it none takes from the map's (shadowrun_magic2_get) */
+static void shadowrun_strangle_hurt(
+	long unit_index)
+{
+	struct biped_datum *biped = biped_try_and_get(unit_index);
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+	struct shadowrun_magic2_definition *magic = shadowrun_magic2_get(unit_index);
+	struct shadowrun_magic_globals *globals = shadowrun_magic_globals;
+	long thorn_index = NONE;
+	long index;
+
+	if (!biped || !shadowrun_unit || !magic || biped->object.parent_object_index != NONE)
+	{
+		return;
+	}
+	for (index = 0; index < globals->thorn_count; index++)
+	{
+		struct object_datum *thorn = object_try_and_get_and_verify_type(globals->thorn_indices[index], NONE);
+		real reach;
+
+		if (!thorn)
+		{
+			continue;
+		}
+		reach = thorn->object.bounding_sphere_radius + biped->object.bounding_sphere_radius + magic->strangle_damage_radius;
+		if (distance_squared3d(&thorn->object.bounding_sphere_center, &biped->object.bounding_sphere_center) <=
+			reach * reach)
+		{
+			if (thorn_index == NONE)
+			{
+				thorn_index = globals->thorn_indices[index];
+			}
+			/* (an enemy's thorn hurts it rather than its own team's) */
+			if (thorn->object.owner_team_index != biped->object.owner_team_index)
+			{
+				thorn_index = globals->thorn_indices[index];
+				break;
+			}
+		}
+	}
+	if (thorn_index == NONE)
+	{
+		if (shadowrun_unit->strangle_hurt_ticks > 0)
+		{
+			shadowrun_unit->strangle_hurt_ticks--;
+		}
+	}
+	else if (shadowrun_unit->strangle_hurt_ticks <= 0)
+	{
+		if (magic->strangle_damage.index != NONE)
+		{
+			struct object_datum *thorn = object_get(thorn_index);
+			struct damage_data damage;
+
+			damage_data_new(&damage, magic->strangle_damage.index);
+			SET_FLAG(damage.flags, _damage_area_of_effect_bit, TRUE);
+			damage.owner_object_index = thorn_index;
+			damage.owner_team_index = thorn->object.owner_team_index;
+			damage.location = thorn->object.location;
+			damage.origin = thorn->object.bounding_sphere_center;
+			damage.epicenter = thorn->object.bounding_sphere_center;
+			vector_from_points3d(&thorn->object.bounding_sphere_center, &biped->object.bounding_sphere_center,
+				&damage.direction);
+			damage.material_type = NONE;
+			object_cause_damage(&damage, unit_index, NONE, NONE, NONE, NULL);
+		}
+		shadowrun_unit->strangle_hurt_ticks = magic->strangle_damage_ticks;
+	}
+	else
+	{
+		shadowrun_unit->strangle_hurt_ticks--;
 	}
 
 	return;

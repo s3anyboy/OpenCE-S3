@@ -233,6 +233,7 @@ symbols in this file:
 #include "units/unit_definitions.h"
 #include "units/units.h"
 #include "shadowrun_tech.h" /* port: port/linux/game/shadowrun_tech.c */
+#include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c */
 
 #ifdef HALO_PORT_MAXIMUM_NETWORK_PLAYERS
 #include "bitmaps/bitmap_group.h"
@@ -1771,6 +1772,9 @@ static void weapon_magazine_start_reload(
 						magazine->original_time = magazine->state_timer =
 							(short)MAX(1, (long)(magazine->state_timer * scale));
 					}
+					/* and the reload worsens its holder's accuracy (its bloom:
+					port/linux/game/shadowrun_units.c) */
+					shadowrun_unit_accuracy_reload(holder_index);
 				}
 			}
 
@@ -2604,7 +2608,13 @@ static void trigger_create_projectiles(
 						weapon->weapon.primary_trigger :
 						trigger->error;
 
-					error= (1.0f-fraction)*trigger_definition->projectile_error_angle_lower_bound + fraction*trigger_definition->projectile_error_angle_upper_bound;
+					/* port: on the Shadowrun prototype's maps, by its holder's
+					accuracy where its srwd has it, which the shot worsens (its
+					bloom: port/linux/game/shadowrun_units.c) */
+					if (!unit || !shadowrun_unit_accuracy_error(owner_object_index, fraction, &error))
+					{
+						error= (1.0f-fraction)*trigger_definition->projectile_error_angle_lower_bound + fraction*trigger_definition->projectile_error_angle_upper_bound;
+					}
 				}
 
 				if (!TEST_FLAG(trigger_definition->flags, _weapon_trigger_use_error_when_unzoomed_bit) ||

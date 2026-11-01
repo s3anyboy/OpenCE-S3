@@ -829,6 +829,18 @@ static void handle_one_player_input(
 		}
 	}
 
+	/* port: on the Shadowrun prototype's maps a melee weapon's (its katanas',
+	razorclaws') fire control strikes, as the melee control does, and fires
+	nothing (port/linux/game/shadowrun_units.c) */
+	if (TEST_FLAG(input.unit_control_flags, _unit_control_weapon_primary_trigger_bit) &&
+		player->unit_index != NONE &&
+		shadowrun_unit_melee_weapon(player->unit_index))
+	{
+		SET_FLAG(input.unit_control_flags, _unit_control_use_equipment_bit, TRUE);
+		SET_FLAG(input.unit_control_flags, _unit_control_weapon_primary_trigger_bit, FALSE);
+		input.primary_trigger = 0.f;
+	}
+
 	player->control_flags = input.unit_control_flags;
 	player->throttle = input.throttle;
 	player->primary_trigger = input.primary_trigger;

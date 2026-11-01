@@ -261,7 +261,19 @@ definition (0x10F0) */
 	(shadowrun_tech.c, units.c's unit_animation_update) */
 	real reflexes_animation_fraction;
 	boolean reflexes_animation_extra_frame;
-	byte pad_reflexes[3];
+	/* the ticks before strangle's thorns hurt the biped again (0x10D9:
+	shadowrun_magic.c, shadowrun_strangle_hurt) */
+	char strangle_hurt_ticks;
+	byte pad_reflexes[2];
+	/* the prototype's weapon bloom, by its weapon's srwd (0x758, 0x754, 0x75C,
+	0x760: shadowrun_units.c, shadowrun_unit_accuracy_update): its accuracy,
+	that unitized (1 the most accurate), the ticks before it comes back, and
+	whether its weapon has any */
+	real accuracy;
+	real accuracy_unitized;
+	long accuracy_wait_ticks;
+	boolean accuracy_active;
+	byte pad_accuracy[3];
 };
 
 /* a player's (in its datum) */

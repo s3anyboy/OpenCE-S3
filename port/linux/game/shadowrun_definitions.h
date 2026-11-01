@@ -61,6 +61,9 @@ enum
 	/* the races a unit definition has (and the levels of each spell) */
 	MAXIMUM_SHADOWRUN_RACES = 5,
 
+	/* an srwd's flags: its accuracy (the prototype's weapon bloom) */
+	SHADOWRUN_WEAPON_DATA_ACCURACY_BIT = 0,
+
 	/* (a marker past any index, so that the group tags stay longs) */
 	SHADOWRUN_GROUP_TAG_LONG = 0x7FFFFFFF,
 
@@ -261,7 +264,12 @@ struct shadowrun_magic2_definition
 	/* the thorns a cast makes, and the most kept */
 	long strangle_count;
 	long strangle_maximum_count;
-	byte unused15[0x8];
+	/* how far past a biped's sphere a thorn hurts it (world units), and the
+	ticks between its hurts (the executable's FUN_0025C0B0: 0x1D0, 0x1D4) */
+	real strangle_damage_radius;
+	char strangle_damage_ticks;
+	byte unused15[3];
+	/* what a thorn does to a biped it touches */
 	struct tag_reference strangle_damage;
 	struct tag_reference strangle_projectile;
 	struct tag_reference strangle_cast_damage;
@@ -404,10 +412,13 @@ struct shadowrun_tech2_definition
 	real glider_scale;
 	struct tag_reference glider_scenery;
 	struct tag_block glider_races;
-	/* (the glider's turn, 0x2A8, as the executable's FUN_002541D0 reads it,
-is not named: it is a tag block's, which this build's differ from the
-Xbox's in size) */
-	byte unused2[0xDC - TECH2_REFERENCE_PADDING];
+	/* a gliding unit's accuracy (units.c's unit update: 0x2A4, 0x2A8, past
+	its races' block): what moving takes of it, and what comes back of it
+	each tick, scaled (the glider's turn, as the executable's FUN_002541D0
+	reads 0x2A8, too) */
+	real glider_accuracy_movement_scale;
+	real glider_accuracy_recovery_scale;
+	byte unused2[0xDC - 8 - TECH2_REFERENCE_PADDING];
 	/* the heal of the undead (bipeds.c FUN_002541d0, the cable's state 5):
 	how many points, and the effects that heal them */
 	long undead_heal_points;
@@ -585,7 +596,45 @@ when it has none of its own): what each race's movement is with it (0x600
 bytes, its races' blocks after it) */
 struct shadowrun_weapon_data
 {
-	byte unused0[0x500];
+	byte unused0[0xFC];
+	/* its accuracy (bit 0, SHADOWRUN_WEAPON_DATA_ACCURACY_BIT): the
+	prototype's bloom (units.c's unit update, FUN_0025F120..FUN_0025F390;
+	weapons.c's fire, at 0x176700; game_engine.c FUN_000EF590's reticle) */
+	unsigned long flags;
+	byte unused2[4];
+	/* a unit's accuracy, between the minimum and maximum, comes back by the
+	recovery each tick; unitized (0 the minimum, 1 the maximum), it puts the
+	error of the weapon's shots between the inaccurate angles and the
+	accurate ones (the trigger's error picks between each's lower and upper
+	bound, as a trigger's own does) */
+	real accuracy_recovery;
+	real accuracy_minimum;
+	real accuracy_maximum;
+	byte unused3[4];
+	real inaccurate_error_angle_lower_bound;
+	real inaccurate_error_angle_upper_bound;
+	byte unused4[4];
+	real accurate_error_angle_lower_bound;
+	real accurate_error_angle_upper_bound;
+	byte unused5[0x38];
+	/* what a shot adds to it (the maps': less than 0) */
+	real accuracy_per_shot;
+	byte unused6[8];
+	/* what it takes each tick a unit moves, for each world unit a second it
+	moves, while it is more than the moving minimum (to which it goes no
+	lower); a moving unit's is no more than the moving maximum */
+	real accuracy_movement_scale;
+	/* what a reload adds, a jump, and each tick a unit is crouched (each
+	waits 7 ticks before it comes back) */
+	real accuracy_reload;
+	byte unused7[0xC];
+	real accuracy_jump;
+	real accuracy_crouch;
+	real accuracy_moving_minimum;
+	real accuracy_moving_maximum;
+	/* the reticle's lines' gap past its own (pixels) */
+	real accuracy_reticle_gap;
+	byte unused8[0x500 - 0x194];
 	struct tag_block races;
 	/* the data a smartlinked unit uses instead (Shadowrun's tech: not
 	played, so it is not chosen) */
@@ -771,6 +820,21 @@ typedef char shadowrun_weapon_data_race_movement_assert[
 	offsetof(struct shadowrun_weapon_data_race, movement_scale) == 0x100 ? 1 : -1];
 typedef char shadowrun_weapon_data_size_assert[sizeof(struct shadowrun_weapon_data) == 0x600 ? 1 : -1];
 typedef char shadowrun_weapon_data_races_assert[offsetof(struct shadowrun_weapon_data, races) == 0x500 ? 1 : -1];
+typedef char shadowrun_weapon_data_flags_assert[offsetof(struct shadowrun_weapon_data, flags) == 0xFC ? 1 : -1];
+typedef char shadowrun_weapon_data_recovery_assert[
+	offsetof(struct shadowrun_weapon_data, accuracy_recovery) == 0x104 ? 1 : -1];
+typedef char shadowrun_weapon_data_inaccurate_assert[
+	offsetof(struct shadowrun_weapon_data, inaccurate_error_angle_lower_bound) == 0x114 ? 1 : -1];
+typedef char shadowrun_weapon_data_accurate_assert[
+	offsetof(struct shadowrun_weapon_data, accurate_error_angle_lower_bound) == 0x120 ? 1 : -1];
+typedef char shadowrun_weapon_data_shot_assert[
+	offsetof(struct shadowrun_weapon_data, accuracy_per_shot) == 0x160 ? 1 : -1];
+typedef char shadowrun_weapon_data_movement_assert[
+	offsetof(struct shadowrun_weapon_data, accuracy_movement_scale) == 0x16C ? 1 : -1];
+typedef char shadowrun_weapon_data_jump_assert[
+	offsetof(struct shadowrun_weapon_data, accuracy_jump) == 0x180 ? 1 : -1];
+typedef char shadowrun_weapon_data_gap_assert[
+	offsetof(struct shadowrun_weapon_data, accuracy_reticle_gap) == 0x190 ? 1 : -1];
 typedef char shadowrun_weapon_data_smartlinked_assert[
 	offsetof(struct shadowrun_weapon_data, smartlinked.index) == 0x518 ? 1 : -1];
 typedef char shadowrun_unit_shop_weapons_assert[

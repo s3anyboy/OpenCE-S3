@@ -127,6 +127,7 @@ symbols in this file:
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
 #include "shaders/shader_definitions.h" /* port: (the shield's flare on the arms) */
 #include "shaders/shaders.h"
+#include "shadowrun.h" /* port: reflexes' faster animations (port/linux/game/shadowrun_tech.c) */
 /* port: port/linux/game/shield_color.c */
 real_rgb_color const *shield_color_colors(long unit_index, real_rgb_color const *colors);
 /* port: port/linux/game/overshield_effect.c */
@@ -1870,6 +1871,24 @@ static void first_person_weapon_update(
 			weapon_definition->weapon.interface_definition.first_person_animations.index,
 			&first_person_weapon->state_animation,
 			&sound_definition_index);
+		/* port: the Shadowrun prototype's reflexes play the animations 30%
+		faster, first person as third (units.c): a frame more on the ticks
+		that have gained one, after a frame that was only a frame, so no key
+		frame or restart is passed over (port/linux/game/shadowrun_tech.c) */
+		if (animation_update_result==_animation_no_key_frame &&
+			shadowrun_unit_animation_extra_frame(first_person_weapon->unit_index))
+		{
+			long extra_sound_definition_index;
+
+			animation_update_result= animation_update_render_only(
+				weapon_definition->weapon.interface_definition.first_person_animations.index,
+				&first_person_weapon->state_animation,
+				&extra_sound_definition_index);
+			if (sound_definition_index==NONE)
+			{
+				sound_definition_index= extra_sound_definition_index;
+			}
+		}
 		if (animation_update_result==_animation_key_frame)
 		{
 			/* a key frame does not advance the first-person weapon state */
@@ -1904,6 +1923,14 @@ static void first_person_weapon_update(
 				weapon_definition->weapon.interface_definition.first_person_animations.index,
 				&first_person_weapon->moving_animation,
 				NULL);
+			/* port: and its walk's sway, 30% faster with reflexes (above) */
+			if (shadowrun_unit_animation_extra_frame(first_person_weapon->unit_index))
+			{
+				animation_update_render_only(
+					weapon_definition->weapon.interface_definition.first_person_animations.index,
+					&first_person_weapon->moving_animation,
+					NULL);
+			}
 			if (!moving)
 			{
 				if (first_person_weapon->state==_first_person_weapon_state_idle)

@@ -87,6 +87,7 @@ symbols in this file:
 #include "units/unit_definitions.h"
 #include "units/units.h"
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
+#include "shadowrun.h" /* port: shadowrun_map_loaded */
 
 /* ---------- constants */
 
@@ -929,7 +930,9 @@ void hud_render_unit_interface(
 						NONE);
 				}
 
-				if (game_engine_has_shield(player_index) &&
+				/* port: the Shadowrun prototype's maps show no shield meter (its
+				units' toughness is their race's: port/linux/game/shadowrun_races.c) */
+				if (game_engine_has_shield(player_index) && !shadowrun_map_loaded() &&
 					!TEST_FLAG(
 						unit_hud_globals->script_flags,
 						_hud_panel_shield_dont_show_bit))
