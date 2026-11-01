@@ -697,6 +697,7 @@ symbols in this file:
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "coop_enemies.h" /* port: port/linux/game/coop_enemies.c */
 #include "shadowrun.h" /* port: port/linux/game/shadowrun_units.c, shadowrun_races.c */
+#include "shadowrun_tech.h" /* port: smartlink's zoom (port/linux/game/shadowrun_tech.c) */
 
 /* port: the control and animation impulses the host's actors give their
 units go to the clients' copies (port/linux/game/network_actors.c) */
@@ -1462,6 +1463,11 @@ real unit_get_zoom_magnification(
 	if (weapon_index!=NONE)
 	{
 		magnification = weapon_get_zoom_magnification(weapon_index, zoom_level);
+		/* port: smartlink doubles the zoom of a weapon that has any */
+		if (magnification > 1.f && shadowrun_smartlink_active(unit_index))
+		{
+			magnification *= SHADOWRUN_SMARTLINK_ZOOM_SCALE;
+		}
 	}
 
 	return magnification;
@@ -5989,6 +5995,9 @@ boolean unit_update(
 		grenade control casts a unit's spell, if it has one
 		(port/linux/game/shadowrun_units.c) */
 		shadowrun_unit_update(unit_index);
+		/* port: smartlink's laser, each tick, from the unit's hand where it
+		aims (port/linux/game/shadowrun_tech.c) */
+		shadowrun_smartlink_update(unit_index);
 
 		if (!jetpack_cheat_active)
 		{

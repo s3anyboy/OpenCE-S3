@@ -440,7 +440,10 @@ static void shadowrun_hud_draw_accuracy_reticle(
 		shadowrun_unit_definition_player(unit_index))
 	{
 		struct shadowrun_weapon_data *data = shadowrun_unit_weapon_data_get(unit_index);
-		real gap = (1.f - PIN(shadowrun_unit->accuracy_unitized, 0.f, 1.f)) * SHADOWRUN_HUD_ACCURACY_SPREAD +
+		/* port: while smartlink runs, the bloom is left out, and the reticle sits
+		at its weapon's own gap */
+		real unitized = shadowrun_smartlink_active(unit_index) ? 1.f : PIN(shadowrun_unit->accuracy_unitized, 0.f, 1.f);
+		real gap = (1.f - unitized) * SHADOWRUN_HUD_ACCURACY_SPREAD +
 			(data ? data->accuracy_reticle_gap : 0.f);
 		short near_gap = (short)gap;
 		short far_gap = (short)(gap + SHADOWRUN_HUD_ACCURACY_LENGTH);

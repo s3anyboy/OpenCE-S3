@@ -98,6 +98,14 @@ red is "default_red"), this high over the unit's origin (world units) */
 static struct shadowrun_hologram shadowrun_holograms[MAXIMUM_SHADOWRUN_HOLOGRAMS];
 static short shadowrun_hologram_count;
 
+/* port: smartlink's laser: the map's projectile, found by name, and the one
+running (any unit's: only one does, as the tech is the player's own) */
+static struct
+{
+	long laser_index;
+	long laser_object_index;
+} smartlink_globals;
+
 /* ---------- private prototypes */
 
 static void shadowrun_gecko_begin(
@@ -267,6 +275,18 @@ boolean shadowrun_tech_cast(
 		jumps a little higher (its jump, movement and reload each ask
 		shadowrun_reflexes_active) */
 		shadowrun_unit->tech_ticks = SHADOWRUN_REFLEXES_TICKS;
+		return TRUE;
+
+	case _shadowrun_tech_smartlink_id:
+		/* port: smartlink: for a while, its weapons zoom 2x and its bloom is
+		ignored, and a laser runs from them to where it aims (each asks
+		shadowrun_smartlink_active; the laser, shadowrun_smartlink_update) */
+		if (smartlink_globals.laser_object_index != NONE &&
+			!object_try_and_get_and_verify_type(smartlink_globals.laser_object_index, NONE))
+		{
+			smartlink_globals.laser_object_index = NONE;
+		}
+		shadowrun_unit->tech_ticks = SHADOWRUN_SMARTLINK_TICKS;
 		return TRUE;
 
 	case _shadowrun_tech_grapple_id:
@@ -1004,6 +1024,73 @@ void shadowrun_antimagic_update(
 			}
 		}
 	}
+
+	return;
+}
+
+/* ---------- smartlink ---------- */
+
+/* port: whether its time runs: the unit's tech is smartlink, and its ticks
+are not up (the tech's own time, as vision's and gecko's) */
+boolean shadowrun_smartlink_active(
+	long unit_index)
+{
+	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
+
+	return shadowrun_unit && shadowrun_unit->tech == _shadowrun_tech_smartlink_id &&
+		shadowrun_unit->tech_ticks > 0;
+}
+
+/* port: smartlink's laser, each tick: the map's 'weapons\laser\laser'
+projectile is fired from the unit's weapon to where it aims, and the last one
+is let go, so that one runs while the tech does (the prototype's smartlink is
+a tag this build does not read; the laser is the port's) */
+void shadowrun_smartlink_update(
+	long unit_index)
+{
+	struct unit_datum *unit = shadowrun_smartlink_active(unit_index) ? unit_try_and_get(unit_index) : NULL;
+
+	if (!unit)
+	{
+		return;
+	}
+	/* (the laser's definition is found once a map, by its name, as the
+	anti-magic grenade's is) */
+	if (smartlink_globals.laser_index == NONE)
+	{
+		smartlink_globals.laser_index = tag_loaded(PROJECTILE_DEFINITION_TAG, SHADOWRUN_SMARTLINK_LASER);
+		if (smartlink_globals.laser_index == NONE)
+		{
+			return;
+		}
+	}
+	/* (the laser before this one is let go, so that one runs at a time) */
+	if (smartlink_globals.laser_object_index != NONE)
+	{
+		if (object_try_and_get_and_verify_type(smartlink_globals.laser_object_index, NONE))
+		{
+			object_delete(smartlink_globals.laser_object_index);
+		}
+		smartlink_globals.laser_object_index = NONE;
+	}
+	{
+		struct object_placement_data placement;
+
+		object_placement_data_new(&placement, smartlink_globals.laser_index, unit_index);
+		placement.position = unit->object.position;
+		placement.forward = unit->object.forward;
+		placement.translational_velocity = unit->object.translational_velocity;
+		smartlink_globals.laser_object_index = object_new(&placement);
+	}
+
+	return;
+}
+
+void shadowrun_smartlink_initialize_for_new_map(
+	void)
+{
+	smartlink_globals.laser_index = NONE;
+	smartlink_globals.laser_object_index = NONE;
 
 	return;
 }

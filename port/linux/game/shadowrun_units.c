@@ -179,6 +179,8 @@ void shadowrun_initialize_for_new_map(
 	/* port: the second grenade made the anti-magic grenade (port/linux/game/
 	shadowrun_tech.c): here, as the game globals the map's are made by then */
 	shadowrun_antimagic_initialize_for_new_map();
+	/* port: smartlink's laser, of the map's projectile (shadowrun_tech.c) */
+	shadowrun_smartlink_initialize_for_new_map();
 
 	return;
 }
@@ -1645,7 +1647,9 @@ boolean shadowrun_unit_accuracy_error(
 
 	if (data)
 	{
-		real unitized = shadowrun_unit->accuracy_unitized;
+		/* port: while smartlink runs, the unit's bloom is left out of its shots:
+		its aim is as accurate as the weapon's data allows */
+		real unitized = shadowrun_smartlink_active(unit_index) ? 1.f : shadowrun_unit->accuracy_unitized;
 		real lower_bound = unitized * data->accurate_error_angle_lower_bound +
 			(1.f - unitized) * data->inaccurate_error_angle_lower_bound;
 		real upper_bound = unitized * data->accurate_error_angle_upper_bound +

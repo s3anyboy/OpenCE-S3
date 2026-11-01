@@ -81,6 +81,12 @@ unit moves and reloads faster, and jumps a little higher */
 /* port: the map's anti-magic tech tag (t3ed), as its tags name it, and the
 anti-magic grenade's projectile (no flag of its own: it is found by its name) */
 #define SHADOWRUN_ANTIMAGIC_TECH_NAME "shadowrunstuff\\tech3"
+/* port: the laser smartlink fires, by its name */
+#define SHADOWRUN_SMARTLINK_LASER "weapons\\laser\\laser"
+/* port: how long a smartlink lasts (twenty seconds), and how much its
+weapons' zoom is (2x, on the weapons that zoom) */
+#define SHADOWRUN_SMARTLINK_TICKS (20 * 30)
+#define SHADOWRUN_SMARTLINK_ZOOM_SCALE 2.f
 #define SHADOWRUN_ANTIMAGIC_GRENADE_PROJECTILE "shadowrunstuff\\antimagic grenade\\antimagic grenade"
 /* port: the grenade type it takes (units.h's second: the Covenant's plasma) */
 #define SHADOWRUN_ANTIMAGIC_GRENADE_TYPE 1
@@ -197,6 +203,18 @@ scaled (bipeds.c), its movement (shadowrun_races.c) and its reload
 (weapons.c) */
 boolean shadowrun_reflexes_active(
 	long unit_index);
+
+/* port: smartlink (shadowrun_tech.c): while it runs, the unit's weapons zoom
+2x where they zoom at all, its bloom is left out of its shots and its aim
+reticle (weapons.c, shadowrun_units.c's accuracy, hud_weapon.c), and a laser
+runs from its weapon to where it aims (shadowrun_tech_smartlink_update, its
+each tick: units.c). The port's, not the prototype's */
+boolean shadowrun_smartlink_active(
+	long unit_index);
+void shadowrun_smartlink_update(
+	long unit_index);
+void shadowrun_smartlink_initialize_for_new_map(
+	void);
 /* port: whether a tech spares the unit falling damage (bipeds.c): the glider,
 which flies, and a cable's pull (shadowrun_cable.c) */
 boolean shadowrun_tech_no_falling_damage(
