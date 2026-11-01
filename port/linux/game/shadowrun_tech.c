@@ -289,9 +289,9 @@ boolean shadowrun_tech_cast(
 		}
 		shadowrun_glider_begin(unit_index);
 		shadowrun_unit->tech_ticks = SHADOWRUN_GLIDER_WEAR_TICKS;
-		/* port: and twenty seconds of the jetpack (cheat_jetpack's: the fire
-		and grenade controls together fly it), whether the glider is put away
-		before then or not */
+		/* port: and twenty seconds of flight, as a banshee flies
+		(shadowrun_glider_flight), whether the glider is put away before then
+		or not */
 		shadowrun_unit->jetpack_ticks = SHADOWRUN_GLIDER_JETPACK_TICKS;
 		return TRUE;
 
@@ -471,13 +471,59 @@ boolean shadowrun_unit_animation_extra_frame(
 	return shadowrun_unit && shadowrun_unit->reflexes_animation_extra_frame;
 }
 
+/* port: the glider gives no jetpack now: it flies as a banshee does
+(shadowrun_glider_flight); kept for its callers, the jetpack cheat's */
 boolean shadowrun_unit_jetpack(
+	long unit_index)
+{
+	(void)unit_index;
+	return FALSE;
+}
+
+/* port: whether the glider's flight lasts for the unit */
+static boolean shadowrun_unit_flying(
 	long unit_index)
 {
 	struct shadowrun_unit *shadowrun_unit = shadowrun_map_loaded() && unit_index != NONE ?
 		shadowrun_unit_get(unit_index) : NULL;
 
 	return shadowrun_unit && shadowrun_unit->jetpack_ticks > 0;
+}
+
+boolean shadowrun_glider_flight(
+	long biped_index,
+	real_vector3d *forward,
+	real_vector3d *movement_desired,
+	real *acceleration_maximum)
+{
+	struct biped_datum *biped = shadowrun_unit_flying(biped_index) ? biped_try_and_get(biped_index) : NULL;
+	real vertical = 0.f;
+	real_vector3d aim;
+
+	if (!biped || TEST_FLAG(biped->object.damage_flags, _object_dead_bit))
+	{
+		return FALSE;
+	}
+	unit_get_aiming_vector(biped_index, &aim);
+	if (normalize3d(&aim) <= 0.f)
+	{
+		aim = biped->object.forward;
+	}
+	*forward = aim;
+	if (TEST_FLAG(biped->unit.control_flags, _unit_control_jump_bit))
+	{
+		vertical += 1.f;
+	}
+	if (TEST_FLAG(biped->unit.control_flags, _unit_control_crouch_modifier_bit))
+	{
+		vertical -= 1.f;
+	}
+	movement_desired->i = biped->unit.throttle.i * SHADOWRUN_GLIDER_FLIGHT_FORWARD_SPEED / TICKS_PER_SECOND;
+	movement_desired->j = biped->unit.throttle.j * SHADOWRUN_GLIDER_FLIGHT_SIDEWAYS_SPEED / TICKS_PER_SECOND;
+	movement_desired->k = vertical * SHADOWRUN_GLIDER_FLIGHT_VERTICAL_SPEED / TICKS_PER_SECOND;
+	*acceleration_maximum = SHADOWRUN_GLIDER_FLIGHT_ACCELERATION / TICKS_PER_SECOND;
+
+	return TRUE;
 }
 
 /* the unit's Shadowrun state if it is a player's on these maps (only a
@@ -1066,7 +1112,7 @@ flies (its fall held off), and a cable's pull */
 boolean shadowrun_tech_no_falling_damage(
 	long unit_index)
 {
-	return shadowrun_glider_worn(unit_index) || shadowrun_cable_holds(unit_index);
+	return shadowrun_glider_worn(unit_index) || shadowrun_cable_holds(unit_index) || shadowrun_unit_flying(unit_index);
 }
 
 /* 0x251f30: the glider's flight, which turns the biped by how fast it moves

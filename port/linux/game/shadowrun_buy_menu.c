@@ -1668,6 +1668,22 @@ static void shadowrun_unit_give_weapon(
 		{
 			object_delete(weapon_index);
 		}
+		else
+		{
+			/* port: a weapon bought is full: each magazine loaded, and as many
+			rounds again as it carries (the executable's came with the
+			definition's starting rounds) */
+			struct weapon_datum *weapon = weapon_get(weapon_index);
+
+			for (index = 0; index < definition->weapon.magazines.count && index < NUMBEROF(weapon->weapon.magazines); index++)
+			{
+				struct weapon_magazine_definition *magazine_definition = TAG_BLOCK_GET_ELEMENT(
+					&definition->weapon.magazines, index, struct weapon_magazine_definition);
+
+				weapon->weapon.magazines[index].rounds_loaded = magazine_definition->rounds_loaded_maximum;
+				weapon->weapon.magazines[index].rounds_total = magazine_definition->rounds_total_maximum;
+			}
+		}
 	}
 
 	return;

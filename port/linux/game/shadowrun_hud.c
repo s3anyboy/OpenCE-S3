@@ -17,6 +17,8 @@ srud's: this is a plainer one, of the same facts.
 /* ---------- headers */
 
 #include "cseries.h"
+#include "cseries/errors.h"
+#include "objects/objects.h"
 #include "cutscene/cinematics.h"
 #include "game/game.h"
 #include "game/players.h"
@@ -94,6 +96,17 @@ static char const *shadowrun_tech_name(
 
 /* ---------- globals */
 
+/* port: each local player's bloom reticle, as its crosshair gave it this
+frame (shadowrun_hud_draw_accuracy) */
+static struct
+{
+	long unit_index;
+	short x;
+	short y;
+	pixel32 color;
+	boolean given;
+} shadowrun_hud_reticles[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+
 /* when each local player's unit last failed a cast */
 static long shadowrun_hud_failure_times[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS] = { NONE, NONE, NONE, NONE };
 
@@ -120,6 +133,12 @@ static void shadowrun_hud_set_color(
 	color->green = green;
 	color->blue = blue;
 }
+
+static void shadowrun_hud_draw_accuracy_reticle(
+	long unit_index,
+	short x,
+	short y,
+	pixel32 color);
 
 /* ---------- public code */
 
@@ -168,6 +187,30 @@ void shadowrun_hud_draw(
 		shadowrun_buy_menu_draw(local_player_index);
 
 		return;
+	}
+	/* port: the bloom reticle, about the crosshair's point (in its colour)
+	the weapon's HUD gave this frame, else the screen's middle, in the HUD's
+	blue (a HUD colour: its alpha the transparency) */
+	{
+		short x;
+		short y;
+		pixel32 color;
+
+		if (shadowrun_hud_reticles[local_player_index].given &&
+			shadowrun_hud_reticles[local_player_index].unit_index == unit_index)
+		{
+			x = shadowrun_hud_reticles[local_player_index].x;
+			y = shadowrun_hud_reticles[local_player_index].y;
+			color = shadowrun_hud_reticles[local_player_index].color;
+		}
+		else
+		{
+			x = (short)((render.camera.window_bounds.x0 + render.camera.window_bounds.x1) / 2 - render.camera.viewport_bounds.x0);
+			y = (short)((render.camera.window_bounds.y0 + render.camera.window_bounds.y1) / 2 - render.camera.viewport_bounds.y0);
+			color = 0x002896FF;
+		}
+		shadowrun_hud_reticles[local_player_index].given = FALSE;
+		shadowrun_hud_draw_accuracy_reticle(unit_index, x, y, color);
 	}
 	font = font_definition_get(font_index);
 	line_height = (short)(font->ascending_height + font->descending_height + font->leading_height);
@@ -348,7 +391,7 @@ crosshair's point (x, y) in its colour: four lines of 15 pixels, right, left,
 below and above it, apart by 20 pixels as the unit is least accurate (none
 as it is most), and its weapon's srwd's gap more. A biped's alone, with an
 srud, whose weapon has accuracy */
-void shadowrun_hud_draw_accuracy(
+static void shadowrun_hud_draw_accuracy_reticle(
 	long unit_index,
 	short x,
 	short y,
@@ -357,10 +400,45 @@ void shadowrun_hud_draw_accuracy(
 	struct shadowrun_unit *shadowrun_unit = shadowrun_unit_get(unit_index);
 	struct unit_datum *unit = shadowrun_unit ? unit_get(unit_index) : NULL;
 
+	/* port: why the reticle is or is not drawn, said when that changes (its
+	weapon, its unit's accuracy), so that one that does not show can be
+	told from the log */
+	{
+		static long said_weapon_index = -2;
+		static short said_reason = -1;
+		struct shadowrun_weapon_data *data = unit ? shadowrun_unit_weapon_data_get(unit_index) : NULL;
+		long weapon_index = unit && unit->unit.current_weapon_index != NONE ?
+			unit_inventory_get_weapon(unit_index, unit->unit.current_weapon_index) : NONE;
+		short reason =
+			!unit ? 0 :
+			unit->object.type != _object_type_biped ? 1 :
+			!shadowrun_unit_definition_player(unit_index) ? 2 :
+			!data ? 3 :
+			!TEST_FLAG(data->flags, SHADOWRUN_WEAPON_DATA_ACCURACY_BIT) ? 4 :
+			!shadowrun_unit->accuracy_active ? 5 : 6;
+
+		if (reason != said_reason || weapon_index != said_weapon_index)
+		{
+			static char const *const reasons[] =
+			{
+				"no Shadowrun unit", "not a biped", "no srud", "no srwd (weapon or srud's)",
+				"its srwd has no accuracy", "its accuracy not updated", "drawn"
+			};
+
+			said_reason = reason;
+			said_weapon_index = weapon_index;
+			error(_error_silent, "shadowrun: bloom reticle of unit %08lx, weapon %s: %s (flags %08lx, unitized %g, at %d,%d, colour %08lx)",
+				(unsigned long)unit_index,
+				weapon_index != NONE ? tag_name_strip_path(tag_get_name(object_get(weapon_index)->definition_index)) : "none",
+				reasons[reason], data ? (unsigned long)data->flags : 0UL,
+				shadowrun_unit ? (double)shadowrun_unit->accuracy_unitized : 0.,
+				(int)x, (int)y, (unsigned long)color);
+		}
+	}
+
 	if (unit && unit->object.type == _object_type_biped && shadowrun_unit->accuracy_active &&
 		shadowrun_unit_definition_player(unit_index))
 	{
-
 		struct shadowrun_weapon_data *data = shadowrun_unit_weapon_data_get(unit_index);
 		real gap = (1.f - PIN(shadowrun_unit->accuracy_unitized, 0.f, 1.f)) * SHADOWRUN_HUD_ACCURACY_SPREAD +
 			(data ? data->accuracy_reticle_gap : 0.f);
@@ -390,6 +468,30 @@ void shadowrun_hud_draw_accuracy(
 		line.y0 = (short)(y - far_gap);
 		line.y1 = (short)(y - near_gap);
 		draw_quad(&line, color);
+	}
+
+	return;
+}
+
+/* port: the crosshair's point and colour, as hud_weapon.c's crosshairs give
+them (the aim crosshair's, each frame): the reticle is drawn with the rest
+of this HUD (shadowrun_hud_draw, just after the weapon's HUD), where its
+quads draw as the magic's cells do */
+void shadowrun_hud_draw_accuracy(
+	long unit_index,
+	short x,
+	short y,
+	pixel32 color)
+{
+	short local_player_index = render.local_player_index;
+
+	if (local_player_index >= 0 && local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+	{
+		shadowrun_hud_reticles[local_player_index].unit_index = unit_index;
+		shadowrun_hud_reticles[local_player_index].x = x;
+		shadowrun_hud_reticles[local_player_index].y = y;
+		shadowrun_hud_reticles[local_player_index].color = color;
+		shadowrun_hud_reticles[local_player_index].given = TRUE;
 	}
 
 	return;

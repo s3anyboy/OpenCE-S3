@@ -86,8 +86,23 @@ anti-magic grenade's projectile (no flag of its own: it is found by its name) */
 #define SHADOWRUN_ANTIMAGIC_GRENADE_TYPE 1
 /* port: the most anti-magic grenades a unit carries (the buy menu's two) */
 #define SHADOWRUN_ANTIMAGIC_GRENADE_MAXIMUM 2
-/* port: how long the glider's jetpack lasts (twenty seconds) */
+/* port: how long the glider's flight lasts (twenty seconds) */
 #define SHADOWRUN_GLIDER_JETPACK_TICKS (20 * 30)
+/* port: the glider's flight, as a banshee flies (world units a second): ahead
+where the unit looks, to the side, and up (jump) or down (crouch); and how
+fast it gets there (world units a second, each tick) */
+#define SHADOWRUN_GLIDER_FLIGHT_FORWARD_SPEED 6.f
+#define SHADOWRUN_GLIDER_FLIGHT_SIDEWAYS_SPEED 4.f
+#define SHADOWRUN_GLIDER_FLIGHT_VERTICAL_SPEED 4.f
+#define SHADOWRUN_GLIDER_FLIGHT_ACCELERATION 0.24f
+/* port: the glider's flight, each tick of a biped's physics (bipeds.c): TRUE
+while the unit flies, its forward (its aim), its movement and its
+acceleration set, as a flying biped's are */
+boolean shadowrun_glider_flight(
+	long biped_index,
+	real_vector3d *forward,
+	real_vector3d *movement_desired,
+	real *acceleration_maximum);
 /* port: how much faster reflexes' animations play */
 #define SHADOWRUN_REFLEXES_ANIMATION_SCALE 1.3f
 /* port: a unit's anti-magic grenades (its third type: shadowrun_tech.c) */

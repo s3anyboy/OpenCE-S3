@@ -4030,6 +4030,13 @@ static void biped_update_moving(
 	{
 		SET_FLAG(in_flags, _biped_physics_in_flying_bit, TRUE);
 	}
+	/* port: and its glider flies it as a banshee flies: where it looks, to
+	the side, up and down, its fall held (port/linux/game/shadowrun_tech.c) */
+	else if (shadowrun_glider_flight(biped_index, &physics.forward, &physics.movement_desired,
+		&physics.acceleration_maximum))
+	{
+		SET_FLAG(in_flags, _biped_physics_in_flying_bit, TRUE);
+	}
 	physics.in_flags = in_flags;
 
 	biped_update_physics(&physics);
