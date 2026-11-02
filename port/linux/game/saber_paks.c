@@ -1852,6 +1852,40 @@ static boolean mesh_read(
 		tangents[index].i = tangents[index].j = tangents[index].k = 0.f;
 	}
 
+	/* (an MCC mesh with no compression parameters whose coordinates sit in
+	the half square: a warthog's hull, stored at half the range, so the
+	body samples a corner of its texture. Twice the coordinate covers the
+	texture. A mesh that already spans the square, the gun and the tires,
+	is left) */
+	if (uv_offset >= 0 && !node->has_uv_decompress && !walk->level && vertex_count > 0)
+	{
+		long inside = 0;
+		real max_u = -1.f;
+		real max_v = -1.f;
+
+		for (index = 0; index < vertex_count; index++)
+		{
+			real u = vertices[index].texcoord.x;
+			real v = vertices[index].texcoord.y;
+
+			if (u > max_u)
+				max_u = u;
+			if (v > max_v)
+				max_v = v;
+			if (u >= -0.02f && u <= 0.51f && v >= -0.02f && v <= 0.51f)
+				inside++;
+		}
+		if (inside * 10 >= vertex_count * 9 && max_u > 0.35f && max_v > 0.35f &&
+			max_u <= 0.51f && max_v <= 0.51f)
+		{
+			for (index = 0; index < vertex_count; index++)
+			{
+				vertices[index].texcoord.x *= 2.f;
+				vertices[index].texcoord.y *= 2.f;
+			}
+		}
+	}
+
 	/* its triangles, turned as Halo's front faces are: clockwise about the
 	normals the template gives */
 	for (index = 0; index < 3 * triangle_count; index++)
