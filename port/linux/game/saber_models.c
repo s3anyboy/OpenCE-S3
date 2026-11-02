@@ -2567,6 +2567,8 @@ struct saber_level_part
 	boolean sky;
 	/* a planet or a moon: drawn after the dome, which would cover it */
 	boolean in_front;
+	/* the halo ring: drawn after the planet, which would cover it */
+	boolean over;
 	/* the skydome: the sky is centred on it */
 	boolean dome;
 	/* the texture's repeat (1 until a mesh says otherwise). Applied as the
@@ -2681,12 +2683,14 @@ static long saber_level_bitmap_tag_add(
 }
 
 /* whether a level's material is its sky: the clouds, the sky dome, the
-stars and the planets. Drawn in place of the map's sky, not as structure */
+stars, the planets and the halo ring. Drawn in place of the map's sky,
+not as structure (the ring stands past where structure is drawn) */
 static boolean saber_level_material_sky(
 	char const *material)
 {
 	return strncmp(material, "cloud", 5) == 0 || strncmp(material, "basis_sky", 9) == 0 ||
-		strncmp(material, "stars", 5) == 0 || strstr(material, "planet") != NULL;
+		strncmp(material, "stars", 5) == 0 || strstr(material, "planet") != NULL ||
+		strstr(material, "ring") != NULL;
 }
 
 /* whether a level's material is drawn as structure: not an effect's, a far
@@ -2782,6 +2786,7 @@ static boolean saber_level_play(
 		sky = part->sky || saber_level_material_sky(level.materials[material]);
 		made->in_front = sky && (strstr(level.materials[material], "planet") != NULL ||
 			strncmp(level.materials[material], "basis_sky", 9) == 0);
+		made->over = sky && strstr(level.materials[material], "ring") != NULL;
 		made->dome = sky && strncmp(level.materials[material], "stars", 5) == 0;
 		if (!sky && !saber_level_material_drawn(level.materials[material]))
 		{
@@ -3337,8 +3342,9 @@ void saber_models_level_sky_render(
 	if (far_distance < 16.f)
 		far_distance = 16.f;
 	scale = reach > far_distance ? far_distance / reach : 1.f;
-	/* the dome, then the clouds, then a planet or a moon: with no depth a
-	later part covers an earlier. Farther first within a group */
+	/* the dome, then the clouds, then a planet or a moon, then the ring:
+	with no depth a later part covers an earlier. Farther first within a
+	group */
 	for (placed = 1; placed < sky_count; placed++)
 	{
 		long item = order[placed];
@@ -3351,7 +3357,8 @@ void saber_models_level_sky_render(
 		offset.j = saber_level.parts[item].centroid.y - anchor.y;
 		offset.k = saber_level.parts[item].centroid.z - anchor.z;
 		item_distance = magnitude3d(&offset);
-		item_layer = saber_level.parts[item].in_front ? 2 : (saber_level.parts[item].dome ? 0 : 1);
+		item_layer = saber_level.parts[item].over ? 3 :
+			(saber_level.parts[item].in_front ? 2 : (saber_level.parts[item].dome ? 0 : 1));
 		while (slot > 0)
 		{
 			long earlier = order[slot - 1];
@@ -3363,7 +3370,8 @@ void saber_models_level_sky_render(
 			offset.j = saber_level.parts[earlier].centroid.y - anchor.y;
 			offset.k = saber_level.parts[earlier].centroid.z - anchor.z;
 			earlier_distance = magnitude3d(&offset);
-			earlier_layer = saber_level.parts[earlier].in_front ? 2 : (saber_level.parts[earlier].dome ? 0 : 1);
+			earlier_layer = saber_level.parts[earlier].over ? 3 :
+				(saber_level.parts[earlier].in_front ? 2 : (saber_level.parts[earlier].dome ? 0 : 1));
 			move = item_layer < earlier_layer ||
 				(item_layer == earlier_layer && earlier_distance < item_distance);
 			if (!move)
