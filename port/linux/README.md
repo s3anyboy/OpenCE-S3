@@ -1638,8 +1638,9 @@ texture of the submesh's material: its full texture, from the level's
 package or `pak_stream.s3dpak` beside it (keep it there; the full textures
 of the Xbox 360's are big-endian, their first mipmap only), else its
 64-pixel mipmaps, which the level's package carries. The shader is drawn
-without alpha testing (the textures' alpha is not Halo's) and without the
-classic model's multipurpose and reflection maps. The model's
+without alpha testing (the textures' alpha is not Halo's), without the
+classic model's multipurpose and reflection maps, and without its change
+colour (which would tint it whole). The model's
 nodes, markers and regions, and everything else of the map, stay as they
 are: only what this machine draws changes. The log (`halo.log`) says which
 models are drawn, in what units, and why any is not.
@@ -1652,7 +1653,9 @@ the map's name or another kind, as `light_fixture_floor1_b30__h` or
 overshields) are left out, of a character's ranks the least's meshes alone
 are drawn, its `.lod1`, `.lod2` meshes are drawn at Halo's lower levels of
 detail, and its vertices move with the map's model's nodes of the names of
-its bones, so the map's animations move them. halo.log says which models
+its bones (or of their nearest parents'), put where those nodes stand in
+the map's model's default pose, so the map's animations move them as the
+classic model's. halo.log says which models
 are drawn and how many of the map's.
 
 Video Setup's FOV AND VIEWMODELS screen turns it on and off (ANNIVERSARY

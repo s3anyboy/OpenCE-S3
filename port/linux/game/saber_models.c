@@ -911,6 +911,9 @@ static boolean shader_plug(
 	shader->model.map_u_scale = 1.f;
 	shader->model.map_v_scale = 1.f;
 	shader->model.multipurpose_map.index = NONE;
+	/* (with no multipurpose map to mask it, an object's change colour would
+	tint it whole: the package's textures have their colours) */
+	shader->model.change_color_source = 0;
 	/* (the package's textures' alpha is no alpha test's: drawn whole) */
 	SET_FLAG(shader->model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, TRUE);
 	shader->model.detail_mask = 0;
@@ -929,7 +932,8 @@ static boolean material_effect(
 		strstr(material, "digits") != NULL;
 }
 
-/* the template's parts less those of effects (let go of) */
+/* the template's parts less those of effects and of no material, and past
+the most a model's geometry has at a level of detail (let go of) */
 static void template_effects_remove(
 	struct saber_template *template_)
 {
@@ -940,7 +944,8 @@ static void template_effects_remove(
 	{
 		struct saber_mesh_part *part = &template_->parts[index];
 
-		if (part->material_index >= 0 && part->material_index < template_->material_count &&
+		/* (and a part of no material: a collision's or a marker's) */
+		if (part->material_index < 0 || part->material_index >= template_->material_count ||
 			material_effect(template_->materials[part->material_index]))
 		{
 			free(part->vertices);
@@ -950,6 +955,26 @@ static void template_effects_remove(
 		template_->parts[kept++] = *part;
 	}
 	template_->part_count = kept;
+	{
+		long level_parts[5] = { 0, 0, 0, 0, 0 };
+
+		kept = 0;
+		for (index = 0; index < template_->part_count; index++)
+		{
+			struct saber_mesh_part *part = &template_->parts[index];
+			long level = MIN(part->lod, 4);
+
+			if (level_parts[level] >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+			{
+				free(part->vertices);
+				free(part->triangles);
+				continue;
+			}
+			level_parts[level]++;
+			template_->parts[kept++] = *part;
+		}
+		template_->part_count = kept;
+	}
 }
 
 /* a Halo node's name as the templates' bones are compared: lower case,
@@ -971,34 +996,168 @@ static void node_name_compared(
 	compared[index] = 0;
 }
 
-/* Has the template's vertices name the map's model's nodes: each bone the
-node of its name, else the first. */
-static void template_nodes_map(
-	struct saber_template *template_,
-	struct model const *model)
+/* a point or vector (w 1 or 0) times a 4x4 row-major matrix, as a row
+vector */
+static void bind_transform(
+	real const *matrix,
+	real x,
+	real y,
+	real z,
+	real w,
+	real *result)
 {
-	short *nodes = malloc(sizeof(*nodes) * ((size_t)template_->bone_count + 1));
-	long bone;
-	long part_index;
+	result[0] = x * matrix[0] + y * matrix[4] + z * matrix[8] + w * matrix[12];
+	result[1] = x * matrix[1] + y * matrix[5] + z * matrix[9] + w * matrix[13];
+	result[2] = x * matrix[2] + y * matrix[6] + z * matrix[10] + w * matrix[14];
+}
 
-	if (!nodes)
-		return;
+/* whether a node's default inverse matrix is one (the map's runtime field,
+made as its tags load) */
+static boolean node_default_valid(
+	struct model_node const *node)
+{
+	real_matrix4x3 const *matrix = &node->runtime_default_inverse_matrix;
+
+	return matrix->scale > 0.0001f && matrix->scale < 10000.f &&
+		matrix->position.x == matrix->position.x && matrix->position.y == matrix->position.y &&
+		matrix->position.z == matrix->position.z;
+}
+
+/* the map's model's node of a template's bone's name, or NONE */
+static short model_node_named(
+	struct model const *model,
+	char const *bone)
+{
+	long node_index;
+
+	for (node_index = 0; node_index < model->nodes.count; node_index++)
+	{
+		char compared[64];
+
+		node_name_compared(TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node)->name, compared,
+			sizeof(compared));
+		if (!strcmp(compared, bone))
+			return (short)node_index;
+	}
+
+	return NONE;
+}
+
+/* The scale of the template's units to Halo's by its skeleton: the
+lengths of its bones whose own and parent's names are the map's model's
+nodes', to those nodes' apart in the model's default pose (however either
+stands, a bone is as long). FALSE when too few bones are the model's to
+tell. */
+static boolean skeleton_scale(
+	struct saber_template const *template_,
+	struct model const *model,
+	real *scale)
+{
+	real template_length = 0.f;
+	real model_length = 0.f;
+	long pairs = 0;
+	long bone;
+
 	for (bone = 0; bone < template_->bone_count; bone++)
 	{
-		long node_index;
+		long parent = template_->bone_parents[bone];
+		short node;
+		short parent_node;
+		real_point3d origin;
+		real_point3d parent_origin;
+		real_vector3d apart;
+		real dx;
+		real dy;
+		real dz;
 
-		nodes[bone] = 0;
-		for (node_index = 0; node_index < model->nodes.count; node_index++)
+		if (parent == NONE)
+			continue;
+		node = model_node_named(model, template_->bones[bone]);
+		parent_node = model_node_named(model, template_->bones[parent]);
+		if (node == NONE || parent_node == NONE || node == parent_node ||
+			!node_default_valid(TAG_BLOCK_GET_ELEMENT(&model->nodes, node, struct model_node)) ||
+			!node_default_valid(TAG_BLOCK_GET_ELEMENT(&model->nodes, parent_node, struct model_node)))
 		{
-			char compared[64];
+			continue;
+		}
+		matrix4x3_inverse_transform_point(&TAG_BLOCK_GET_ELEMENT(&model->nodes, node, struct model_node)->
+			runtime_default_inverse_matrix, global_origin3d, &origin);
+		matrix4x3_inverse_transform_point(&TAG_BLOCK_GET_ELEMENT(&model->nodes, parent_node, struct model_node)->
+			runtime_default_inverse_matrix, global_origin3d, &parent_origin);
+		vector_from_points3d(&parent_origin, &origin, &apart);
+		dx = template_->bone_origins[bone][0] - template_->bone_origins[parent][0];
+		dy = template_->bone_origins[bone][1] - template_->bone_origins[parent][1];
+		dz = template_->bone_origins[bone][2] - template_->bone_origins[parent][2];
+		model_length += magnitude3d(&apart);
+		template_length += square_root(dx * dx + dy * dy + dz * dz);
+		pairs++;
+	}
+	if (pairs < 3 || template_length <= 0.f || model_length <= 0.f)
+		return FALSE;
+	*scale = model_length / template_length;
 
-			node_name_compared(TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node)->name, compared,
-				sizeof(compared));
-			if (!strcmp(compared, template_->bones[bone]))
+	return *scale > 0.f && *scale < 1000.f;
+}
+
+/* Has the template's vertices move with the map's model's nodes, in the
+map's model's units: each bone the node of its name, else its nearest
+parent's that has one (a vertex of a bone with none, as a vehicle's
+parts, is the model's first node's, as it is). A vertex is put where its
+bones put it in the map's model's default pose: in each of its bones' own
+space (the template's bind), scaled to Halo's units, then where that node
+is by default; so the template is the map's model's shape as the map's
+animations pose it, though the two's skeletons stand otherwise. */
+static void template_nodes_map(
+	struct saber_template *template_,
+	struct model const *model,
+	real scale)
+{
+	short *nodes = malloc(sizeof(*nodes) * ((size_t)template_->bone_count + 1));
+	long *binds = malloc(sizeof(*binds) * ((size_t)template_->bone_count + 1));
+	boolean defaults = TRUE;
+	long bone;
+	long part_index;
+	long node_index;
+
+	if (!nodes || !binds)
+	{
+		if (nodes)
+			free(nodes);
+		if (binds)
+			free(binds);
+		return;
+	}
+	for (node_index = 0; node_index < model->nodes.count; node_index++)
+	{
+		if (!node_default_valid(TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node)))
+			defaults = FALSE;
+	}
+	/* (each bone's node and the bone whose bind is used: its own, or its
+	nearest parent's that has a node) */
+	for (bone = 0; bone < template_->bone_count; bone++)
+	{
+		long at = bone;
+		long depth;
+
+		nodes[bone] = NONE;
+		binds[bone] = NONE;
+		for (depth = 0; at != NONE && depth < 64 && nodes[bone] == NONE; depth++)
+		{
+			for (node_index = 0; node_index < model->nodes.count; node_index++)
 			{
-				nodes[bone] = (short)node_index;
-				break;
+				char compared[64];
+
+				node_name_compared(TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node)->name, compared,
+					sizeof(compared));
+				if (!strcmp(compared, template_->bones[at]))
+				{
+					nodes[bone] = (short)node_index;
+					binds[bone] = at;
+					break;
+				}
 			}
+			if (nodes[bone] == NONE)
+				at = template_->bone_parents[at];
 		}
 	}
 	for (part_index = 0; part_index < template_->part_count; part_index++)
@@ -1009,12 +1168,96 @@ static void template_nodes_map(
 		for (index = 0; index < part->vertex_count; index++)
 		{
 			struct model_vertex_uncompressed *vertex = &part->vertices[index];
+			real_point3d position = { 0.f, 0.f, 0.f };
+			real_vector3d normal = { 0.f, 0.f, 0.f };
+			real_vector3d tangent = { 0.f, 0.f, 0.f };
+			boolean posed = defaults;
+			long influence;
 
-			vertex->nodes[0] = vertex->nodes[0] >= 0 && vertex->nodes[0] < template_->bone_count ? nodes[vertex->nodes[0]] : 0;
-			vertex->nodes[1] = vertex->nodes[1] >= 0 && vertex->nodes[1] < template_->bone_count ? nodes[vertex->nodes[1]] : 0;
+			long slots[2];
+
+			for (influence = 0; influence < 2; influence++)
+			{
+				long slot = vertex->nodes[influence];
+				short node = slot >= 0 && slot < template_->bone_count ? nodes[slot] : NONE;
+
+				if (node == NONE && vertex->node_weights[influence] > 0.f)
+					posed = FALSE;
+				slots[influence] = node == NONE ? NONE : binds[slot];
+				vertex->nodes[influence] = node == NONE ? 0 : node;
+			}
+			for (influence = 0; posed && influence < 2; influence++)
+			{
+				long slot = slots[influence];
+				struct model_node const *node = TAG_BLOCK_GET_ELEMENT(&model->nodes, vertex->nodes[influence],
+					struct model_node);
+				real weight = vertex->node_weights[influence];
+				real local[3];
+				real_point3d point;
+				real_point3d placed;
+				real_vector3d direction;
+				real_vector3d turned;
+
+				if (weight <= 0.f || slot == NONE)
+					continue;
+				bind_transform(template_->bone_binds[slot], vertex->position.x, vertex->position.y, vertex->position.z,
+					1.f, local);
+				point.x = local[0] * scale;
+				point.y = local[1] * scale;
+				point.z = local[2] * scale;
+				matrix4x3_inverse_transform_point(&node->runtime_default_inverse_matrix, &point, &placed);
+				position.x += placed.x * weight;
+				position.y += placed.y * weight;
+				position.z += placed.z * weight;
+				bind_transform(template_->bone_binds[slot], vertex->normal.i, vertex->normal.j, vertex->normal.k, 0.f,
+					local);
+				direction.i = local[0];
+				direction.j = local[1];
+				direction.k = local[2];
+				matrix4x3_inverse_transform_vector(&node->runtime_default_inverse_matrix, &direction, &turned);
+				normalize3d(&turned);
+				normal.i += turned.i * weight;
+				normal.j += turned.j * weight;
+				normal.k += turned.k * weight;
+				bind_transform(template_->bone_binds[slot], vertex->tangent.i, vertex->tangent.j, vertex->tangent.k, 0.f,
+					local);
+				direction.i = local[0];
+				direction.j = local[1];
+				direction.k = local[2];
+				matrix4x3_inverse_transform_vector(&node->runtime_default_inverse_matrix, &direction, &turned);
+				tangent.i += turned.i * weight;
+				tangent.j += turned.j * weight;
+				tangent.k += turned.k * weight;
+			}
+			if (posed && normalize3d(&normal) > 0.0001f)
+			{
+				real along = dot_product3d(&tangent, &normal);
+
+				vertex->position = position;
+				vertex->normal = normal;
+				tangent.i -= normal.i * along;
+				tangent.j -= normal.j * along;
+				tangent.k -= normal.k * along;
+				if (normalize3d(&tangent) < 0.0001f)
+				{
+					perpendicular3d(&normal, &tangent);
+					normalize3d(&tangent);
+				}
+				vertex->tangent = tangent;
+				cross_product3d(&normal, &tangent, &vertex->binormal);
+				normalize3d(&vertex->binormal);
+			}
+			else
+			{
+				/* (as it is, in the model's space, scaled) */
+				vertex->position.x *= scale;
+				vertex->position.y *= scale;
+				vertex->position.z *= scale;
+			}
 		}
 	}
 	free(nodes);
+	free(binds);
 }
 
 /* the package's template of a model of the map, by the model's name: its
@@ -1182,6 +1425,7 @@ static boolean model_play(
 	long bitmap_count = 0;
 	long shader_count = 0;
 	long level_parts[5] = { 0, 0, 0, 0, 0 };
+	real scale;
 	char const *reason = "out of memory";
 	long index;
 
@@ -1209,7 +1453,16 @@ static boolean model_play(
 	reason = "the map's model has more nodes than its parts are drawn with";
 	if (definition->nodes.count <= 0 || definition->nodes.count >= RASTERIZER_MAXIMUM_NODES_PER_MODEL)
 		goto refused;
-	template_nodes_map(&template_, definition);
+	/* (a skinned template's by its skeleton, else by its size) */
+	if (skeleton_scale(&template_, definition, &scale))
+	{
+		platform_log("anniversary: %s's units are %f world units, by its skeleton", template_name, scale);
+	}
+	else
+	{
+		scale = template_scale(&template_, template_name, definition);
+	}
+	template_nodes_map(&template_, definition, scale);
 
 	/* the map's model's shaders that can be drawn with a texture (model
 	shaders with a base map), and each material's: the first's the first,
@@ -1260,8 +1513,7 @@ static boolean model_play(
 			goto refused;
 		bitmap_count++;
 	}
-	made = saber_model_new(tag_index, definition,
-		&template_, shader_indices, template_scale(&template_, template_name, definition), &reason);
+	made = saber_model_new(tag_index, definition, &template_, shader_indices, 1.f, &reason);
 	if (!made)
 		goto refused;
 

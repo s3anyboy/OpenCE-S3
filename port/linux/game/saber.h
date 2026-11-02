@@ -61,6 +61,13 @@ struct saber_template
 	nodes are the places of */
 	long bone_count;
 	char (*bones)[64];
+	/* each bone's parent's place (NONE: none), and its bind: what takes a
+	vertex (in Halo's axes, the template's units, a row vector) to the
+	bone's own space, 4x4 row-major */
+	long *bone_parents;
+	real (*bone_binds)[16];
+	/* and where it stands, in Halo's axes and the template's units */
+	real (*bone_origins)[3];
 	long part_count;
 	struct saber_mesh_part *parts;
 };

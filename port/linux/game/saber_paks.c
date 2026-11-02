@@ -750,25 +750,97 @@ static boolean node_rank_variant(
 	return FALSE;
 }
 
+/* the inverse of a 4x4 row-major matrix (Gauss-Jordan); FALSE if it has
+none */
+static boolean matrix_invert(
+	real const *matrix,
+	real *inverse)
+{
+	real work[4][8];
+	long row;
+	long column;
+
+	for (row = 0; row < 4; row++)
+	{
+		for (column = 0; column < 4; column++)
+		{
+			work[row][column] = matrix[4 * row + column];
+			work[row][4 + column] = row == column ? 1.f : 0.f;
+		}
+	}
+	for (column = 0; column < 4; column++)
+	{
+		long pivot = column;
+		real scale;
+
+		for (row = column + 1; row < 4; row++)
+		{
+			real a = work[row][column] < 0.f ? -work[row][column] : work[row][column];
+			real b = work[pivot][column] < 0.f ? -work[pivot][column] : work[pivot][column];
+
+			if (a > b)
+				pivot = row;
+		}
+		if (work[pivot][column] > -1e-12f && work[pivot][column] < 1e-12f)
+			return FALSE;
+		if (pivot != column)
+		{
+			real swap[8];
+
+			memcpy(swap, work[pivot], sizeof(swap));
+			memcpy(work[pivot], work[column], sizeof(swap));
+			memcpy(work[column], swap, sizeof(swap));
+		}
+		scale = 1.f / work[column][column];
+		for (row = 0; row < 8; row++)
+			work[column][row] *= scale;
+		for (row = 0; row < 4; row++)
+		{
+			long other;
+			real factor = work[row][column];
+
+			if (row == column)
+				continue;
+			for (other = 0; other < 8; other++)
+				work[row][other] -= factor * work[column][other];
+		}
+	}
+	for (row = 0; row < 4; row++)
+	{
+		for (column = 0; column < 4; column++)
+			inverse[4 * row + column] = work[row][4 + column];
+	}
+
+	return TRUE;
+}
+
 /* The slot among the template's bones of the bone a node moves with: its
 own, if it is one, else its nearest parent's that is, else (a template
 whose parts are not bones, as the vehicles') its own; its name made as
 Halo's nodes' are compared (lower case, spaces for underscores, without
-Saber3D's leading "." and trailing ".x"). NONE when there is no room. */
-static long bone_slot(
+Saber3D's leading "." and trailing ".x"), its parent's slot (the bone the
+bone's parent moves with) and its bind: what takes a vertex of the
+template, in Halo's axes, to the bone's own (the inverse of the bone's
+transform, after Halo's axes are turned back to Saber3D's). NONE when there
+is no room. */
+static long bone_slot_at(
 	struct saber_template *template_,
 	struct template_walk const *walk,
-	struct template_node const *node)
+	struct template_node const *node,
+	long depth)
 {
 	struct template_node const *bone = node;
 	char name[64];
 	unsigned long start;
 	unsigned long length;
 	unsigned long index;
-	long depth;
+	long climb;
 	long slot;
+	long parent = NONE;
+	real world[16];
+	real inverse[16];
 
-	for (depth = 0; bone && bone->bone_index == NONE && depth < MAXIMUM_NODE_DEPTH; depth++)
+	for (climb = 0; bone && bone->bone_index == NONE && climb < MAXIMUM_NODE_DEPTH; climb++)
 		bone = bone->parent_id == NONE ? NULL : node_of_id(walk, bone->parent_id);
 	if (!bone || bone->bone_index == NONE)
 		bone = node;
@@ -801,16 +873,67 @@ static long bone_slot(
 		if (!strcmp(template_->bones[slot], name))
 			return slot;
 	}
+	if (bone->parent_id != NONE && depth < MAXIMUM_NODE_DEPTH)
+	{
+		struct template_node const *above = node_of_id(walk, bone->parent_id);
+
+		if (above)
+			parent = bone_slot_at(template_, walk, above, depth + 1);
+	}
+	node_world_transform(walk, bone, world);
+	if (!matrix_invert(world, inverse))
+	{
+		for (index = 0; index < 16; index++)
+			inverse[index] = (index % 5) ? 0.f : 1.f;
+	}
 	{
 		char (*bones)[64] = realloc(template_->bones, sizeof(*template_->bones) * ((size_t)template_->bone_count + 1));
+		long *parents;
+		real (*binds)[16];
 
 		if (!bones)
 			return NONE;
 		template_->bones = bones;
+		parents = realloc(template_->bone_parents, sizeof(*parents) * ((size_t)template_->bone_count + 1));
+		if (!parents)
+			return NONE;
+		template_->bone_parents = parents;
+		binds = realloc(template_->bone_binds, sizeof(*binds) * ((size_t)template_->bone_count + 1));
+		if (!binds)
+			return NONE;
+		template_->bone_binds = binds;
+		{
+			real (*origins)[3] = realloc(template_->bone_origins,
+				sizeof(*origins) * ((size_t)template_->bone_count + 1));
+
+			if (!origins)
+				return NONE;
+			template_->bone_origins = origins;
+			origins[template_->bone_count][0] = world[12];
+			origins[template_->bone_count][1] = world[14];
+			origins[template_->bone_count][2] = world[13];
+		}
 		strcpy(bones[template_->bone_count], name);
+		parents[template_->bone_count] = parent;
+		/* (Halo's axes to Saber3D's, y and z exchanged: its rows 1 and 2) */
+		for (index = 0; index < 4; index++)
+		{
+			binds[template_->bone_count][index] = inverse[index];
+			binds[template_->bone_count][4 + index] = inverse[8 + index];
+			binds[template_->bone_count][8 + index] = inverse[4 + index];
+			binds[template_->bone_count][12 + index] = inverse[12 + index];
+		}
 	}
 
 	return template_->bone_count++;
+}
+
+static long bone_slot(
+	struct saber_template *template_,
+	struct template_walk const *walk,
+	struct template_node const *node)
+{
+	return bone_slot_at(template_, walk, node, 0);
 }
 
 /* the transform of normals of a row-vector transform: the inverse
@@ -1590,6 +1713,12 @@ void saber_template_dispose(
 		free(template_->materials);
 	if (template_->bones)
 		free(template_->bones);
+	if (template_->bone_parents)
+		free(template_->bone_parents);
+	if (template_->bone_binds)
+		free(template_->bone_binds);
+	if (template_->bone_origins)
+		free(template_->bone_origins);
 	csmemset(template_, 0, sizeof(*template_));
 }
 
