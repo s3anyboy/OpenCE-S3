@@ -31,7 +31,8 @@ every permutation of every region draws the template. Each of the
 template's submeshes is drawn with one of the map's model's shaders (its
 material's place among the template's, of the shaders there are), whose
 base map becomes the package's texture of the submesh's base material
-(its TexturesMips64 for now: the full textures are in pak_stream.s3dpak).
+(its full texture, from the level's package or pak_stream.s3dpak beside
+it, else its 64-pixel TexturesMips64), drawn without alpha testing.
 The shader loses its multipurpose and reflection maps, which are the
 classic model's. The map's model, shader and bitmap tags take the made
 definitions in place, and their own come back as the map goes.
@@ -77,10 +78,18 @@ char *tag_get_name(long tag_index);
 default paks, next to the executable) */
 #define DEFAULT_PAKS_FOLDER "paks"
 #define PAK_EXTENSION ".s3dpak"
+/* the package of the full textures, beside the levels' */
+#define STREAM_PAK_NAME "pak_stream.s3dpak"
+
+/* the most a texture's pixels may take (mod_bitmaps.c's: a quarter of the
+texture cache, which draws it among others) */
+#define MAXIMUM_TEXTURE_SIZE ((long)(HALO_PORT_TEXTURE_CACHE_SIZE / 4))
 
 /* models.c's shader types and model flags */
 #define SHADER_TYPE_MODEL 4
 #define MODEL_PARTS_HAVE_LOCAL_NODES_BIT 1
+/* rasterizer_xbox_models.c's model shader flags */
+#define SHADER_MODEL_NOT_ALPHA_TESTED_BIT 2
 
 /* bitmaps.c's types and flags */
 enum
@@ -251,6 +260,11 @@ static struct
 	struct saber_model *models;
 	struct saber_shader *shaders;
 	struct saber_bitmap *bitmaps;
+	/* the folder of the level's package (with its separator), and the
+	stream's package there, opened as a texture is first looked for in it */
+	char folder[1024];
+	struct saber_pak *stream;
+	boolean stream_tried;
 } saber_models_globals;
 
 /* ---------- private code */
@@ -710,6 +724,89 @@ static long model_tag_find(
 	return NONE;
 }
 
+/* the stream's package, pak_stream.s3dpak, beside the level's, or NULL */
+static struct saber_pak *saber_stream_pak(
+	void)
+{
+	if (!saber_models_globals.stream_tried)
+	{
+		char path[1100];
+		char const *reason;
+
+		saber_models_globals.stream_tried = TRUE;
+		snprintf(path, sizeof(path), "%s%s", saber_models_globals.folder, STREAM_PAK_NAME);
+		saber_models_globals.stream = saber_pak_open(path, &reason);
+		if (saber_models_globals.stream)
+			platform_log("anniversary: textures from %s", path);
+		else
+			platform_log("anniversary: no textures from %s: %s", path, reason);
+	}
+
+	return saber_models_globals.stream;
+}
+
+/* The texture `texture_name`, of the most detail there is that the texture
+cache can draw: the level's package's full texture, else the stream's
+(pak_stream.s3dpak, beside the level's: most full textures are there), else
+the level's 64-pixel one. FALSE, with *reason saying why, when there is none
+this build draws. */
+static boolean texture_find(
+	struct saber_pak *pak,
+	char const *texture_name,
+	struct saber_texture *texture,
+	char const **source,
+	char const **reason)
+{
+	struct saber_pak *paks[3];
+	long types[3];
+	char const *sources[3];
+	long index;
+
+	paks[0] = pak;
+	types[0] = _saber_entry_textures;
+	sources[0] = "the level's package";
+	paks[1] = saber_stream_pak();
+	types[1] = _saber_entry_textures;
+	sources[1] = "pak_stream";
+	paks[2] = pak;
+	types[2] = _saber_entry_textures_mips64;
+	sources[2] = "the level's 64-pixel mipmaps";
+	*reason = "the packages have not got its texture";
+	for (index = 0; index < 3; index++)
+	{
+		long entry = paks[index] ? saber_pak_find(paks[index], texture_name, types[index]) : NONE;
+		unsigned char *bytes;
+		unsigned long size = 0;
+
+		if (entry == NONE)
+			continue;
+		bytes = saber_pak_read(paks[index], entry, &size);
+		if (!bytes)
+		{
+			*reason = "its texture cannot be read";
+			continue;
+		}
+		if (!saber_texture_read(texture, bytes, size))
+		{
+			*reason = "its texture is not one this build draws (DXT)";
+			free(bytes);
+			continue;
+		}
+		free(bytes);
+		/* (what the texture cache takes for it, with its mipmaps' padding) */
+		if (texture->pixels_size > MAXIMUM_TEXTURE_SIZE)
+		{
+			*reason = "its texture is larger than the texture cache draws among others";
+			saber_texture_dispose(texture);
+			continue;
+		}
+		*source = sources[index];
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
 /* the bitmap of the package's texture `texture_name`, made to be played
 over the map's bitmap tag `bitmap_tag` as the texture cache draws a Custom
 Edition map's (not yet played), or NULL with *reason saying why not */
@@ -720,31 +817,20 @@ static struct saber_bitmap *saber_bitmap_new(
 	char const **reason)
 {
 	struct saber_bitmap *made;
-	unsigned char *bytes;
-	unsigned long size = 0;
-	long entry;
+	char const *source = NULL;
 
-	*reason = "the package has not got its texture";
-	entry = saber_pak_find(pak, texture_name, _saber_entry_textures_mips64);
-	if (entry == NONE)
-		entry = saber_pak_find(pak, texture_name, _saber_entry_textures);
-	if (entry == NONE)
-		return NULL;
 	*reason = "out of memory";
 	made = malloc(sizeof(*made));
 	if (!made)
 		return NULL;
 	csmemset(made, 0, sizeof(*made));
-	bytes = saber_pak_read(pak, entry, &size);
-	*reason = "its texture is not one this build draws (DXT)";
-	if (!bytes || !saber_texture_read(&made->texture, bytes, size))
+	if (!texture_find(pak, texture_name, &made->texture, &source, reason))
 	{
-		if (bytes)
-			free(bytes);
 		free(made);
 		return NULL;
 	}
-	free(bytes);
+	platform_log("anniversary: the texture %s from %s, %dx%d, %d mipmaps after the first", texture_name, source,
+		made->texture.width, made->texture.height, made->texture.mipmap_count);
 	made->tag_index = bitmap_tag;
 	made->bitmap.signature = BITMAP_GROUP_TAG;
 	made->bitmap.width = made->texture.width;
@@ -832,6 +918,9 @@ static boolean shader_plug(
 	shader->model.map_u_scale = 1.f;
 	shader->model.map_v_scale = 1.f;
 	shader->model.multipurpose_map.index = NONE;
+	/* (the package's textures' alpha is no alpha test's: drawn whole) */
+	SET_FLAG(shader->model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, TRUE);
+	shader->model.detail_mask = 0;
 	shader->model.reflection_cube_map.index = NONE;
 
 	return TRUE;
@@ -988,9 +1077,20 @@ void saber_models_tags_loaded(
 		return;
 	}
 	platform_log("anniversary: %s's models from %s", map_name, path);
+	{
+		char *separator = MAX(strrchr(path, '/'), strrchr(path, '\\'));
+		size_t length = separator ? (size_t)(separator - path) + 1 : 0;
+
+		memcpy(saber_models_globals.folder, path, length);
+		saber_models_globals.folder[length] = 0;
+	}
 	for (index = 0; index < NUMBEROF(saber_model_templates); index++)
 		model_play(pak, saber_model_templates[index].model_name, saber_model_templates[index].template_name);
 	saber_pak_close(pak);
+	if (saber_models_globals.stream)
+		saber_pak_close(saber_models_globals.stream);
+	saber_models_globals.stream = NULL;
+	saber_models_globals.stream_tried = FALSE;
 }
 
 void saber_models_tags_unloaded(
