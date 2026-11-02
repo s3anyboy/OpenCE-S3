@@ -2775,7 +2775,7 @@ static boolean saber_level_play(
 			part->vertex_count = 0;
 			continue;
 		}
-		sky = saber_level_material_sky(level.materials[material]);
+		sky = part->sky || saber_level_material_sky(level.materials[material]);
 		if (!sky && !saber_level_material_drawn(level.materials[material]))
 		{
 			part->vertex_count = 0;
@@ -2853,9 +2853,12 @@ static boolean saber_level_play(
 		made->texture = slots[material];
 		made->uv_scale[0] = part->uv_scale[0] != 0.f ? part->uv_scale[0] : 1.f;
 		made->uv_scale[1] = part->uv_scale[1] != 0.f ? part->uv_scale[1] : 1.f;
+		/* (a cloud's alpha, and a planet card's, is its shape. The dome's
+		colour is the texture's, and a clear alpha would cut the sky out) */
 		made->cutout = material_card(level.materials[material]) ||
 			(sky && strncmp(level.materials[material], "cloud", 5) == 0) ||
-			saber_texture_cutout(&saber_level.textures[made->texture], TRUE) ? TRUE : FALSE;
+			((!sky || strstr(level.materials[material], "planet") != NULL) &&
+				saber_texture_cutout(&saber_level.textures[made->texture], TRUE)) ? TRUE : FALSE;
 		made->lit_bsp = NONE;
 		vertices_size += (unsigned long)part->vertex_count * (unsigned long)compressed_size +
 			(unsigned long)part->triangle_count * 6 * sizeof(word);

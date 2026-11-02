@@ -59,6 +59,9 @@ on the Xbox 360, which are big-endian. What is read of one, as Reclaimer
 		0x0701 its submeshes: in its 0x0401 (after an i32 count), for each
 		a 0x0501 (its first triangle and count), and a 0x0B01 whose first
 		0x0E01 is the material its base layer is drawn with
+	0xEA01 a level's placed objects: an i32 count, then that many 0xE402
+		templates (a skydome, the cloud layers). Each one's 0xE502 is
+		"LPTA" and its name. Its materials are the level's.
 	A mesh named .lod1, .lod2 ... is the template's at a lower level of
 	detail.
 
@@ -120,6 +123,10 @@ uncompressed and compressed */
 enum
 {
 	_block_template = 0xE402,
+	/* a placed object's name: "LPTA" and then the name */
+	_block_object_name = 0xE502,
+	/* a level's placed objects: an i32 count, then that many templates */
+	_block_objects = 0xEA01,
 	_block_materials = 0x5501,
 	_block_material = 0x5601,
 	_block_node = 0xF000,
@@ -2209,6 +2216,123 @@ unsigned char *saber_pak_read(
 static int template_blocks_read(struct saber_template *template_, unsigned char const *bytes, unsigned long size,
 	struct block const *root, int xbox360, boolean level, char const **reason);
 
+/* whether a level's placed object is its sky (the dome, the clouds, the
+horizon), not a cinematic's or the water's */
+static boolean level_object_sky(
+	char const *name)
+{
+	return strstr(name, "sky") != NULL || strstr(name, "cloud") != NULL || strstr(name, "horizont") != NULL;
+}
+
+/* the placed object's name, from its 0xE502 ("LPTA" and the name), or
+FALSE when it has none */
+static boolean object_template_name(
+	unsigned char const *bytes,
+	struct block const *object,
+	char *name,
+	unsigned long size)
+{
+	struct block block;
+	unsigned long start;
+	unsigned long length;
+	unsigned long index;
+
+	name[0] = 0;
+	if (!size || !block_find(bytes, object->start, object->end, _block_object_name, &block))
+		return FALSE;
+	start = block.start;
+	if (block.end - start >= 4 && bytes[start] == 'L' && bytes[start + 1] == 'P' && bytes[start + 2] == 'T' &&
+		bytes[start + 3] == 'A')
+	{
+		start += 4;
+	}
+	length = 0;
+	while (start + length < block.end && bytes[start + length] && length + 1 < size)
+		length++;
+	for (index = 0; index < length; index++)
+		name[index] = (char)bytes[start + index];
+	name[length] = 0;
+
+	return length > 0;
+}
+
+/* one placed object of a level: its nodes read on their own (their ids are
+not the level's) and its meshes added to the level. A sky object's parts
+are marked so. A mesh that cannot be read leaves the object there */
+static void level_object_read(
+	struct saber_template *template_,
+	unsigned char const *bytes,
+	unsigned long size,
+	struct block const *object,
+	int xbox360)
+{
+	char name[64];
+	struct template_walk walk;
+	long first;
+	long index;
+	char const *reason = NULL;
+
+	if (!object_template_name(bytes, object, name, sizeof(name)) || !level_object_sky(name))
+		return;
+	csmemset(&walk, 0, sizeof(walk));
+	walk.bytes = bytes;
+	walk.size = size;
+	walk.level = TRUE;
+	walk.nodes = malloc(sizeof(*walk.nodes) * MAXIMUM_NODES);
+	if (!walk.nodes)
+		return;
+	nodes_read(&walk, object->start, object->end, 0);
+	if (walk.failed)
+	{
+		free(walk.nodes);
+		return;
+	}
+	first = template_->part_count;
+	for (index = 0; index < walk.node_count; index++)
+	{
+		if (!mesh_read(template_, &walk, &walk.nodes[index], xbox360 ? TRUE : FALSE, &reason))
+			break;
+	}
+	free(walk.nodes);
+	for (index = first; index < template_->part_count; index++)
+		template_->parts[index].sky = 1;
+}
+
+/* a level's placed objects (0xEA01): the skydome and the cloud layers live
+here, not among the level's own nodes */
+static void level_objects_read(
+	struct saber_template *template_,
+	unsigned char const *bytes,
+	unsigned long size,
+	struct block const *root,
+	int xbox360)
+{
+	unsigned long position = root->start;
+	struct block block;
+
+	while (position < root->end && block_at(bytes, position, root->end, &block))
+	{
+		if (block.type == _block_objects && block.end - block.start >= 4)
+		{
+			long count = (long)read_u32(bytes + block.start);
+			unsigned long at = block.start + 4;
+			struct block object;
+
+			if (count > 0 && count <= 64)
+			{
+				while (count > 0 && at < block.end && block_at(bytes, at, block.end, &object))
+				{
+					if (object.type == _block_template)
+						level_object_read(template_, bytes, size, &object, xbox360);
+					at = object.end;
+					count--;
+				}
+			}
+		}
+		position = block.end;
+	}
+}
+
 int saber_template_read(
 	struct saber_template *template_,
 	unsigned char const *bytes,
@@ -2310,6 +2434,10 @@ static int template_blocks_read(
 		}
 	}
 	free(walk.nodes);
+	/* (a level's skydome and cloud layers are placed objects, after its
+	own nodes) */
+	if (level)
+		level_objects_read(template_, bytes, size, &root, xbox360);
 	*reason = "it has no mesh";
 
 	return template_->part_count > 0;

@@ -75,6 +75,9 @@ struct saber_mesh_part
 	into the coordinates: the renderer keeps a coordinate in -1..1 */
 	real uv_scale[2];
 	real uv_offset[2];
+	/* a level's sky object (its skydome, its cloud layers): drawn with
+	the sky, whichever material it uses */
+	short sky;
 };
 
 struct saber_template
