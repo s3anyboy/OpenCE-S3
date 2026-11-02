@@ -2565,6 +2565,10 @@ struct saber_level_part
 	/* a sky mesh (clouds, the sky, stars, a planet): drawn by
 	saber_models_level_sky_render, not with the structure */
 	boolean sky;
+	/* a planet or a moon: drawn after the dome, which would cover it */
+	boolean in_front;
+	/* the skydome: the sky is centred on it */
+	boolean dome;
 	/* the texture's repeat (1 until a mesh says otherwise). Applied as the
 	shader's map scale, so a coordinate kept in -1..1 still tiles */
 	real uv_scale[2];
@@ -2776,6 +2780,9 @@ static boolean saber_level_play(
 			continue;
 		}
 		sky = part->sky || saber_level_material_sky(level.materials[material]);
+		made->in_front = sky && (strstr(level.materials[material], "planet") != NULL ||
+			strncmp(level.materials[material], "basis_sky", 9) == 0);
+		made->dome = sky && strncmp(level.materials[material], "stars", 5) == 0;
 		if (!sky && !saber_level_material_drawn(level.materials[material]))
 		{
 			part->vertex_count = 0;
@@ -3252,9 +3259,11 @@ int saber_models_level_sky_drawn(
 }
 
 /* the package's sky, in the map sky's place: full bright, with no fog and
-no depth, so the structure drawn afterwards covers it. A part past the far
-plane is pulled in towards the camera, which keeps it in view and in the
-direction it stands */
+no depth, so the structure drawn afterwards covers it. The sky is moved so
+its dome is centred on the camera, then fitted inside the far plane: left
+where the level puts it, the dome's rim crosses the view and its shell
+covers the planet. The dome is drawn first, the clouds over it, and a
+planet or a moon last */
 void saber_models_level_sky_render(
 	void)
 {
@@ -3267,45 +3276,91 @@ void saber_models_level_sky_render(
 	long sky_count;
 	long index;
 	long placed;
+	long anchor_index;
+	real_point3d anchor;
+	real reach;
 	real far_distance;
+	real scale;
 
 	if (!saber_level.drawn)
 		return;
 	sky_count = 0;
+	anchor_index = NONE;
 	for (index = 0; index < saber_level.part_count && sky_count < MAXIMUM_SABER_SKY_PARTS; index++)
 	{
-		if (saber_level.parts[index].sky)
-			order[sky_count++] = index;
+		if (!saber_level.parts[index].sky)
+			continue;
+		order[sky_count++] = index;
+		if (anchor_index == NONE ||
+			(saber_level.parts[index].dome && !saber_level.parts[anchor_index].dome) ||
+			(saber_level.parts[index].dome == saber_level.parts[anchor_index].dome &&
+				saber_level.parts[index].radius > saber_level.parts[anchor_index].radius))
+		{
+			anchor_index = index;
+		}
 	}
-	/* the farther part first: with no depth, a later part covers an earlier */
+	if (!sky_count || anchor_index == NONE)
+		return;
+	anchor = saber_level.parts[anchor_index].centroid;
+	reach = 0.f;
+	for (index = 0; index < sky_count; index++)
+	{
+		struct saber_level_part const *part = &saber_level.parts[order[index]];
+		long corner;
+
+		for (corner = 0; corner < 8; corner++)
+		{
+			real_vector3d offset;
+			real distance;
+
+			offset.i = ((corner & 1) ? part->bounds.x1 : part->bounds.x0) - anchor.x;
+			offset.j = ((corner & 2) ? part->bounds.y1 : part->bounds.y0) - anchor.y;
+			offset.k = ((corner & 4) ? part->bounds.z1 : part->bounds.z0) - anchor.z;
+			distance = magnitude3d(&offset);
+			if (distance > reach)
+				reach = distance;
+		}
+	}
+	far_distance = rasterizer_globals.far_clip_distance * 0.85f;
+	if (far_distance < 16.f)
+		far_distance = 16.f;
+	scale = reach > far_distance ? far_distance / reach : 1.f;
+	/* the dome, then the clouds, then a planet or a moon: with no depth a
+	later part covers an earlier. Farther first within a group */
 	for (placed = 1; placed < sky_count; placed++)
 	{
 		long item = order[placed];
 		long slot = placed;
+		long item_layer;
 		real item_distance;
 		real_vector3d offset;
-		real_vector3d earlier;
 
-		offset.i = saber_level.parts[item].centroid.x - render.camera.position.x;
-		offset.j = saber_level.parts[item].centroid.y - render.camera.position.y;
-		offset.k = saber_level.parts[item].centroid.z - render.camera.position.z;
+		offset.i = saber_level.parts[item].centroid.x - anchor.x;
+		offset.j = saber_level.parts[item].centroid.y - anchor.y;
+		offset.k = saber_level.parts[item].centroid.z - anchor.z;
 		item_distance = magnitude3d(&offset);
+		item_layer = saber_level.parts[item].in_front ? 2 : (saber_level.parts[item].dome ? 0 : 1);
 		while (slot > 0)
 		{
-			earlier.i = saber_level.parts[order[slot - 1]].centroid.x - render.camera.position.x;
-			earlier.j = saber_level.parts[order[slot - 1]].centroid.y - render.camera.position.y;
-			earlier.k = saber_level.parts[order[slot - 1]].centroid.z - render.camera.position.z;
-			if (magnitude3d(&earlier) >= item_distance)
+			long earlier = order[slot - 1];
+			long earlier_layer;
+			real earlier_distance;
+			boolean move;
+
+			offset.i = saber_level.parts[earlier].centroid.x - anchor.x;
+			offset.j = saber_level.parts[earlier].centroid.y - anchor.y;
+			offset.k = saber_level.parts[earlier].centroid.z - anchor.z;
+			earlier_distance = magnitude3d(&offset);
+			earlier_layer = saber_level.parts[earlier].in_front ? 2 : (saber_level.parts[earlier].dome ? 0 : 1);
+			move = item_layer < earlier_layer ||
+				(item_layer == earlier_layer && earlier_distance < item_distance);
+			if (!move)
 				break;
-			order[slot] = order[slot - 1];
+			order[slot] = earlier;
 			slot--;
 		}
 		order[slot] = item;
 	}
-
-	far_distance = rasterizer_globals.far_clip_distance * 0.85f;
-	if (far_distance < 16.f)
-		far_distance = 16.f;
 	csmemset(&lighting, 0, sizeof(lighting));
 	lighting.ambient_color = *global_real_rgb_white;
 	csmemset(&node, 0, sizeof(node));
@@ -3329,39 +3384,23 @@ void saber_models_level_sky_render(
 		struct saber_level_part *part = &saber_level.parts[order[placed]];
 		struct shader_model_definition shader;
 		real_rectangle3d scaled;
-		real max_distance = 0.f;
-		real scale = 1.f;
-		long corner;
 
-		for (corner = 0; corner < 8; corner++)
-		{
-			real_vector3d offset;
-			real distance;
-
-			offset.i = ((corner & 1) ? part->bounds.x1 : part->bounds.x0) - render.camera.position.x;
-			offset.j = ((corner & 2) ? part->bounds.y1 : part->bounds.y0) - render.camera.position.y;
-			offset.k = ((corner & 4) ? part->bounds.z1 : part->bounds.z0) - render.camera.position.z;
-			distance = magnitude3d(&offset);
-			if (distance > max_distance)
-				max_distance = distance;
-		}
-		if (max_distance > far_distance)
-			scale = far_distance / max_distance;
-		scaled.x0 = part->bounds.x0 * scale + render.camera.position.x * (1.f - scale);
-		scaled.x1 = part->bounds.x1 * scale + render.camera.position.x * (1.f - scale);
-		scaled.y0 = part->bounds.y0 * scale + render.camera.position.y * (1.f - scale);
-		scaled.y1 = part->bounds.y1 * scale + render.camera.position.y * (1.f - scale);
-		scaled.z0 = part->bounds.z0 * scale + render.camera.position.z * (1.f - scale);
-		scaled.z1 = part->bounds.z1 * scale + render.camera.position.z * (1.f - scale);
+		/* camera + (point - anchor) * scale */
+		scaled.x0 = render.camera.position.x + (part->bounds.x0 - anchor.x) * scale;
+		scaled.x1 = render.camera.position.x + (part->bounds.x1 - anchor.x) * scale;
+		scaled.y0 = render.camera.position.y + (part->bounds.y0 - anchor.y) * scale;
+		scaled.y1 = render.camera.position.y + (part->bounds.y1 - anchor.y) * scale;
+		scaled.z0 = render.camera.position.z + (part->bounds.z0 - anchor.z) * scale;
+		scaled.z1 = render.camera.position.z + (part->bounds.z1 - anchor.z) * scale;
 		if (!render_frustum_cube_visible(&render.frustum, &scaled, FALSE))
 			continue;
 		node.scale = scale;
-		node.position.x = render.camera.position.x * (1.f - scale);
-		node.position.y = render.camera.position.y * (1.f - scale);
-		node.position.z = render.camera.position.z * (1.f - scale);
-		parameters.centroid.x = part->centroid.x * scale + render.camera.position.x * (1.f - scale);
-		parameters.centroid.y = part->centroid.y * scale + render.camera.position.y * (1.f - scale);
-		parameters.centroid.z = part->centroid.z * scale + render.camera.position.z * (1.f - scale);
+		node.position.x = render.camera.position.x - anchor.x * scale;
+		node.position.y = render.camera.position.y - anchor.y * scale;
+		node.position.z = render.camera.position.z - anchor.z * scale;
+		parameters.centroid.x = render.camera.position.x + (part->centroid.x - anchor.x) * scale;
+		parameters.centroid.y = render.camera.position.y + (part->centroid.y - anchor.y) * scale;
+		parameters.centroid.z = render.camera.position.z + (part->centroid.z - anchor.z) * scale;
 		parameters.radius = part->radius * scale;
 		shader = saber_level.shaders[part->cutout ? 1 : 0];
 		shader.model.map_u_scale = part->uv_scale[0];
