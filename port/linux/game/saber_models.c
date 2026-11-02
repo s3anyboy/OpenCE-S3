@@ -48,7 +48,9 @@ the template's materials is drawn with one of the map's model's shaders
 that can be (model shaders with a base map: the first material the first,
 the next the next ...), whose base map becomes the package's texture of
 the material (its full texture, from the level's package or
-pak_stream.s3dpak beside it, else its 64-pixel TexturesMips64), drawn
+pak_stream.s3dpak beside it, or, in the Master Chief Collection's
+packages, from inplace1.ipak, inplace2.ipak, inplace2o.ipak and
+common.ipak in that folder, else its 64-pixel TexturesMips64), drawn
 without alpha testing. The shader loses its multipurpose and reflection
 maps, which are the classic model's. A shader or bitmap another model has
 too is drawn so for it as well. The map's model, shader and bitmap tags
@@ -108,6 +110,9 @@ default paks, next to the executable) */
 #define PAK_EXTENSION ".s3dpak"
 /* the package of the full textures, beside the levels' */
 #define STREAM_PAK_NAME "pak_stream.s3dpak"
+/* the Collection's texture archives, in the same folder */
+#define MAXIMUM_IPAKS 4
+#define MAXIMUM_TEXTURE_PAKS 8
 
 /* the most a texture's pixels may take (mod_bitmaps.c's: a quarter of the
 texture cache, which draws it among others) */
@@ -307,6 +312,10 @@ static struct
 	char folder[1024];
 	struct saber_pak *stream;
 	boolean stream_tried;
+	/* the Collection's .ipak texture archives in that folder */
+	struct saber_pak *ipaks[MAXIMUM_IPAKS];
+	long ipak_count;
+	boolean ipaks_tried;
 	/* the models drawn with ranks' geometries */
 	long ranked_count;
 	/* the shaders and bitmaps of the map's models that have no template,
@@ -890,11 +899,82 @@ static struct saber_pak *saber_stream_pak(
 	return saber_models_globals.stream;
 }
 
+/* the Collection's texture archives in the level's folder, once */
+static void ipaks_open(
+	void)
+{
+	static char const *const names[MAXIMUM_IPAKS] = {
+		"inplace1.ipak", "inplace2.ipak", "inplace2o.ipak", "common.ipak"
+	};
+	long index;
+
+	if (saber_models_globals.ipaks_tried)
+		return;
+	saber_models_globals.ipaks_tried = TRUE;
+	for (index = 0; index < MAXIMUM_IPAKS; index++)
+	{
+		char path[1100];
+		char const *reason;
+		struct saber_pak *pak;
+
+		snprintf(path, sizeof(path), "%s%s", saber_models_globals.folder, names[index]);
+		pak = saber_pak_open(path, &reason);
+		if (!pak)
+		{
+			if (strcmp(reason, "there is no such file"))
+				platform_log("anniversary: no textures from %s: %s", path, reason);
+			continue;
+		}
+		saber_models_globals.ipaks[saber_models_globals.ipak_count++] = pak;
+		platform_log("anniversary: textures from %s", path);
+	}
+}
+
+/* where a texture is looked for, most detail first: the level's package,
+the 360's pak_stream, the Collection's ipaks, then the level's 64-pixel
+mipmaps. `sources` may be NULL. */
+static long texture_paks(
+	struct saber_pak *pak,
+	struct saber_pak **paks,
+	long *types,
+	char const **sources)
+{
+	long count = 0;
+	long index;
+
+	paks[count] = pak;
+	types[count] = _saber_entry_textures;
+	if (sources)
+		sources[count] = "the level's package";
+	count++;
+	paks[count] = saber_stream_pak();
+	types[count] = _saber_entry_textures;
+	if (sources)
+		sources[count] = "pak_stream";
+	count++;
+	ipaks_open();
+	for (index = 0; index < saber_models_globals.ipak_count; index++)
+	{
+		paks[count] = saber_models_globals.ipaks[index];
+		types[count] = _saber_entry_textures;
+		if (sources)
+			sources[count] = "an ipak";
+		count++;
+	}
+	paks[count] = pak;
+	types[count] = _saber_entry_textures_mips64;
+	if (sources)
+		sources[count] = "the level's 64-pixel mipmaps";
+	count++;
+
+	return count;
+}
+
 /* The texture `texture_name`, of the most detail there is that the texture
 cache can draw: the level's package's full texture, else the stream's
 (pak_stream.s3dpak, beside the level's: most full textures are there), else
-the level's 64-pixel one. FALSE, with *reason saying why, when there is none
-this build draws. */
+the Collection's ipaks in that folder, else the level's 64-pixel one.
+FALSE, with *reason saying why, when there is none this build draws. */
 static boolean texture_find(
 	struct saber_pak *pak,
 	char const *texture_name,
@@ -902,22 +982,15 @@ static boolean texture_find(
 	char const **source,
 	char const **reason)
 {
-	struct saber_pak *paks[3];
-	long types[3];
-	char const *sources[3];
+	struct saber_pak *paks[MAXIMUM_TEXTURE_PAKS];
+	long types[MAXIMUM_TEXTURE_PAKS];
+	char const *sources[MAXIMUM_TEXTURE_PAKS];
+	long count;
 	long index;
 
-	paks[0] = pak;
-	types[0] = _saber_entry_textures;
-	sources[0] = "the level's package";
-	paks[1] = saber_stream_pak();
-	types[1] = _saber_entry_textures;
-	sources[1] = "pak_stream";
-	paks[2] = pak;
-	types[2] = _saber_entry_textures_mips64;
-	sources[2] = "the level's 64-pixel mipmaps";
+	count = texture_paks(pak, paks, types, sources);
 	*reason = "the packages have not got its texture";
-	for (index = 0; index < 3; index++)
+	for (index = 0; index < count; index++)
 	{
 		long entry = paks[index] ? saber_pak_find(paks[index], texture_name, types[index]) : NONE;
 		unsigned char *bytes;
@@ -1100,23 +1173,19 @@ static boolean mask_find(
 	struct saber_texture const *base,
 	struct saber_texture *mask)
 {
-	struct saber_pak *paks[3];
-	long types[3];
+	struct saber_pak *paks[MAXIMUM_TEXTURE_PAKS];
+	long types[MAXIMUM_TEXTURE_PAKS];
+	long count;
 	long suffix;
 	long index;
 
-	paks[0] = pak;
-	types[0] = _saber_entry_textures;
-	paks[1] = saber_stream_pak();
-	types[1] = _saber_entry_textures;
-	paks[2] = pak;
-	types[2] = _saber_entry_textures_mips64;
+	count = texture_paks(pak, paks, types, NULL);
 	for (suffix = 0; suffix < (banded ? 2 : 1); suffix++)
 	{
 		char name[96];
 
 		snprintf(name, sizeof(name), "%s%s", texture_name, suffix ? "_br" : "_mpmask");
-		for (index = 0; index < 3; index++)
+		for (index = 0; index < count; index++)
 		{
 			long entry = paks[index] ? saber_pak_find(paks[index], name, types[index]) : NONE;
 			unsigned char *bytes;
@@ -2978,6 +3047,14 @@ void saber_models_tags_loaded(
 		saber_pak_close(saber_models_globals.stream);
 	saber_models_globals.stream = NULL;
 	saber_models_globals.stream_tried = FALSE;
+	{
+		long index;
+
+		for (index = 0; index < saber_models_globals.ipak_count; index++)
+			saber_pak_close(saber_models_globals.ipaks[index]);
+	}
+	saber_models_globals.ipak_count = 0;
+	saber_models_globals.ipaks_tried = FALSE;
 }
 
 void saber_models_tags_unloaded(

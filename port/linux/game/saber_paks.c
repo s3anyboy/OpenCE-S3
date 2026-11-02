@@ -14,11 +14,21 @@ A package is an entry directory and the entries' data, one stream:
 
 The Xbox 360's packages (paks360) compress the stream in blocks: a u32
 block count, each block's offset in the file, then the blocks, each an
-XMemCompress stream (saber_lzx.c). The PC's (Halo: The Master Chief
-Collection's) are the stream itself. As Reclaimer tells them apart: a
-package whose fourth u32 is no name length (0 or less, or over 1024) is
-compressed. Blocks are read as their entries are, and the last one read is
-kept.
+XMemCompress stream (saber_lzx.c). The Master Chief Collection's packages,
+and its .ipak texture archives, compress the stream in zlib chunks: a u32
+chunk count, each chunk's offset in the file, and at that offset a u32 of
+the chunk's uncompressed size (128 KB, less for the last) then a zlib
+stream (port/linux/src/zlib_inflate.c). As Reclaimer tells a 360 package
+from an uncompressed one: a package whose fourth u32 is no name length (0
+or less, or over 1024) is compressed. A chunk whose first bytes are a zlib
+header is the Collection's, and the 360's blocks are not. Blocks are read
+as their entries are, and the last one read is kept.
+
+An .ipak's stream is not that entry directory. It is a u32 count, a u32 0,
+then one 328-byte record a texture: a 264-byte name, and at 308 and 312
+the size and offset of its pixels. A 58-byte TCIP header stands in front
+of those pixels (Sabre-unPacker's ipak). Each record becomes an entry of
+type Textures, so a texture is found as one in a package is.
 
 A template is blocks, each a u16 type (big-endian), the offset of its end in
 the template (i32, little-endian) and its contents, some of them blocks of
@@ -82,6 +92,9 @@ paths (the game's fopen takes the Xbox's) */
 void *config_host_file_open(const char *path, unsigned long *size);
 int config_host_file_read(void *file, unsigned long offset, void *buffer, unsigned long size);
 void config_host_file_close(void *file);
+/* one zlib stream (port/linux/src/zlib_inflate.c): the bytes written, or -1 */
+long port_zlib_inflate(void const *source, unsigned long source_size, void *destination,
+	unsigned long destination_size);
 
 /* ---------- constants */
 
@@ -95,6 +108,13 @@ uncompressed and compressed */
 #define MAXIMUM_ENTRIES 0x10000
 #define MAXIMUM_NAME_LENGTH 1024
 #define MAXIMUM_ENTRY_SIZE (256UL * 1024 * 1024)
+/* an .ipak texture record: its name, then the texture's size and offset */
+#define IPAK_RECORD_SIZE 328
+#define IPAK_NAME_SIZE 264
+#define IPAK_SIZE_AT 308
+#define IPAK_OFFSET_AT 312
+/* a TCIP header in front of the pixels the record's size counts */
+#define IPAK_HEADER_SIZE 58
 
 /* a template's blocks */
 enum
@@ -165,6 +185,9 @@ struct saber_pak
 	void *file;
 	unsigned long file_size;
 	int compressed;
+	/* the 360's LZX blocks, or the Collection's zlib chunks */
+	int xbox360;
+	int zlib_chunks;
 	/* the blocks' offsets in the file, and in the stream (one more than
 	there are blocks, the ends) */
 	long block_count;
@@ -349,19 +372,31 @@ static unsigned char *block_get(
 	struct saber_pak *pak,
 	long block_index)
 {
-	unsigned long compressed_size = pak->block_offsets[block_index + 1] - pak->block_offsets[block_index];
+	unsigned long file_offset = pak->block_offsets[block_index];
+	unsigned long compressed_size = pak->block_offsets[block_index + 1] - file_offset;
 	unsigned long size = pak->block_starts[block_index + 1] - pak->block_starts[block_index];
 	long written;
 
 	if (pak->cached_block == block_index)
 		return pak->block;
 	pak->cached_block = NONE;
+	/* (a zlib chunk's first four bytes are its uncompressed size) */
+	if (pak->zlib_chunks)
+	{
+		if (compressed_size < 4)
+			return NULL;
+		compressed_size -= 4;
+		file_offset += 4;
+	}
 	if (compressed_size > MAXIMUM_COMPRESSED_BLOCK_SIZE ||
-		!file_read(pak, pak->block_offsets[block_index], pak->compressed_block, compressed_size))
+		!file_read(pak, file_offset, pak->compressed_block, compressed_size))
 	{
 		return NULL;
 	}
-	written = saber_lzx_decompress(pak->lzx, pak->compressed_block, compressed_size, pak->block, MAXIMUM_BLOCK_SIZE);
+	if (pak->zlib_chunks)
+		written = port_zlib_inflate(pak->compressed_block, compressed_size, pak->block, size);
+	else
+		written = saber_lzx_decompress(pak->lzx, pak->compressed_block, compressed_size, pak->block, MAXIMUM_BLOCK_SIZE);
 	if (written < 0 || (unsigned long)written != size)
 		return NULL;
 	pak->cached_block = block_index;
@@ -477,6 +512,99 @@ static boolean blocks_open(
 	return TRUE;
 }
 
+/* a zlib header: deflate, and the two bytes a multiple of 31 */
+static boolean zlib_header(
+	unsigned char const *bytes)
+{
+	unsigned long check = (unsigned long)bytes[0] * 256UL + bytes[1];
+
+	return (bytes[0] & 0x0F) == 8 && check % 31UL == 0;
+}
+
+/* the Collection's chunks, not the 360's blocks: the first block's offset
+holds a zlib chunk */
+static boolean mcc_package(
+	struct saber_pak *pak,
+	unsigned long count,
+	unsigned long first)
+{
+	unsigned char header[6];
+	unsigned long size;
+
+	if (count == 0 || count > MAXIMUM_BLOCKS || first < 4 + 4 * count || first > pak->file_size - 6)
+		return FALSE;
+	if (!file_read(pak, first, header, 6))
+		return FALSE;
+	size = read_u32(header);
+	if (size == 0 || size > MAXIMUM_BLOCK_SIZE || !zlib_header(header + 4))
+		return FALSE;
+
+	return TRUE;
+}
+
+/* the Collection's zlib chunks, as blocks_open reads the 360's */
+static boolean zlib_blocks_open(
+	struct saber_pak *pak,
+	char const **reason)
+{
+	unsigned char *table;
+	long index;
+
+	*reason = "its blocks are not a package's";
+	if (pak->block_count <= 0 || pak->block_count > MAXIMUM_BLOCKS ||
+		4 + 4 * (unsigned long)pak->block_count > pak->file_size)
+	{
+		return FALSE;
+	}
+	*reason = "out of memory";
+	table = malloc(4 * (size_t)pak->block_count);
+	pak->block_offsets = malloc(sizeof(unsigned long) * ((size_t)pak->block_count + 1));
+	pak->block_starts = malloc(sizeof(unsigned long) * ((size_t)pak->block_count + 1));
+	pak->block = malloc(MAXIMUM_BLOCK_SIZE);
+	pak->compressed_block = malloc(MAXIMUM_COMPRESSED_BLOCK_SIZE);
+	if (!table || !pak->block_offsets || !pak->block_starts || !pak->block || !pak->compressed_block)
+	{
+		if (table)
+			free(table);
+		return FALSE;
+	}
+	*reason = "it cannot be read";
+	if (!file_read(pak, 4, table, 4 * (unsigned long)pak->block_count))
+	{
+		free(table);
+		return FALSE;
+	}
+	for (index = 0; index < pak->block_count; index++)
+		pak->block_offsets[index] = read_u32(table + 4 * index);
+	free(table);
+	pak->block_offsets[pak->block_count] = pak->file_size;
+	pak->block_starts[0] = 0;
+	*reason = "its blocks are not a package's";
+	for (index = 0; index < pak->block_count; index++)
+	{
+		unsigned char header[6];
+		unsigned long size;
+
+		if (pak->block_offsets[index] < 4 + 4 * (unsigned long)pak->block_count ||
+			pak->block_offsets[index] + 6 > pak->block_offsets[index + 1] ||
+			!file_read(pak, pak->block_offsets[index], header, 6))
+		{
+			return FALSE;
+		}
+		size = read_u32(header);
+		if (size == 0 || size > MAXIMUM_BLOCK_SIZE || !zlib_header(header + 4) ||
+			pak->block_starts[index] + size < pak->block_starts[index])
+		{
+			return FALSE;
+		}
+		pak->block_starts[index + 1] = pak->block_starts[index] + size;
+	}
+	pak->stream_size = pak->block_starts[pak->block_count];
+	pak->cached_block = NONE;
+
+	return TRUE;
+}
+
 static boolean directory_read(
 	struct saber_pak *pak,
 	char const **reason)
@@ -542,6 +670,88 @@ static boolean directory_read(
 		name += name_length + 1;
 		position += name_length + 12;
 	}
+
+	return TRUE;
+}
+
+/* an .ipak: its first word a count and its second 0, then a texture's name */
+static boolean ipak_stream(
+	struct saber_pak *pak)
+{
+	unsigned char words[9];
+	unsigned long count;
+
+	if (!stream_read(pak, 0, words, 9))
+		return FALSE;
+	count = read_u32(words);
+	if (read_u32(words + 4) != 0 || count == 0 || count > MAXIMUM_ENTRIES)
+		return FALSE;
+
+	return words[8] >= 32 && words[8] < 127;
+}
+
+/* the .ipak's records as texture entries */
+static boolean ipak_entries(
+	struct saber_pak *pak,
+	char const **reason)
+{
+	unsigned char words[8];
+	unsigned char record[IPAK_RECORD_SIZE];
+	unsigned long count;
+	unsigned long position;
+	char *name;
+	long index;
+
+	*reason = "its directory is not a package's";
+	if (!stream_read(pak, 0, words, 8))
+		return FALSE;
+	count = read_u32(words);
+	if (read_u32(words + 4) != 0 || count == 0 || count > MAXIMUM_ENTRIES)
+		return FALSE;
+	*reason = "out of memory";
+	pak->entries = malloc(sizeof(*pak->entries) * ((size_t)count + 1));
+	pak->names = malloc((size_t)count * (IPAK_NAME_SIZE + 1));
+	if (!pak->entries || !pak->names)
+		return FALSE;
+	*reason = "its directory is not a package's";
+	position = 8;
+	name = pak->names;
+	pak->entry_count = 0;
+	for (index = 0; (unsigned long)index < count; index++)
+	{
+		struct pak_entry *entry;
+		unsigned long length = 0;
+		unsigned long size;
+		unsigned long offset;
+
+		if (!stream_read(pak, position, record, IPAK_RECORD_SIZE))
+			return FALSE;
+		position += IPAK_RECORD_SIZE;
+		while (length < IPAK_NAME_SIZE && record[length])
+			length++;
+		if (!length || length >= IPAK_NAME_SIZE)
+			continue;
+		size = read_u32(record + IPAK_SIZE_AT);
+		offset = read_u32(record + IPAK_OFFSET_AT);
+		/* (the record's size counts the pixels, and the header before them
+		is part of what a texture reader takes) */
+		if (!size || size > MAXIMUM_ENTRY_SIZE - IPAK_HEADER_SIZE || offset > pak->stream_size ||
+			size + IPAK_HEADER_SIZE > pak->stream_size - offset)
+		{
+			continue;
+		}
+		size += IPAK_HEADER_SIZE;
+		entry = &pak->entries[pak->entry_count++];
+		memcpy(name, record, length);
+		name[length] = 0;
+		entry->name = name;
+		entry->offset = offset;
+		entry->size = size;
+		entry->type = _saber_entry_textures;
+		name += length + 1;
+	}
+	if (!pak->entry_count)
+		return FALSE;
 
 	return TRUE;
 }
@@ -1859,10 +2069,20 @@ struct saber_pak *saber_pak_open(
 		goto refused;
 	if (!file_read(pak, 0, words, 16))
 		goto refused;
-	/* (a compressed package's fourth word is a block's offset, or 0) */
-	pak->compressed = (long)read_u32(words + 12) <= 0 || read_u32(words + 12) > MAXIMUM_NAME_LENGTH;
-	if (pak->compressed)
+	/* (the Collection's zlib chunks, else the 360's LZX blocks: a
+	compressed package's fourth word is a block's offset, or 0) */
+	if (mcc_package(pak, read_u32(words), read_u32(words + 4)))
 	{
+		pak->compressed = TRUE;
+		pak->zlib_chunks = TRUE;
+		pak->block_count = (long)read_u32(words);
+		if (!zlib_blocks_open(pak, reason))
+			goto refused;
+	}
+	else if ((long)read_u32(words + 12) <= 0 || read_u32(words + 12) > MAXIMUM_NAME_LENGTH)
+	{
+		pak->compressed = TRUE;
+		pak->xbox360 = TRUE;
 		pak->block_count = (long)read_u32(words);
 		if (!blocks_open(pak, reason))
 			goto refused;
@@ -1871,8 +2091,22 @@ struct saber_pak *saber_pak_open(
 	{
 		pak->stream_size = pak->file_size;
 	}
-	if (!directory_read(pak, reason))
+	if (pak->zlib_chunks)
+	{
+		if (ipak_stream(pak))
+		{
+			if (!ipak_entries(pak, reason))
+				goto refused;
+		}
+		else if (!directory_read(pak, reason))
+		{
+			goto refused;
+		}
+	}
+	else if (!directory_read(pak, reason))
+	{
 		goto refused;
+	}
 
 	return pak;
 
@@ -1911,7 +2145,7 @@ void saber_pak_close(
 int saber_pak_xbox360(
 	struct saber_pak const *pak)
 {
-	return pak->compressed;
+	return pak->xbox360;
 }
 
 long saber_pak_entry_count(
