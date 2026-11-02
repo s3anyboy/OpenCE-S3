@@ -123,6 +123,13 @@ void saber_template_dispose(struct saber_template *template_);
 Textures), DXT only, or FALSE (saber_texture_dispose lets go of it) */
 int saber_texture_read(struct saber_texture *texture, unsigned char const *bytes, unsigned long size);
 void saber_texture_dispose(struct saber_texture *texture);
+/* whether a texture's alpha cuts it out (leaves, grass: many texels clear
+and many solid), which is drawn alpha tested; not a texture whose alpha is
+another mask, all low or all high */
+int saber_texture_cutout(struct saber_texture const *texture);
+/* a texture's alpha made solid throughout (DXT3's and DXT5's), for one not
+cut out that is drawn by a shader alpha tested for another's sake */
+void saber_texture_make_solid(struct saber_texture *texture);
 
 /* ---------- prototypes/SABER_MODELS.C */
 

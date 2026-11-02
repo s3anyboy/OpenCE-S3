@@ -97,10 +97,16 @@ default paks, next to the executable) */
 texture cache, which draws it among others) */
 #define MAXIMUM_TEXTURE_SIZE ((long)(HALO_PORT_TEXTURE_CACHE_SIZE / 4))
 
+/* the most textures one bitmap of the map holds (as permutations), and the
+most materials a template draws */
+#define MAXIMUM_SABER_BITMAP_TEXTURES 32
+#define MAXIMUM_SABER_MATERIALS 64
+
 /* models.c's shader types and model flags */
 #define SHADER_TYPE_MODEL 4
 #define MODEL_PARTS_HAVE_LOCAL_NODES_BIT 1
 /* rasterizer_xbox_models.c's model shader flags */
+#define SHADER_MODEL_TWO_SIDED_BIT 1
 #define SHADER_MODEL_NOT_ALPHA_TESTED_BIT 2
 #define SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT 3
 
@@ -217,6 +223,9 @@ typedef char verify_shader_model_properties_size[sizeof(struct shader_model_prop
 /* a model made of a template, played over the map's model tag */
 struct saber_model
 {
+	/* its shaders: the map's model's, then one for each of the template's
+	materials (a shader of the map's model, the permutation its texture) */
+	struct model_shader_reference *shaders;
 	struct saber_model *next;
 	long tag_index;
 	struct model map_model;
@@ -242,14 +251,21 @@ struct saber_shader
 	struct shader_model_definition map_shader;
 };
 
-/* a bitmap of the map that is a texture of the package */
+/* a bitmap of the map that is textures of the package: each a bitmap of
+it, which a shader reference's permutation chooses (the renderer draws a
+model shader's base map's bitmap of the permutation), so that one shader
+draws each material of a template that has more than its model's shaders */
 struct saber_bitmap
 {
 	struct saber_bitmap *next;
 	long tag_index;
 	struct bitmap_group map_group;
-	struct bitmap_data bitmap;
-	struct saber_texture texture;
+	long count;
+	struct bitmap_data bitmaps[MAXIMUM_SABER_BITMAP_TEXTURES];
+	struct saber_texture textures[MAXIMUM_SABER_BITMAP_TEXTURES];
+	char names[MAXIMUM_SABER_BITMAP_TEXTURES][64];
+	/* whether each is cut out by its alpha (saber_texture_cutout) */
+	boolean cutouts[MAXIMUM_SABER_BITMAP_TEXTURES];
 };
 
 /* ---------- globals */
@@ -369,8 +385,7 @@ static real template_scale(
 	boolean found = FALSE;
 	real map_span;
 	real ratio;
-	real best = 0.f;
-	real best_distance = 0.f;
+	real best;
 	long part_index;
 	long index;
 
@@ -393,25 +408,17 @@ static real template_scale(
 			high.y = MAX(high.y, position->y);
 		}
 	}
-	if (!found || (high.x - low.x) + (high.y - low.y) <= 0.f || !map_model_span(map_model, &map_span))
+	/* (a template of a "__" kind, the scenery's, the vehicles', the
+	powerups', is in metres; the others, the characters' and weapons', in
+	tenths of a foot. Its size is no guide: a template may carry what is not
+	the model's, as c_uplink__h carries crates 69 metres off) */
+	best = strstr(template_name, "__") ? saber_units[0] : saber_units[1];
+	if (found && (high.x - low.x) + (high.y - low.y) > 0.f && map_model_span(map_model, &map_span))
 	{
-		size_t length = strlen(template_name);
-
-		return length > 3 && !strcmp(template_name + length - 3, "__h") ? saber_units[0] : saber_units[1];
+		ratio = map_span / ((high.x - low.x) + (high.y - low.y));
+		platform_log("anniversary: %s's units are %f world units (its size is %f of the map's model's)",
+			template_name, best, 1.f / ratio);
 	}
-	ratio = map_span / ((high.x - low.x) + (high.y - low.y));
-	for (index = 0; index < NUMBEROF(saber_units); index++)
-	{
-		real distance = ratio > saber_units[index] ? ratio / saber_units[index] : saber_units[index] / ratio;
-
-		if (!index || distance < best_distance)
-		{
-			best = saber_units[index];
-			best_distance = distance;
-		}
-	}
-	platform_log("anniversary: %s's units are %f world units (its size is %f of the map's model's)",
-		template_name, best, 1.f / ratio);
 
 	return best;
 }
@@ -477,6 +484,8 @@ static void saber_model_free(
 		else
 			free(made->vertices);
 	}
+	if (made->shaders)
+		free(made->shaders);
 	if (made->regions)
 		free(made->regions);
 	if (made->permutations)
@@ -801,53 +810,61 @@ static boolean texture_find(
 	return FALSE;
 }
 
-/* the bitmap of the package's texture `texture_name`, made to be played
-over the map's bitmap tag `bitmap_tag` as the texture cache draws a Custom
-Edition map's (not yet played), or NULL with *reason saying why not */
-static struct saber_bitmap *saber_bitmap_new(
+/* Reads the package's texture `texture_name` as a bitmap of the map's
+bitmap tag `bitmap_tag`, as the texture cache draws a Custom Edition map's
+(not yet played); FALSE with *reason saying why not. */
+static boolean saber_texture_bitmap(
 	struct saber_pak *pak,
 	long bitmap_tag,
 	char const *texture_name,
+	struct saber_texture *texture,
+	struct bitmap_data *bitmap,
 	char const **reason)
 {
-	struct saber_bitmap *made;
 	char const *source = NULL;
 
-	*reason = "out of memory";
-	made = malloc(sizeof(*made));
-	if (!made)
-		return NULL;
-	csmemset(made, 0, sizeof(*made));
-	if (!texture_find(pak, texture_name, &made->texture, &source, reason))
-	{
-		free(made);
-		return NULL;
-	}
+	csmemset(texture, 0, sizeof(*texture));
+	csmemset(bitmap, 0, sizeof(*bitmap));
+	if (!texture_find(pak, texture_name, texture, &source, reason))
+		return FALSE;
 	platform_log("anniversary: the texture %s from %s, %dx%d, %d mipmaps after the first", texture_name, source,
-		made->texture.width, made->texture.height, made->texture.mipmap_count);
-	made->tag_index = bitmap_tag;
-	made->bitmap.signature = BITMAP_GROUP_TAG;
-	made->bitmap.width = made->texture.width;
-	made->bitmap.height = made->texture.height;
-	made->bitmap.depth = 1;
-	made->bitmap.type = _bitmap_type_2d;
-	made->bitmap.format = made->texture.format;
-	made->bitmap.flags = FLAG(_bitmap_has_power_of_two_dimensions_bit) | FLAG(_bitmap_compressed_bit) |
+		texture->width, texture->height, texture->mipmap_count);
+	bitmap->signature = BITMAP_GROUP_TAG;
+	bitmap->width = texture->width;
+	bitmap->height = texture->height;
+	bitmap->depth = 1;
+	bitmap->type = _bitmap_type_2d;
+	bitmap->format = texture->format;
+	bitmap->flags = FLAG(_bitmap_has_power_of_two_dimensions_bit) | FLAG(_bitmap_compressed_bit) |
 		FLAG(_bitmap_cached_bit);
-	made->bitmap.mipmap_count = made->texture.mipmap_count;
-	made->bitmap.pixels_offset = 0;
-	made->bitmap.pixels_size = bitmap_get_pixel_data_size(&made->bitmap);
-	made->bitmap.tag_index = bitmap_tag;
-	made->bitmap.cache_block_index = NONE;
+	bitmap->mipmap_count = texture->mipmap_count;
+	bitmap->pixels_offset = 0;
+	bitmap->pixels_size = bitmap_get_pixel_data_size(bitmap);
+	bitmap->tag_index = bitmap_tag;
+	bitmap->cache_block_index = NONE;
 	*reason = "its texture's pixels are not all there";
-	if (made->bitmap.pixels_size <= 0 || made->bitmap.pixels_size > made->texture.pixels_size)
+	if (bitmap->pixels_size <= 0 || bitmap->pixels_size > texture->pixels_size)
 	{
-		saber_texture_dispose(&made->texture);
-		free(made);
-		return NULL;
+		saber_texture_dispose(texture);
+		return FALSE;
 	}
 
-	return made;
+	return TRUE;
+}
+
+/* the textures played over the map's bitmap tag, or NULL */
+static struct saber_bitmap *bitmap_played_get(
+	long tag_index)
+{
+	struct saber_bitmap *played;
+
+	for (played = saber_models_globals.bitmaps; played; played = played->next)
+	{
+		if (played->tag_index == tag_index)
+			return played;
+	}
+
+	return NULL;
 }
 
 /* whether the shader or bitmap tag is already played over */
@@ -863,35 +880,6 @@ static boolean shader_played(
 	}
 
 	return FALSE;
-}
-
-static boolean bitmap_played(
-	long tag_index)
-{
-	struct saber_bitmap const *played;
-
-	for (played = saber_models_globals.bitmaps; played; played = played->next)
-	{
-		if (played->tag_index == tag_index)
-			return TRUE;
-	}
-
-	return FALSE;
-}
-
-/* Plays the bitmap made over its map's tag. */
-static void bitmap_plug(
-	struct saber_bitmap *made)
-{
-	struct bitmap_group *group = bitmap_group_get(made->tag_index);
-
-	made->map_group = *group;
-	group->sequences.count = 0;
-	group->bitmaps.count = 1;
-	group->bitmaps.address = &made->bitmap;
-	group->bitmaps.definition = NULL;
-	made->next = saber_models_globals.bitmaps;
-	saber_models_globals.bitmaps = made;
 }
 
 /* whether a model shader lights itself (its self-illumination's colours,
@@ -924,6 +912,9 @@ static boolean shader_plug(
 	shader->model.map_u_scale = 1.f;
 	shader->model.map_v_scale = 1.f;
 	shader->model.multipurpose_map.index = NONE;
+	/* (and its detail map, whose pattern (a cyborg's mottling) the
+	template's texture coordinates do not lay as the classic model's did) */
+	shader->model.detail_map.index = NONE;
 	/* (with no multipurpose map to mask it, an object's change colour would
 	tint it whole: the package's textures have their colours) */
 	shader->model.change_color_source = 0;
@@ -996,6 +987,66 @@ static void template_effects_remove(
 		}
 		template_->part_count = kept;
 	}
+}
+
+/* the template's parts less those far from the rest (let go of): a
+part's middle more than four times the size of the template's largest part
+from that part's (c_uplink__h carries crates of a scene 69 metres off) */
+static void template_strays_remove(
+	struct saber_template *template_)
+{
+	real_point3d middles[MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5];
+	real radii[MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5];
+	long largest = NONE;
+	long kept = 0;
+	long index;
+
+	if (template_->part_count > MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5)
+		return;
+	for (index = 0; index < template_->part_count; index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[index];
+		real_point3d low = part->vertices[0].position;
+		real_point3d high = part->vertices[0].position;
+		real_vector3d across;
+		long vertex;
+
+		for (vertex = 1; vertex < part->vertex_count; vertex++)
+		{
+			real_point3d const *position = &part->vertices[vertex].position;
+
+			low.x = MIN(low.x, position->x);
+			low.y = MIN(low.y, position->y);
+			low.z = MIN(low.z, position->z);
+			high.x = MAX(high.x, position->x);
+			high.y = MAX(high.y, position->y);
+			high.z = MAX(high.z, position->z);
+		}
+		middles[index].x = (low.x + high.x) / 2.f;
+		middles[index].y = (low.y + high.y) / 2.f;
+		middles[index].z = (low.z + high.z) / 2.f;
+		vector_from_points3d(&low, &high, &across);
+		radii[index] = magnitude3d(&across) / 2.f;
+		if (largest == NONE || part->vertex_count > template_->parts[largest].vertex_count)
+			largest = index;
+	}
+	if (largest == NONE || radii[largest] <= 0.f)
+		return;
+	for (index = 0; index < template_->part_count; index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[index];
+		real_vector3d apart;
+
+		vector_from_points3d(&middles[largest], &middles[index], &apart);
+		if (magnitude3d(&apart) > 4.f * radii[largest])
+		{
+			free(part->vertices);
+			free(part->triangles);
+			continue;
+		}
+		template_->parts[kept++] = *part;
+	}
+	template_->part_count = kept;
 }
 
 /* a Halo node's name as the templates' bones are compared: lower case,
@@ -1465,6 +1516,7 @@ static boolean template_find(
 				if (read)
 				{
 					template_effects_remove(template_);
+					template_strays_remove(template_);
 					if (template_->part_count > 0)
 					{
 						snprintf(template_name, template_name_size, "%s", name);
@@ -1494,12 +1546,21 @@ static boolean model_play(
 	struct saber_model *made = NULL;
 	short *shader_indices = NULL;
 	long shader_tags[MAXIMUM_SHADERS_PER_MODEL];
-	struct saber_bitmap *bitmaps[MAXIMUM_SHADERS_PER_MODEL];
 	short usable[MAXIMUM_SHADERS_PER_MODEL];
-	short material_shaders[256];
+	/* each of the template's materials drawn (in the order they are first
+	drawn): its place among them, its shader of the map's model, the bitmap
+	tag of that shader's base map and its texture's place among that
+	bitmap's; the textures read for it (not yet played: NULL, a texture
+	already there) */
+	short material_places[256];
+	short material_shaders[MAXIMUM_SABER_MATERIALS];
+	long material_bitmaps[MAXIMUM_SABER_MATERIALS];
+	short material_permutations[MAXIMUM_SABER_MATERIALS];
+	boolean material_cutouts[MAXIMUM_SABER_MATERIALS];
+	struct saber_texture *material_textures[MAXIMUM_SABER_MATERIALS];
+	struct bitmap_data *material_bitmap_data[MAXIMUM_SABER_MATERIALS];
 	long usable_count = 0;
 	long material_count = 0;
-	long bitmap_count = 0;
 	long shader_count = 0;
 	long level_parts[5] = { 0, 0, 0, 0, 0 };
 	real scale;
@@ -1590,48 +1651,175 @@ static boolean model_play(
 	reason = "the map's model has no model shader with a base map";
 	if (!usable_count)
 		goto refused;
+	csmemset(material_textures, 0, sizeof(material_textures));
+	csmemset(material_bitmap_data, 0, sizeof(material_bitmap_data));
 	for (index = 0; index < 256; index++)
-		material_shaders[index] = NONE;
+		material_places[index] = NONE;
+	/* each material its own of the usable shaders, in turn, and its texture
+	a bitmap of that shader's base map of its own (its permutation) */
 	for (index = 0; index < template_.part_count; index++)
 	{
 		short material = template_.parts[index].material_index;
+		long place;
 		long shader_tag;
 		long bitmap_tag;
+		struct saber_bitmap *played;
+		long existing = 0;
 		long other;
 
 		reason = "a part's material is not one of its template's";
 		if (material < 0 || material >= template_.material_count || material >= 256)
 			goto refused;
-		if (material_shaders[material] == NONE)
-			material_shaders[material] = usable[material_count++ % usable_count];
-		shader_indices[index] = material_shaders[material];
-		shader_tag = model_shader_tag(definition, shader_indices[index]);
+		if (material_places[material] != NONE)
+		{
+			shader_indices[index] = (short)(definition->shaders.count + material_places[material]);
+			continue;
+		}
+		reason = "its template has more materials than are drawn";
+		if (material_count >= MAXIMUM_SABER_MATERIALS)
+			goto refused;
+		place = material_count++;
+		material_places[material] = (short)place;
+		shader_indices[index] = (short)(definition->shaders.count + place);
+		material_shaders[place] = usable[place % usable_count];
+		shader_tag = model_shader_tag(definition, material_shaders[place]);
 		bitmap_tag = ((struct shader_model_definition *)shader_definition_get(shader_tag))->model.base_map.index;
+		material_bitmaps[place] = bitmap_tag;
 		for (other = 0; other < shader_count && shader_tags[other] != shader_tag; other++)
 		{
 		}
-		if (other < shader_count || shader_played(shader_tag))
-			continue;
-		shader_tags[shader_count++] = shader_tag;
-		for (other = 0; other < bitmap_count && bitmaps[other]->tag_index != bitmap_tag; other++)
+		if (other == shader_count && !shader_played(shader_tag))
+			shader_tags[shader_count++] = shader_tag;
+
+		/* (a texture this bitmap has, played before or read for this model,
+		is its place; another is read, its place the bitmap's next) */
+		played = bitmap_played_get(bitmap_tag);
+		for (other = 0; played && other < played->count; other++)
 		{
+			if (!strcmp(played->names[other], template_.materials[material]))
+				break;
 		}
-		if (other < bitmap_count || bitmap_played(bitmap_tag))
+		material_cutouts[place] = FALSE;
+		if (played && other < played->count)
+		{
+			material_permutations[place] = (short)other;
+			material_cutouts[place] = played->cutouts[other];
 			continue;
-		bitmaps[bitmap_count] = saber_bitmap_new(pak, bitmap_tag, template_.materials[material], &reason);
-		if (!bitmaps[bitmap_count])
+		}
+		existing = played ? played->count : 0;
+		for (other = 0; other < place; other++)
+		{
+			if (material_bitmaps[other] == bitmap_tag && material_textures[other])
+				existing++;
+		}
+		reason = "a bitmap of the map's holds too many of its textures";
+		if (existing >= MAXIMUM_SABER_BITMAP_TEXTURES)
 			goto refused;
-		bitmap_count++;
+		material_permutations[place] = (short)existing;
+		reason = "out of memory";
+		material_textures[place] = malloc(sizeof(struct saber_texture));
+		material_bitmap_data[place] = malloc(sizeof(struct bitmap_data));
+		if (!material_textures[place] || !material_bitmap_data[place])
+			goto refused;
+		if (!saber_texture_bitmap(pak, bitmap_tag, template_.materials[material], material_textures[place],
+				material_bitmap_data[place], &reason))
+		{
+			free(material_textures[place]);
+			material_textures[place] = NULL;
+			goto refused;
+		}
+		material_cutouts[place] = saber_texture_cutout(material_textures[place]) ? TRUE : FALSE;
+		/* (one that is not cut out drawn whole, though its shader be alpha
+		tested for another's) */
+		if (!material_cutouts[place])
+			saber_texture_make_solid(material_textures[place]);
 	}
 	made = saber_model_new(tag_index, definition, &template_, shader_indices, 1.f, &reason);
 	if (!made)
 		goto refused;
 
-	/* (played) */
-	for (index = 0; index < bitmap_count; index++)
-		bitmap_plug(bitmaps[index]);
+	/* its shaders: the map's model's, then each material's */
+	reason = "out of memory";
+	made->shaders = malloc(sizeof(*made->shaders) * ((size_t)definition->shaders.count + (size_t)material_count + 1));
+	if (!made->shaders)
+	{
+		saber_model_free(made);
+		made = NULL;
+		goto refused;
+	}
+	for (index = 0; index < definition->shaders.count; index++)
+		made->shaders[index] = *TAG_BLOCK_GET_ELEMENT(&definition->shaders, index, struct model_shader_reference);
+	for (index = 0; index < material_count; index++)
+	{
+		made->shaders[definition->shaders.count + index] = made->shaders[material_shaders[index]];
+		made->shaders[definition->shaders.count + index].permutation_index = material_permutations[index];
+	}
+	made->model.shaders.count = definition->shaders.count + material_count;
+	made->model.shaders.address = made->shaders;
+	made->model.shaders.definition = NULL;
+
+	/* (played: the textures read into their bitmaps, the shaders, the model) */
+	for (index = 0; index < material_count; index++)
+	{
+		struct saber_bitmap *played;
+		long slot;
+
+		if (!material_textures[index])
+			continue;
+		played = bitmap_played_get(material_bitmaps[index]);
+		if (!played)
+		{
+			struct bitmap_group *group = bitmap_group_get(material_bitmaps[index]);
+
+			played = malloc(sizeof(*played));
+			if (!played)
+				continue;
+			csmemset(played, 0, sizeof(*played));
+			played->tag_index = material_bitmaps[index];
+			played->map_group = *group;
+			group->sequences.count = 0;
+			group->bitmaps.address = played->bitmaps;
+			group->bitmaps.definition = NULL;
+			played->next = saber_models_globals.bitmaps;
+			saber_models_globals.bitmaps = played;
+		}
+		slot = material_permutations[index];
+		if (slot >= MAXIMUM_SABER_BITMAP_TEXTURES)
+			continue;
+		played->bitmaps[slot] = *material_bitmap_data[index];
+		played->textures[slot] = *material_textures[index];
+		{
+			short material;
+
+			for (material = 0; material < 256 && material_places[material] != index; material++)
+			{
+			}
+			csstrncpy(played->names[slot], material < template_.material_count ? template_.materials[material] : "",
+				sizeof(played->names[slot]) - 1);
+		}
+		played->cutouts[slot] = material_cutouts[index];
+		played->count = MAX(played->count, slot + 1);
+		bitmap_group_get(played->tag_index)->bitmaps.count = played->count;
+		free(material_textures[index]);
+		free(material_bitmap_data[index]);
+		material_textures[index] = NULL;
+		material_bitmap_data[index] = NULL;
+	}
 	for (index = 0; index < shader_count; index++)
 		shader_plug(shader_tags[index]);
+	/* (a shader of a texture cut out by its alpha, leaves', is alpha
+	tested again, and drawn from both sides as Saber3D draws leaves) */
+	for (index = 0; index < material_count; index++)
+	{
+		struct shader_model_definition *shader;
+
+		if (!material_cutouts[index])
+			continue;
+		shader = (struct shader_model_definition *)shader_definition_get(
+			model_shader_tag(definition, material_shaders[index]));
+		SET_FLAG(shader->model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
+		SET_FLAG(shader->model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+	}
 	*definition = made->model;
 	made->next = saber_models_globals.models;
 	saber_models_globals.models = made;
@@ -1645,10 +1833,15 @@ static boolean model_play(
 refused:
 	platform_log("anniversary: %s is drawn as the map's: the template %s: %s", tag_get_name(tag_index), template_name,
 		reason);
-	for (index = 0; index < bitmap_count; index++)
+	for (index = 0; index < material_count; index++)
 	{
-		saber_texture_dispose(&bitmaps[index]->texture);
-		free(bitmaps[index]);
+		if (material_textures[index])
+		{
+			saber_texture_dispose(material_textures[index]);
+			free(material_textures[index]);
+		}
+		if (material_bitmap_data[index])
+			free(material_bitmap_data[index]);
 	}
 	saber_template_dispose(&template_);
 	if (shader_indices)
@@ -1749,10 +1942,13 @@ void saber_models_tags_unloaded(
 	{
 		struct saber_bitmap *bitmap = saber_models_globals.bitmaps;
 
+		long index;
+
 		saber_models_globals.bitmaps = bitmap->next;
 		if (give_back)
 			*bitmap_group_get(bitmap->tag_index) = bitmap->map_group;
-		saber_texture_dispose(&bitmap->texture);
+		for (index = 0; index < bitmap->count; index++)
+			saber_texture_dispose(&bitmap->textures[index]);
 		free(bitmap);
 	}
 }
@@ -1764,7 +1960,7 @@ int saber_bitmaps_contain(
 
 	for (played = saber_models_globals.bitmaps; played; played = played->next)
 	{
-		if (bitmap == &played->bitmap)
+		if (bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
 			return TRUE;
 	}
 
@@ -1779,9 +1975,13 @@ int saber_bitmaps_read(
 
 	for (played = saber_models_globals.bitmaps; played; played = played->next)
 	{
-		if (bitmap == &played->bitmap)
+		if (bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
 		{
-			memcpy(buffer, played->texture.pixels, (size_t)bitmap->pixels_size);
+			struct saber_texture const *texture = &played->textures[bitmap - played->bitmaps];
+
+			if (!texture->pixels || texture->pixels_size < bitmap->pixels_size)
+				return FALSE;
+			memcpy(buffer, texture->pixels, (size_t)bitmap->pixels_size);
 			halo_custom_edition_texels_channels(buffer, _custom_edition_channels_xbox);
 			rasterizer_xbox_bitmap_rebuild_hardware_format(bitmap);
 			return TRUE;

@@ -1826,6 +1826,102 @@ int saber_texture_read(
 	return TRUE;
 }
 
+int saber_texture_cutout(
+	struct saber_texture const *texture)
+{
+	long block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	long blocks = (long)(texture->width / 4) * (long)(texture->height / 4);
+	long clear = 0;
+	long solid = 0;
+	long block;
+
+	if (!texture->pixels || blocks <= 0 || blocks * block_size > texture->pixels_size)
+		return FALSE;
+	for (block = 0; block < blocks; block++)
+	{
+		unsigned char const *bytes = texture->pixels + block * block_size;
+		long texel;
+
+		if (texture->format == _bitmap_format_dxt1)
+		{
+			unsigned long color0 = (unsigned long)bytes[0] | ((unsigned long)bytes[1] << 8);
+			unsigned long color1 = (unsigned long)bytes[2] | ((unsigned long)bytes[3] << 8);
+
+			for (texel = 0; texel < 16; texel++)
+			{
+				long index = (bytes[4 + texel / 4] >> (2 * (texel % 4))) & 3;
+
+				if (color0 <= color1 && index == 3)
+					clear++;
+				else
+					solid++;
+			}
+		}
+		else if (texture->format == _bitmap_format_dxt3)
+		{
+			for (texel = 0; texel < 16; texel++)
+			{
+				long alpha = ((bytes[texel / 2] >> (4 * (texel % 2))) & 15) * 17;
+
+				clear += alpha < 64;
+				solid += alpha > 192;
+			}
+		}
+		else
+		{
+			long alpha0 = bytes[0];
+			long alpha1 = bytes[1];
+			unsigned long low = (unsigned long)bytes[2] | ((unsigned long)bytes[3] << 8) | ((unsigned long)bytes[4] << 16);
+			unsigned long high = (unsigned long)bytes[5] | ((unsigned long)bytes[6] << 8) | ((unsigned long)bytes[7] << 16);
+
+			for (texel = 0; texel < 16; texel++)
+			{
+				long index = (long)(((texel < 8 ? low : high) >> (3 * (texel % 8))) & 7);
+				long alpha;
+
+				if (index == 0)
+					alpha = alpha0;
+				else if (index == 1)
+					alpha = alpha1;
+				else if (alpha0 > alpha1)
+					alpha = ((8 - index) * alpha0 + (index - 1) * alpha1) / 7;
+				else if (index < 6)
+					alpha = ((6 - index) * alpha0 + (index - 1) * alpha1) / 5;
+				else
+					alpha = index == 6 ? 0 : 255;
+				clear += alpha < 64;
+				solid += alpha > 192;
+			}
+		}
+	}
+
+	/* (a twentieth clear and a fifth solid, at least) */
+	return clear * 20 >= blocks * 16 && solid * 5 >= blocks * 16;
+}
+
+void saber_texture_make_solid(
+	struct saber_texture *texture)
+{
+	long offset;
+
+	if (!texture->pixels || texture->format == _bitmap_format_dxt1)
+		return;
+	/* (every block of every mipmap: each's alpha its first 8 bytes) */
+	for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+	{
+		if (texture->format == _bitmap_format_dxt3)
+		{
+			memset(texture->pixels + offset, 0xFF, 8);
+		}
+		else
+		{
+			texture->pixels[offset] = 0xFF;
+			texture->pixels[offset + 1] = 0xFF;
+			memset(texture->pixels + offset + 2, 0, 6);
+		}
+	}
+}
+
 void saber_texture_dispose(
 	struct saber_texture *texture)
 {
