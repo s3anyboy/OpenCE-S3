@@ -2950,6 +2950,286 @@ int saber_texture_blank(
 	return TRUE;
 }
 
+/* a 565 colour from channels of 255 */
+static unsigned long pack565(
+	long red,
+	long green,
+	long blue)
+{
+	return ((unsigned long)((red * 31 + 127) / 255) << 11) |
+		((unsigned long)((green * 63 + 127) / 255) << 5) |
+		(unsigned long)((blue * 31 + 127) / 255);
+}
+
+/* one channel, of 255, of a 565 colour */
+static long unpack565(
+	unsigned long color,
+	long channel)
+{
+	if (channel == 0)
+		return (long)((color >> 11) & 31) * 255 / 31;
+	if (channel == 1)
+		return (long)((color >> 5) & 63) * 255 / 63;
+
+	return (long)(color & 31) * 255 / 31;
+}
+
+/* a DXT block's texel alpha, of 255 */
+static long block_texel_alpha(
+	unsigned char const *block,
+	long format,
+	long texel)
+{
+	if (format == _bitmap_format_dxt3)
+		return ((block[texel / 2] >> (4 * (texel % 2))) & 15) * 17;
+
+	{
+		long alpha0 = block[0];
+		long alpha1 = block[1];
+		unsigned long bits = texel < 8 ?
+			(unsigned long)block[2] | ((unsigned long)block[3] << 8) | ((unsigned long)block[4] << 16) :
+			(unsigned long)block[5] | ((unsigned long)block[6] << 8) | ((unsigned long)block[7] << 16);
+		long index = (long)((bits >> (3 * (texel % 8))) & 7);
+
+		if (index == 0)
+			return alpha0;
+		if (index == 1)
+			return alpha1;
+		if (alpha0 > alpha1)
+			return ((8 - index) * alpha0 + (index - 1) * alpha1) / 7;
+		if (index < 6)
+			return ((6 - index) * alpha0 + (index - 1) * alpha1) / 5;
+
+		return index == 6 ? 0 : 255;
+	}
+}
+
+/* a star field's black punched out (DXT1: colour 0 no greater than colour
+1, and index 3 clear). The black is the sky behind the stars, and it is
+stored with no alpha */
+static void texture_punch_black(
+	struct saber_texture *texture)
+{
+	long offset;
+
+	if (!texture->pixels || texture->format != _bitmap_format_dxt1)
+		return;
+	for (offset = 0; offset + 8 <= texture->pixels_size; offset += 8)
+	{
+		unsigned char *block = texture->pixels + offset;
+		unsigned long color0 = (unsigned long)block[0] | ((unsigned long)block[1] << 8);
+		unsigned long color1 = (unsigned long)block[2] | ((unsigned long)block[3] << 8);
+		long red[4];
+		long green[4];
+		long blue[4];
+		unsigned char texel_red[16];
+		unsigned char texel_green[16];
+		unsigned char texel_blue[16];
+		unsigned char dark[16];
+		long dark_count = 0;
+		long darkest = 0;
+		long brightest = 0;
+		long dark_luma = 255;
+		long bright_luma = -1;
+		long channel;
+		long texel;
+
+		for (channel = 0; channel < 2; channel++)
+		{
+			unsigned long color = channel == 0 ? color0 : color1;
+
+			red[channel] = unpack565(color, 0);
+			green[channel] = unpack565(color, 1);
+			blue[channel] = unpack565(color, 2);
+		}
+		if (color0 > color1)
+		{
+			red[2] = (2 * red[0] + red[1]) / 3;
+			green[2] = (2 * green[0] + green[1]) / 3;
+			blue[2] = (2 * blue[0] + blue[1]) / 3;
+			red[3] = (red[0] + 2 * red[1]) / 3;
+			green[3] = (green[0] + 2 * green[1]) / 3;
+			blue[3] = (blue[0] + 2 * blue[1]) / 3;
+		}
+		else
+		{
+			red[2] = (red[0] + red[1]) / 2;
+			green[2] = (green[0] + green[1]) / 2;
+			blue[2] = (blue[0] + blue[1]) / 2;
+			red[3] = green[3] = blue[3] = 0;
+		}
+		for (texel = 0; texel < 16; texel++)
+		{
+			long index = (block[4 + texel / 4] >> (2 * (texel % 4))) & 3;
+			long luma;
+
+			/* (index 3 of a block already punched is clear) */
+			if (color0 <= color1 && index == 3)
+			{
+				dark[texel] = 1;
+				dark_count++;
+				continue;
+			}
+			texel_red[texel] = (unsigned char)red[index];
+			texel_green[texel] = (unsigned char)green[index];
+			texel_blue[texel] = (unsigned char)blue[index];
+			luma = red[index];
+			if (green[index] > luma)
+				luma = green[index];
+			if (blue[index] > luma)
+				luma = blue[index];
+			if (luma < 16)
+			{
+				dark[texel] = 1;
+				dark_count++;
+				continue;
+			}
+			dark[texel] = 0;
+			if (luma < dark_luma)
+			{
+				dark_luma = luma;
+				darkest = texel;
+			}
+			if (luma > bright_luma)
+			{
+				bright_luma = luma;
+				brightest = texel;
+			}
+		}
+		if (!dark_count)
+			continue;
+		if (dark_count == 16)
+		{
+			memset(block, 0, 4);
+			memset(block + 4, 0xFF, 4);
+			continue;
+		}
+		{
+			unsigned long packed0 = pack565(texel_red[darkest], texel_green[darkest], texel_blue[darkest]);
+			unsigned long packed1 = pack565(texel_red[brightest], texel_green[brightest], texel_blue[brightest]);
+			long palette[3][3];
+			unsigned char rows[4];
+
+			if (packed0 > packed1)
+			{
+				unsigned long swap = packed0;
+				long swap_texel = darkest;
+
+				packed0 = packed1;
+				packed1 = swap;
+				darkest = brightest;
+				brightest = swap_texel;
+			}
+			for (channel = 0; channel < 3; channel++)
+			{
+				palette[0][channel] = unpack565(packed0, channel);
+				palette[1][channel] = unpack565(packed1, channel);
+				palette[2][channel] = (palette[0][channel] + palette[1][channel]) / 2;
+			}
+			memset(rows, 0, sizeof(rows));
+			for (texel = 0; texel < 16; texel++)
+			{
+				long index = 3;
+				long best = 255 * 255 * 3;
+				long choice;
+
+				if (!dark[texel])
+				{
+					for (choice = 0; choice < 3; choice++)
+					{
+						long difference = texel_red[texel] - palette[choice][0];
+						long distance = difference * difference;
+
+						difference = texel_green[texel] - palette[choice][1];
+						distance += difference * difference;
+						difference = texel_blue[texel] - palette[choice][2];
+						distance += difference * difference;
+						if (distance < best)
+						{
+							best = distance;
+							index = choice;
+						}
+					}
+				}
+				rows[texel / 4] |= (unsigned char)(index << (2 * (texel % 4)));
+			}
+			block[0] = (unsigned char)packed0;
+			block[1] = (unsigned char)(packed0 >> 8);
+			block[2] = (unsigned char)packed1;
+			block[3] = (unsigned char)(packed1 >> 8);
+			block[4] = rows[0];
+			block[5] = rows[1];
+			block[6] = rows[2];
+			block[7] = rows[3];
+		}
+	}
+}
+
+/* a card's alpha made the test's. Its picture is stored near an alpha of
+140, under 255 and around the test's 127, and the card around it at 0: a
+texel clear enough stays clear, and the picture is made solid */
+static void texture_card_alpha(
+	struct saber_texture *texture)
+{
+	long offset;
+
+	if (!texture->pixels || texture->format == _bitmap_format_dxt1)
+		return;
+	for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+	{
+		unsigned char *block = texture->pixels + offset;
+		long texel;
+
+		if (texture->format == _bitmap_format_dxt3)
+		{
+			unsigned char alpha[8];
+
+			memset(alpha, 0, sizeof(alpha));
+			for (texel = 0; texel < 16; texel++)
+			{
+				if (block_texel_alpha(block, texture->format, texel) >= 48)
+					alpha[texel / 2] |= (unsigned char)(15 << (4 * (texel % 2)));
+			}
+			memcpy(block, alpha, 8);
+		}
+		else
+		{
+			unsigned long low = 0;
+			unsigned long high = 0;
+
+			for (texel = 0; texel < 16; texel++)
+			{
+				/* (alpha 0 no greater than alpha 1: index 6 is clear and
+				index 7 is solid) */
+				long index = block_texel_alpha(block, texture->format, texel) >= 48 ? 7 : 6;
+
+				if (texel < 8)
+					low |= (unsigned long)index << (3 * texel);
+				else
+					high |= (unsigned long)index << (3 * (texel - 8));
+			}
+			block[0] = 0;
+			block[1] = 255;
+			block[2] = (unsigned char)low;
+			block[3] = (unsigned char)(low >> 8);
+			block[4] = (unsigned char)(low >> 16);
+			block[5] = (unsigned char)high;
+			block[6] = (unsigned char)(high >> 8);
+			block[7] = (unsigned char)(high >> 16);
+		}
+	}
+}
+
+void saber_texture_sky_alpha(
+	struct saber_texture *texture,
+	int stars)
+{
+	if (stars || texture->format == _bitmap_format_dxt1)
+		texture_punch_black(texture);
+	else
+		texture_card_alpha(texture);
+}
+
 void saber_texture_make_solid(
 	struct saber_texture *texture)
 {

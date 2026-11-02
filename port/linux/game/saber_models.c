@@ -2846,10 +2846,19 @@ static boolean saber_level_play(
 			{
 				slots[material] = (short)saber_level.texture_count++;
 				/* (a sky's alpha is its shape: a cloud's soft edge. Filling it
-				in would draw the card solid) */
-				if (!sky && !saber_texture_cutout(texture, material_foliage(level.materials[material])) &&
+				in would draw the card solid. A star field's black, and a
+				planet's clear card, are stored with no alpha that cuts them) */
+				if (sky && (strncmp(level.materials[material], "stars", 5) == 0 ||
+					strstr(level.materials[material], "planet") != NULL ||
+					strncmp(level.materials[material], "basis_sky", 9) == 0))
+				{
+					saber_texture_sky_alpha(texture, strncmp(level.materials[material], "stars", 5) == 0);
+				}
+				else if (!sky && !saber_texture_cutout(texture, material_foliage(level.materials[material])) &&
 					!material_card(level.materials[material]))
+				{
 					saber_texture_make_solid(texture);
+				}
 			}
 		}
 		if (slots[material] < 0)
@@ -2860,12 +2869,15 @@ static boolean saber_level_play(
 		made->texture = slots[material];
 		made->uv_scale[0] = part->uv_scale[0] != 0.f ? part->uv_scale[0] : 1.f;
 		made->uv_scale[1] = part->uv_scale[1] != 0.f ? part->uv_scale[1] : 1.f;
-		/* (a cloud's alpha, and a planet card's, is its shape. The dome's
-		colour is the texture's, and a clear alpha would cut the sky out) */
+		/* (a cloud, the stars, a planet and a moon are cut out: the card
+		around the planet, and the black of the stars, are clear) */
 		made->cutout = material_card(level.materials[material]) ||
-			(sky && strncmp(level.materials[material], "cloud", 5) == 0) ||
-			((!sky || strstr(level.materials[material], "planet") != NULL) &&
-				saber_texture_cutout(&saber_level.textures[made->texture], TRUE)) ? TRUE : FALSE;
+			(sky && (strncmp(level.materials[material], "cloud", 5) == 0 ||
+				strncmp(level.materials[material], "stars", 5) == 0 ||
+				strncmp(level.materials[material], "basis_sky", 9) == 0 ||
+				strstr(level.materials[material], "planet") != NULL)) ||
+			(!sky && saber_texture_cutout(&saber_level.textures[made->texture],
+				material_foliage(level.materials[material]))) ? TRUE : FALSE;
 		made->lit_bsp = NONE;
 		vertices_size += (unsigned long)part->vertex_count * (unsigned long)compressed_size +
 			(unsigned long)part->triangle_count * 6 * sizeof(word);

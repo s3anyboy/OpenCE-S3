@@ -247,52 +247,48 @@ void render_sky(
 				;
 			}
 
-			/* port: the package's sky in place of the map's model when the
-			remastered structure is drawn (display.remastered_bsp). The lens
-			flares above stay the map's, from the same lights */
-			if (saber_models_level_sky_drawn())
+			/* port: the map's sky, and over it the package's when the
+			remastered structure is drawn (display.remastered_bsp). The
+			package's stars are clear where they are black, so this sky
+			shows through them. The lens flares above stay the map's */
+			view_matrix = *global_identity4x3;
+			view_matrix.position.x = render.camera.position.x * 0.9990234375f;
+			view_matrix.position.y = render.camera.position.y * 0.9990234375f;
+			view_matrix.position.z = render.camera.position.z * 0.9990234375f;
 			{
-				saber_models_level_sky_render();
-			}
-			else
-			{
-				view_matrix = *global_identity4x3;
-				view_matrix.position.x = render.camera.position.x * 0.9990234375f;
-				view_matrix.position.y = render.camera.position.y * 0.9990234375f;
-				view_matrix.position.z = render.camera.position.z * 0.9990234375f;
+				/* port: no more nodes than node_matrices holds (a map's count) */
+				long node_count = MIN(model->nodes.count, MAXIMUM_NODES_PER_ANIMATION);
+
+				view_matrix.scale = 1.f / 1024.f;
+				for (i = 0; i < node_count; i++)
 				{
-					/* port: no more nodes than node_matrices holds (a map's count) */
-					long node_count = MIN(model->nodes.count, MAXIMUM_NODES_PER_ANIMATION);
-
-					view_matrix.scale = 1.f / 1024.f;
-					for (i = 0; i < node_count; i++)
-					{
-						matrix4x3_multiply(
-							&view_matrix,
-							&node_matrices[i],
-							&node_matrices[i]);
-					}
+					matrix4x3_multiply(
+						&view_matrix,
+						&node_matrices[i],
+						&node_matrices[i]);
 				}
-
-				rasterizer_models_begin(TRUE);
-				csmemset(&render_model_lighting, 0, sizeof(render_model_lighting));
-				render_model_lighting.ambient_color = *global_real_rgb_white;
-				render_model(
-					sky->model.index,
-					0.f,
-					node_matrices,
-					0,
-					0,
-					region_scales,
-					&render_model_lighting,
-					&render.camera.position,
-					0,
-					0,
-					0,
-					0,
-					TRUE);
-				rasterizer_models_end();
 			}
+
+			rasterizer_models_begin(TRUE);
+			csmemset(&render_model_lighting, 0, sizeof(render_model_lighting));
+			render_model_lighting.ambient_color = *global_real_rgb_white;
+			render_model(
+				sky->model.index,
+				0.f,
+				node_matrices,
+				0,
+				0,
+				region_scales,
+				&render_model_lighting,
+				&render.camera.position,
+				0,
+				0,
+				0,
+				0,
+				TRUE);
+			rasterizer_models_end();
+			if (saber_models_level_sky_drawn())
+				saber_models_level_sky_render();
 		}
 	}
 
