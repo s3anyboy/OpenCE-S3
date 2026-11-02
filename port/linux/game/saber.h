@@ -127,6 +127,16 @@ void saber_texture_dispose(struct saber_texture *texture);
 and many solid), which is drawn alpha tested; not a texture whose alpha is
 another mask, all low or all high */
 int saber_texture_cutout(struct saber_texture const *texture);
+/* the colour-change mask of a package's texture entry (a "_mpmask", one
+channel, or a "_br", whose first channel differs from its background where
+its armour is: `banded`), made a texture of Halo's multipurpose map: DXT1,
+the mask in its blue (which this build's model shaders take colour change
+from), nothing in its other channels; FALSE if it is no mask read */
+int saber_texture_read_mask(struct saber_texture *texture, unsigned char const *bytes, unsigned long size,
+	int banded);
+/* a texture of no colour change, 4 by 4 (a multipurpose map's for a
+material without a mask) */
+int saber_texture_blank(struct saber_texture *texture);
 /* a texture's alpha made solid throughout (DXT3's and DXT5's), for one not
 cut out that is drawn by a shader alpha tested for another's sake */
 void saber_texture_make_solid(struct saber_texture *texture);

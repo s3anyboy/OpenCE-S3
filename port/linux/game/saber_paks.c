@@ -48,10 +48,11 @@ on the Xbox 360, which are big-endian. What is read of one, as Reclaimer
 	A mesh named .lod1, .lod2 ... is the template's at a lower level of
 	detail.
 
-Saber3D's axes are forward x, right -z and up y, Halo's forward x, left y
-and up z: a point of the template is Halo's with its y and z exchanged,
-which turns its triangles over; they are turned to face as Halo's do
-(clockwise about the normals the template gives). A template's own units vary (Halo's are not
+Saber3D's axes are forward x, right z and up y, Halo's forward x, left y
+and up z (a warthog's left wheels are at Saber3D's -z, at Halo's +y): a
+point (x, y, z) of the template is Halo's (x, -z, y), turned, not mirrored.
+Its triangles are turned to face as Halo's do (clockwise about the normals
+the template gives). A template's own units vary (Halo's are not
 among them): saber_models.c scales them to the map's model.
 
 A texture (TexturesMips64, Textures) starts "TCIP" at 6 (little-endian:
@@ -910,16 +911,18 @@ static long bone_slot_at(
 				return NONE;
 			template_->bone_origins = origins;
 			origins[template_->bone_count][0] = world[12];
-			origins[template_->bone_count][1] = world[14];
+			origins[template_->bone_count][1] = -world[14];
 			origins[template_->bone_count][2] = world[13];
 		}
 		strcpy(bones[template_->bone_count], name);
 		parents[template_->bone_count] = parent;
-		/* (Halo's axes to Saber3D's, y and z exchanged: its rows 1 and 2) */
+		/* (Halo's axes to Saber3D's: Saber3D's (x, y, z) is Halo's (x, -z, y),
+		so Halo's y is Saber3D's -z and its z Saber3D's y: rows 1 and 2,
+		less row 2) */
 		for (index = 0; index < 4; index++)
 		{
 			binds[template_->bone_count][index] = inverse[index];
-			binds[template_->bone_count][4 + index] = inverse[8 + index];
+			binds[template_->bone_count][4 + index] = -inverse[8 + index];
 			binds[template_->bone_count][8 + index] = inverse[4 + index];
 			binds[template_->bone_count][12 + index] = inverse[12 + index];
 		}
@@ -1246,10 +1249,10 @@ static boolean mesh_read(
 		world_normal.k = normal.i * normals[2] + normal.j * normals[5] + normal.k * normals[8];
 		csmemset(vertex, 0, sizeof(*vertex));
 		vertex->position.x = world.x;
-		vertex->position.y = world.z;
+		vertex->position.y = -world.z;
 		vertex->position.z = world.y;
 		vertex->normal.i = world_normal.i;
-		vertex->normal.j = world_normal.k;
+		vertex->normal.j = -world_normal.k;
 		vertex->normal.k = world_normal.j;
 		normalize3d(&vertex->normal);
 		if (!real_finite(world.x) || !real_finite(world.y) || !real_finite(world.z))
@@ -1897,6 +1900,238 @@ int saber_texture_cutout(
 
 	/* (a twentieth clear and a fifth solid, at least) */
 	return clear * 20 >= blocks * 16 && solid * 5 >= blocks * 16;
+}
+
+/* a 565 colour's blue of a value 0 to 255 */
+static unsigned long blue565(
+	long value)
+{
+	return (unsigned long)((value * 31 + 127) / 255);
+}
+
+int saber_texture_read_mask(
+	struct saber_texture *texture,
+	unsigned char const *bytes,
+	unsigned long size,
+	int banded)
+{
+	boolean big_endian;
+	long width;
+	long height;
+	long format;
+	unsigned long data;
+	unsigned char *mask;
+	long blocks_wide;
+	long blocks_high;
+	long x;
+	long y;
+
+	csmemset(texture, 0, sizeof(*texture));
+	if (size >= 58 && !memcmp(bytes + 6, "TCIP", 4))
+	{
+		big_endian = FALSE;
+		width = (long)read_u32(bytes + 16);
+		height = (long)read_u32(bytes + 20);
+		format = (long)read_u32(bytes + 38);
+		data = 58;
+	}
+	else if (size >= 4096 && !memcmp(bytes + 8, "PICT", 4))
+	{
+		big_endian = TRUE;
+		width = (long)read_u32_big(bytes + 12);
+		height = (long)read_u32_big(bytes + 16);
+		format = (long)read_u32_big(bytes + 32);
+		data = 4096;
+	}
+	else
+	{
+		return FALSE;
+	}
+	if (width < 4 || height < 4 || width > 4096 || height > 4096 || (width & (width - 1)) || (height & (height - 1)))
+		return FALSE;
+	mask = malloc((size_t)width * (size_t)height);
+	if (!mask)
+		return FALSE;
+	blocks_wide = width / 4;
+	blocks_high = height / 4;
+	if (format == 37 || format == 79)
+	{
+		/* (one channel, DXT5's alpha: a block of 8 bytes; the Xbox 360's
+		16-bit words byte-swapped) */
+		if ((unsigned long)(blocks_wide * blocks_high * 8) > size - data)
+		{
+			free(mask);
+			return FALSE;
+		}
+		for (y = 0; y < blocks_high; y++)
+		{
+			for (x = 0; x < blocks_wide; x++)
+			{
+				unsigned char block[8];
+				long texel;
+				unsigned long low;
+				unsigned long high;
+
+				memcpy(block, bytes + data + 8 * (y * blocks_wide + x), 8);
+				if (big_endian)
+				{
+					long index;
+
+					for (index = 0; index < 8; index += 2)
+					{
+						unsigned char swap = block[index];
+
+						block[index] = block[index + 1];
+						block[index + 1] = swap;
+					}
+				}
+				low = (unsigned long)block[2] | ((unsigned long)block[3] << 8) | ((unsigned long)block[4] << 16);
+				high = (unsigned long)block[5] | ((unsigned long)block[6] << 8) | ((unsigned long)block[7] << 16);
+				for (texel = 0; texel < 16; texel++)
+				{
+					long index = (long)(((texel < 8 ? low : high) >> (3 * (texel % 8))) & 7);
+					long alpha0 = block[0];
+					long alpha1 = block[1];
+					long value;
+
+					if (index == 0)
+						value = alpha0;
+					else if (index == 1)
+						value = alpha1;
+					else if (alpha0 > alpha1)
+						value = ((8 - index) * alpha0 + (index - 1) * alpha1) / 7;
+					else if (index < 6)
+						value = ((6 - index) * alpha0 + (index - 1) * alpha1) / 5;
+					else
+						value = index == 6 ? 0 : 255;
+					mask[(4 * y + texel / 4) * width + 4 * x + texel % 4] = (unsigned char)value;
+				}
+			}
+		}
+	}
+	else if (format == 0 || format == 22 || format == 90)
+	{
+		/* (four bytes a texel, its first channel: B of the PC's BGRA, of
+		the Xbox 360's ARGB once its 32-bit words are turned round) */
+		long texel;
+
+		if ((unsigned long)(width * height * 4) > size - data)
+		{
+			free(mask);
+			return FALSE;
+		}
+		for (texel = 0; texel < width * height; texel++)
+			mask[texel] = bytes[data + 4 * texel + (big_endian ? 3 : 0)];
+	}
+	else
+	{
+		free(mask);
+		return FALSE;
+	}
+
+	/* (a banded mask: its background, its most common value, none; else
+	whole) */
+	if (banded)
+	{
+		long counts[256];
+		long background = 0;
+		long texel;
+
+		csmemset(counts, 0, sizeof(counts));
+		for (texel = 0; texel < width * height; texel++)
+			counts[mask[texel]]++;
+		for (texel = 1; texel < 256; texel++)
+		{
+			if (counts[texel] > counts[background])
+				background = texel;
+		}
+		for (texel = 0; texel < width * height; texel++)
+		{
+			long apart = (long)mask[texel] - background;
+
+			mask[texel] = (unsigned char)(apart > 8 || apart < -8 ? 255 : 0);
+		}
+	}
+
+	/* the mask as DXT1, in blue */
+	texture->pixels = malloc((size_t)blocks_wide * (size_t)blocks_high * 8);
+	if (!texture->pixels)
+	{
+		free(mask);
+		return FALSE;
+	}
+	for (y = 0; y < blocks_high; y++)
+	{
+		for (x = 0; x < blocks_wide; x++)
+		{
+			unsigned char *block = texture->pixels + 8 * (y * blocks_wide + x);
+			long low = 255;
+			long high = 0;
+			unsigned long color0;
+			unsigned long color1;
+			unsigned long indices = 0;
+			long texel;
+
+			for (texel = 0; texel < 16; texel++)
+			{
+				long value = mask[(4 * y + texel / 4) * width + 4 * x + texel % 4];
+
+				low = MIN(low, value);
+				high = MAX(high, value);
+			}
+			color0 = blue565(high);
+			color1 = blue565(low);
+			if (color0 > color1)
+			{
+				for (texel = 0; texel < 16; texel++)
+				{
+					long value = mask[(4 * y + texel / 4) * width + 4 * x + texel % 4];
+					/* (the palette: color0, color1, and two between, a third and
+					two thirds of the way from color0) */
+					long step = (high - value) * 3 / MAX(high - low, 1);
+					long index = step <= 0 ? 0 : step >= 3 ? 1 : step == 1 ? 2 : 3;
+
+					indices |= (unsigned long)index << (2 * texel);
+				}
+			}
+			else
+			{
+				color1 = color0;
+			}
+			block[0] = (unsigned char)color0;
+			block[1] = (unsigned char)(color0 >> 8);
+			block[2] = (unsigned char)color1;
+			block[3] = (unsigned char)(color1 >> 8);
+			block[4] = (unsigned char)indices;
+			block[5] = (unsigned char)(indices >> 8);
+			block[6] = (unsigned char)(indices >> 16);
+			block[7] = (unsigned char)(indices >> 24);
+		}
+	}
+	free(mask);
+	texture->width = (short)width;
+	texture->height = (short)height;
+	texture->mipmap_count = 0;
+	texture->format = _bitmap_format_dxt1;
+	texture->pixels_size = blocks_wide * blocks_high * 8;
+
+	return TRUE;
+}
+
+int saber_texture_blank(
+	struct saber_texture *texture)
+{
+	csmemset(texture, 0, sizeof(*texture));
+	texture->pixels = malloc(8);
+	if (!texture->pixels)
+		return FALSE;
+	memset(texture->pixels, 0, 8);
+	texture->width = 4;
+	texture->height = 4;
+	texture->format = _bitmap_format_dxt1;
+	texture->pixels_size = 8;
+
+	return TRUE;
 }
 
 void saber_texture_make_solid(

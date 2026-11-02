@@ -266,6 +266,10 @@ struct saber_bitmap
 	char names[MAXIMUM_SABER_BITMAP_TEXTURES][64];
 	/* whether each is cut out by its alpha (saber_texture_cutout) */
 	boolean cutouts[MAXIMUM_SABER_BITMAP_TEXTURES];
+	/* whether it is a multipurpose map's: each texture a colour-change mask
+	(saber_texture_read_mask), of the permutation of the texture its
+	shader's base map has there */
+	boolean masks;
 };
 
 /* ---------- globals */
@@ -810,6 +814,8 @@ static boolean texture_find(
 	return FALSE;
 }
 
+static boolean bitmap_describe(struct saber_texture const *texture, long bitmap_tag, struct bitmap_data *bitmap);
+
 /* Reads the package's texture `texture_name` as a bitmap of the map's
 bitmap tag `bitmap_tag`, as the texture cache draws a Custom Edition map's
 (not yet played); FALSE with *reason saying why not. */
@@ -829,6 +835,24 @@ static boolean saber_texture_bitmap(
 		return FALSE;
 	platform_log("anniversary: the texture %s from %s, %dx%d, %d mipmaps after the first", texture_name, source,
 		texture->width, texture->height, texture->mipmap_count);
+	if (!bitmap_describe(texture, bitmap_tag, bitmap))
+	{
+		*reason = "its texture's pixels are not all there";
+		saber_texture_dispose(texture);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+/* A bitmap of the map's bitmap tag `bitmap_tag` of a texture read; FALSE if
+its pixels are not all there. */
+static boolean bitmap_describe(
+	struct saber_texture const *texture,
+	long bitmap_tag,
+	struct bitmap_data *bitmap)
+{
+	csmemset(bitmap, 0, sizeof(*bitmap));
 	bitmap->signature = BITMAP_GROUP_TAG;
 	bitmap->width = texture->width;
 	bitmap->height = texture->height;
@@ -842,14 +866,8 @@ static boolean saber_texture_bitmap(
 	bitmap->pixels_size = bitmap_get_pixel_data_size(bitmap);
 	bitmap->tag_index = bitmap_tag;
 	bitmap->cache_block_index = NONE;
-	*reason = "its texture's pixels are not all there";
-	if (bitmap->pixels_size <= 0 || bitmap->pixels_size > texture->pixels_size)
-	{
-		saber_texture_dispose(texture);
-		return FALSE;
-	}
 
-	return TRUE;
+	return bitmap->pixels_size > 0 && bitmap->pixels_size <= texture->pixels_size;
 }
 
 /* the textures played over the map's bitmap tag, or NULL */
@@ -932,6 +950,150 @@ static boolean shader_plug(
 	shader->model.reflection_cube_map.index = NONE;
 
 	return TRUE;
+}
+
+/* the package's colour-change mask of the texture `texture_name` (its
+"_mpmask", else its "_br"), of the most detail there is, or FALSE */
+static boolean mask_find(
+	struct saber_pak *pak,
+	char const *texture_name,
+	struct saber_texture *mask)
+{
+	struct saber_pak *paks[3];
+	long types[3];
+	long suffix;
+	long index;
+
+	paks[0] = pak;
+	types[0] = _saber_entry_textures;
+	paks[1] = saber_stream_pak();
+	types[1] = _saber_entry_textures;
+	paks[2] = pak;
+	types[2] = _saber_entry_textures_mips64;
+	for (suffix = 0; suffix < 2; suffix++)
+	{
+		char name[96];
+
+		snprintf(name, sizeof(name), "%s%s", texture_name, suffix ? "_br" : "_mpmask");
+		for (index = 0; index < 3; index++)
+		{
+			long entry = paks[index] ? saber_pak_find(paks[index], name, types[index]) : NONE;
+			unsigned char *bytes;
+			unsigned long size = 0;
+			boolean read;
+
+			if (entry == NONE)
+				continue;
+			bytes = saber_pak_read(paks[index], entry, &size);
+			read = bytes && saber_texture_read_mask(mask, bytes, size, suffix);
+			if (bytes)
+				free(bytes);
+			if (read)
+				return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+/* Puts a mask (or none) at a permutation of a multipurpose map played over,
+blank masks before it where it has none; FALSE if it cannot. */
+static boolean mask_set_put(
+	struct saber_bitmap *set,
+	long slot,
+	struct saber_texture *mask)
+{
+	if (slot < 0 || slot >= MAXIMUM_SABER_BITMAP_TEXTURES)
+		return FALSE;
+	while (set->count <= slot)
+	{
+		struct saber_texture *blank = &set->textures[set->count];
+
+		if (!saber_texture_blank(blank) || !bitmap_describe(blank, set->tag_index, &set->bitmaps[set->count]))
+			return FALSE;
+		set->count++;
+	}
+	if (mask)
+	{
+		struct bitmap_data bitmap;
+
+		if (!bitmap_describe(mask, set->tag_index, &bitmap))
+			return FALSE;
+		saber_texture_dispose(&set->textures[slot]);
+		set->textures[slot] = *mask;
+		set->bitmaps[slot] = bitmap;
+	}
+	bitmap_group_get(set->tag_index)->bitmaps.count = set->count;
+
+	return TRUE;
+}
+
+/* Has a material keep its classic shader's colour change (a grunt's or an
+Elite's rank), masked as the package's "_mpmask" or "_br" texture masks it:
+its shader's multipurpose map the masks, each at its material's
+permutation (a material with none, a mask of nothing). Nothing if the
+classic shader has no colour change. */
+static void material_mask_play(
+	struct saber_pak *pak,
+	long shader_tag,
+	char const *texture_name,
+	long permutation)
+{
+	struct shader_model_definition *shader = (struct shader_model_definition *)shader_definition_get(shader_tag);
+	struct saber_shader const *played;
+	struct saber_bitmap *set;
+	struct saber_texture mask;
+	boolean found;
+	long mask_tag;
+
+	for (played = saber_models_globals.shaders; played && played->tag_index != shader_tag; played = played->next)
+	{
+	}
+	if (!played || played->map_shader.model.change_color_source <= 0 ||
+		played->map_shader.model.multipurpose_map.index == NONE)
+	{
+		return;
+	}
+	mask_tag = played->map_shader.model.multipurpose_map.index;
+	set = bitmap_played_get(mask_tag);
+	/* (a bitmap that is a base map's too is left as it is) */
+	if (set && !set->masks)
+		return;
+	found = mask_find(pak, texture_name, &mask);
+	if (!found && !set)
+		return;
+	if (!set)
+	{
+		struct bitmap_group *group = bitmap_group_get(mask_tag);
+
+		set = malloc(sizeof(*set));
+		if (!set)
+		{
+			saber_texture_dispose(&mask);
+			return;
+		}
+		csmemset(set, 0, sizeof(*set));
+		set->tag_index = mask_tag;
+		set->masks = TRUE;
+		set->map_group = *group;
+		group->sequences.count = 0;
+		group->bitmaps.count = 0;
+		group->bitmaps.address = set->bitmaps;
+		group->bitmaps.definition = NULL;
+		set->next = saber_models_globals.bitmaps;
+		saber_models_globals.bitmaps = set;
+	}
+	if (!mask_set_put(set, permutation, found ? &mask : NULL))
+	{
+		if (found)
+			saber_texture_dispose(&mask);
+		return;
+	}
+	if (found)
+		platform_log("anniversary: %s's colour change masked by its %s, %dx%d", texture_name, "mask", mask.width,
+			mask.height);
+	shader->model.multipurpose_map.index = mask_tag;
+	shader->model.change_color_source = played->map_shader.model.change_color_source;
 }
 
 /* whether a part's material is an effect's (a muzzle flash, a light's
@@ -1819,6 +1981,20 @@ static boolean model_play(
 			model_shader_tag(definition, material_shaders[index]));
 		SET_FLAG(shader->model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
 		SET_FLAG(shader->model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+	}
+	/* (each material's colour change, where its classic shader had one) */
+	for (index = 0; index < material_count; index++)
+	{
+		short material;
+
+		for (material = 0; material < 256 && material_places[material] != index; material++)
+		{
+		}
+		if (material < template_.material_count)
+		{
+			material_mask_play(pak, model_shader_tag(definition, material_shaders[index]),
+				template_.materials[material], material_permutations[index]);
+		}
 	}
 	*definition = made->model;
 	made->next = saber_models_globals.models;
