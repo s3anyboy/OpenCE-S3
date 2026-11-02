@@ -308,6 +308,11 @@ static const struct config_setting config_settings[] =
 		"lightmapped surfaces. Collision, water and fog stay the map's; the\n"
 		"geometry is lit as objects are, by the map's lightmaps.\n"
 		"Read as a map loads." },
+	{ "display.remastered_ui", _config_boolean, "false", "HALO_REMASTERED_UI", _environment_value, _platform_all,
+		"Draw the main menu (ui.map) with anniversary_models and\n"
+		"remastered_bsp. false: the main menu stays the map's own graphics,\n"
+		"and those settings apply to every other map.\n"
+		"Read as the main menu loads." },
 	{ "display.anniversary_paks", _config_string, "\"paks\"", "HALO_ANNIVERSARY_PAKS", _environment_value, _platform_all,
 		"The folder of Halo: Combat Evolved Anniversary's packages (.s3dpak)\n"
 		"that anniversary_models draws from: a path, or a folder next to the\n"

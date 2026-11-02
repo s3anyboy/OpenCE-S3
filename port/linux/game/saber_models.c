@@ -3012,6 +3012,13 @@ void saber_models_tags_loaded(
 	{
 		return;
 	}
+	/* (ui.map, the main menu, stays the map's own graphics unless
+	display.remastered_ui is on) */
+	if (!_stricmp(map_name, "ui") && !config_boolean("display.remastered_ui"))
+	{
+		platform_log("anniversary: the main menu stays the map's (display.remastered_ui is off)");
+		return;
+	}
 	/* (in display.anniversary_paks's folder, else in paks next to the
 	executable: a config.toml written before paks was the default keeps
 	the data folder's anniversary) */
