@@ -348,7 +348,8 @@ static void render_window(
 		structure_render_preprocess();
 		/* port: the structure drawn as Halo: Combat Evolved Anniversary's level
 		geometry in place of its lightmapped surfaces (display.remastered_bsp,
-		port/linux/game/saber_models.c); its collision, water and fog stay */
+		port/linux/game/saber_models.c); its collision, water and fog stay,
+		and its sky is drawn in render_sky */
 		if (saber_models_level_drawn())
 		{
 			saber_models_level_render();

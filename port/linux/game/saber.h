@@ -186,9 +186,12 @@ int saber_bitmaps_read(struct bitmap_data *bitmap, void *buffer);
 int saber_bitmaps_contain(struct bitmap_data const *bitmap);
 /* (render.c) whether the level's structure is drawn as the package's level
 geometry (display.remastered_bsp), and its drawing, in place of the
-structure's lightmapped surfaces */
+structure's lightmapped surfaces. The sky is the package's too, drawn in
+place of the map's sky model (the map's lens flares stay) */
 int saber_models_level_drawn(void);
 void saber_models_level_render(void);
+int saber_models_level_sky_drawn(void);
+void saber_models_level_sky_render(void);
 struct model;
 /* (models.c, render_model_parts) the geometry of a model drawn as a
 template that the object `object_index` is drawn with: its rank's (by its

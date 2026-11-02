@@ -71,6 +71,7 @@ goes.
 #include "rasterizer/rasterizer_model_types.h"
 #include "rasterizer/rasterizer_swizzle.h"
 #include "rasterizer/rasterizer_models.h"
+#include "rasterizer/rasterizer.h"
 #include "render/render.h"
 #include "render/render_cameras_internal.h"
 #include "objects/object_lights_rendering.h"
@@ -2434,10 +2435,16 @@ refused:
 /* ---------- the level (display.remastered_bsp) */
 
 /* the most textures the level's geometry is drawn with, and how far from
-the middle of the world a part of it is drawn (its sky's and far
-mountains' are past where Halo draws, in world units) */
+the middle of the world a part of the structure is drawn. The sky is drawn
+however far it stands. Far mountains past this are left out (world units) */
 #define MAXIMUM_SABER_LEVEL_TEXTURES 512
 #define MAXIMUM_SABER_LEVEL_DISTANCE 800.f
+/* models.c's rasterizer geometry flags: the sky is drawn with no fog and
+no depth, as the map's sky model is */
+#define SABER_GEOMETRY_NO_FOG_BIT 2
+#define SABER_GEOMETRY_NO_DEPTH_BIT 3
+/* sky parts sorted before they are drawn (a level's clouds and planets) */
+#define MAXIMUM_SABER_SKY_PARTS 256
 /* a metre, in world units */
 #define SABER_LEVEL_UNITS (1.f / 3.048f)
 
@@ -2463,6 +2470,9 @@ struct saber_level_part
 	struct triangle_buffer triangle_buffer;
 	short texture;
 	boolean cutout;
+	/* a sky mesh (clouds, the sky, stars, a planet): drawn by
+	saber_models_level_sky_render, not with the structure */
+	boolean sky;
 	real_rectangle3d bounds;
 	real_point3d centroid;
 	real radius;
@@ -2571,15 +2581,22 @@ static long saber_level_bitmap_tag_add(
 	return grown[count].tag_index;
 }
 
-/* whether a level's material is drawn: not an effect's, a far plane's, a
-lightmap's, water's (the map's water is drawn) or none */
+/* whether a level's material is its sky: the clouds, the sky dome, the
+stars and the planets. Drawn in place of the map's sky, not as structure */
+static boolean saber_level_material_sky(
+	char const *material)
+{
+	return strncmp(material, "cloud", 5) == 0 || strncmp(material, "basis_sky", 9) == 0 ||
+		strncmp(material, "stars", 5) == 0 || strstr(material, "planet") != NULL;
+}
+
+/* whether a level's material is drawn as structure: not an effect's, a far
+plane's, a lightmap's, water's (the map's water is drawn), the sky's or none */
 static boolean saber_level_material_drawn(
 	char const *material)
 {
 	return !material_effect(material) && !strstr(material, "farplane") && !strstr(material, "_lm") &&
-		!strstr(material, "water") &&
-		strncmp(material, "cloud", 5) && strncmp(material, "basis_sky", 9) && strncmp(material, "stars", 5) &&
-		strncmp(material, "planet", 6);
+		!strstr(material, "water") && !saber_level_material_sky(material);
 }
 
 /* Draws the level's structure as the package's level geometry (its
@@ -2603,6 +2620,7 @@ static boolean saber_level_play(
 	word *strips;
 	long drawn = 0;
 	long triangles = 0;
+	long sky_parts = 0;
 	real_rectangle3d bounds;
 
 	csmemset(&level, 0, sizeof(level));
@@ -2630,7 +2648,8 @@ static boolean saber_level_play(
 	}
 	free(bytes);
 
-	/* its parts drawn: of a material drawn, not far off; in world units */
+	/* its parts drawn: of a material drawn, not far off (the sky however far
+	it stands); in world units */
 	saber_level.texture_count = 0;
 	slots = malloc(sizeof(*slots) * ((size_t)level.material_count + 1));
 	saber_level.textures = malloc(sizeof(*saber_level.textures) * MAXIMUM_SABER_LEVEL_TEXTURES);
@@ -2654,13 +2673,20 @@ static boolean saber_level_play(
 		struct saber_level_part *made = &saber_level.parts[saber_level.part_count];
 		short material = part->material_index;
 		long vertex;
+		boolean sky;
 
-		if (material < 0 || material >= level.material_count || !saber_level_material_drawn(level.materials[material]) ||
-			part->vertex_count <= 0 || part->triangle_count <= 0)
+		if (material < 0 || material >= level.material_count || part->vertex_count <= 0 || part->triangle_count <= 0)
 		{
 			part->vertex_count = 0;
 			continue;
 		}
+		sky = saber_level_material_sky(level.materials[material]);
+		if (!sky && !saber_level_material_drawn(level.materials[material]))
+		{
+			part->vertex_count = 0;
+			continue;
+		}
+		made->sky = sky;
 		made->bounds.x0 = made->bounds.y0 = made->bounds.z0 = REAL_MAX;
 		made->bounds.x1 = made->bounds.y1 = made->bounds.z1 = -REAL_MAX;
 		for (vertex = 0; vertex < part->vertex_count; vertex++)
@@ -2692,7 +2718,7 @@ static boolean saber_level_play(
 			across.k = made->bounds.z1 - made->bounds.z0;
 			made->radius = magnitude3d(&across) / 2.f;
 		}
-		if (magnitude3d((real_vector3d *)&made->centroid) > MAXIMUM_SABER_LEVEL_DISTANCE)
+		if (!sky && magnitude3d((real_vector3d *)&made->centroid) > MAXIMUM_SABER_LEVEL_DISTANCE)
 		{
 			part->vertex_count = 0;
 			continue;
@@ -2717,7 +2743,9 @@ static boolean saber_level_play(
 			else
 			{
 				slots[material] = (short)saber_level.texture_count++;
-				if (!saber_texture_cutout(texture, material_foliage(level.materials[material])) &&
+				/* (a sky's alpha is its shape: a cloud's soft edge. Filling it
+				in would draw the card solid) */
+				if (!sky && !saber_texture_cutout(texture, material_foliage(level.materials[material])) &&
 					!material_card(level.materials[material]))
 					saber_texture_make_solid(texture);
 			}
@@ -2729,6 +2757,7 @@ static boolean saber_level_play(
 		}
 		made->texture = slots[material];
 		made->cutout = material_card(level.materials[material]) ||
+			(sky && strncmp(level.materials[material], "cloud", 5) == 0) ||
 			saber_texture_cutout(&saber_level.textures[made->texture], TRUE) ? TRUE : FALSE;
 		made->lit_bsp = NONE;
 		vertices_size += (unsigned long)part->vertex_count * (unsigned long)compressed_size +
@@ -2739,6 +2768,8 @@ static boolean saber_level_play(
 		bounds.y1 = MAX(bounds.y1, made->bounds.y1);
 		bounds.z0 = MIN(bounds.z0, made->bounds.z0);
 		bounds.z1 = MAX(bounds.z1, made->bounds.z1);
+		if (made->sky)
+			sky_parts++;
 		saber_level.part_count++;
 	}
 	reason = "none of its parts is drawn";
@@ -2851,9 +2882,9 @@ static boolean saber_level_play(
 		drawn = made_index;
 	}
 	saber_level.drawn = TRUE;
-	platform_log("anniversary: the structure drawn as %s: %ld parts, %ld triangles, %ld textures; "
-		"its bounds %.1f %.1f %.1f to %.1f %.1f %.1f world units", saber_pak_entry_name(pak, entry), drawn, triangles,
-		saber_level.texture_count, bounds.x0, bounds.y0, bounds.z0, bounds.x1, bounds.y1, bounds.z1);
+	platform_log("anniversary: the structure drawn as %s: %ld parts, %ld of them the sky, %ld triangles, %ld textures; "
+		"its bounds %.1f %.1f %.1f to %.1f %.1f %.1f world units", saber_pak_entry_name(pak, entry), drawn, sky_parts,
+		triangles, saber_level.texture_count, bounds.x0, bounds.y0, bounds.z0, bounds.x1, bounds.y1, bounds.z1);
 	saber_template_dispose(&level);
 	free(slots);
 
@@ -3089,6 +3120,144 @@ int saber_models_level_drawn(
 	return saber_level.drawn;
 }
 
+int saber_models_level_sky_drawn(
+	void)
+{
+	long index;
+
+	if (!saber_level.drawn)
+		return FALSE;
+	for (index = 0; index < saber_level.part_count; index++)
+	{
+		if (saber_level.parts[index].sky)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* the package's sky, in the map sky's place: full bright, with no fog and
+no depth, so the structure drawn afterwards covers it. A part past the far
+plane is pulled in towards the camera, which keeps it in view and in the
+direction it stands */
+void saber_models_level_sky_render(
+	void)
+{
+	static real_rgb_color const colors[4] = { { 1.f, 1.f, 1.f }, { 1.f, 1.f, 1.f }, { 1.f, 1.f, 1.f }, { 1.f, 1.f, 1.f } };
+	static real const values[8] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
+	struct rasterizer_model_begin_parameters parameters;
+	struct render_lighting lighting;
+	real_matrix4x3 node;
+	long order[MAXIMUM_SABER_SKY_PARTS];
+	long sky_count;
+	long index;
+	long placed;
+	real far_distance;
+
+	if (!saber_level.drawn)
+		return;
+	sky_count = 0;
+	for (index = 0; index < saber_level.part_count && sky_count < MAXIMUM_SABER_SKY_PARTS; index++)
+	{
+		if (saber_level.parts[index].sky)
+			order[sky_count++] = index;
+	}
+	/* the farther part first: with no depth, a later part covers an earlier */
+	for (placed = 1; placed < sky_count; placed++)
+	{
+		long item = order[placed];
+		long slot = placed;
+		real item_distance;
+		real_vector3d offset;
+		real_vector3d earlier;
+
+		offset.i = saber_level.parts[item].centroid.x - render.camera.position.x;
+		offset.j = saber_level.parts[item].centroid.y - render.camera.position.y;
+		offset.k = saber_level.parts[item].centroid.z - render.camera.position.z;
+		item_distance = magnitude3d(&offset);
+		while (slot > 0)
+		{
+			earlier.i = saber_level.parts[order[slot - 1]].centroid.x - render.camera.position.x;
+			earlier.j = saber_level.parts[order[slot - 1]].centroid.y - render.camera.position.y;
+			earlier.k = saber_level.parts[order[slot - 1]].centroid.z - render.camera.position.z;
+			if (magnitude3d(&earlier) >= item_distance)
+				break;
+			order[slot] = order[slot - 1];
+			slot--;
+		}
+		order[slot] = item;
+	}
+
+	far_distance = rasterizer_globals.far_clip_distance * 0.85f;
+	if (far_distance < 16.f)
+		far_distance = 16.f;
+	csmemset(&lighting, 0, sizeof(lighting));
+	lighting.ambient_color = *global_real_rgb_white;
+	csmemset(&node, 0, sizeof(node));
+	node.forward.i = 1.f;
+	node.left.j = 1.f;
+	node.up.k = 1.f;
+	csmemset(&parameters, 0, sizeof(parameters));
+	parameters.unique_identifier = NONE;
+	parameters.skinning.node_matrices = &node;
+	parameters.skinning.node_matrix_count = 1;
+	parameters.animation.colors = colors;
+	parameters.animation.values = values;
+	parameters.base_map_scale.i = 1.f;
+	parameters.base_map_scale.j = 1.f;
+	parameters.lighting = lighting;
+	parameters.geometry_flags = FLAG(SABER_GEOMETRY_NO_FOG_BIT) | FLAG(SABER_GEOMETRY_NO_DEPTH_BIT);
+
+	rasterizer_models_begin(TRUE);
+	for (placed = 0; placed < sky_count; placed++)
+	{
+		struct saber_level_part *part = &saber_level.parts[order[placed]];
+		struct shader_model_definition shader;
+		real_rectangle3d scaled;
+		real max_distance = 0.f;
+		real scale = 1.f;
+		long corner;
+
+		for (corner = 0; corner < 8; corner++)
+		{
+			real_vector3d offset;
+			real distance;
+
+			offset.i = ((corner & 1) ? part->bounds.x1 : part->bounds.x0) - render.camera.position.x;
+			offset.j = ((corner & 2) ? part->bounds.y1 : part->bounds.y0) - render.camera.position.y;
+			offset.k = ((corner & 4) ? part->bounds.z1 : part->bounds.z0) - render.camera.position.z;
+			distance = magnitude3d(&offset);
+			if (distance > max_distance)
+				max_distance = distance;
+		}
+		if (max_distance > far_distance)
+			scale = far_distance / max_distance;
+		scaled.x0 = part->bounds.x0 * scale + render.camera.position.x * (1.f - scale);
+		scaled.x1 = part->bounds.x1 * scale + render.camera.position.x * (1.f - scale);
+		scaled.y0 = part->bounds.y0 * scale + render.camera.position.y * (1.f - scale);
+		scaled.y1 = part->bounds.y1 * scale + render.camera.position.y * (1.f - scale);
+		scaled.z0 = part->bounds.z0 * scale + render.camera.position.z * (1.f - scale);
+		scaled.z1 = part->bounds.z1 * scale + render.camera.position.z * (1.f - scale);
+		if (!render_frustum_cube_visible(&render.frustum, &scaled, FALSE))
+			continue;
+		node.scale = scale;
+		node.position.x = render.camera.position.x * (1.f - scale);
+		node.position.y = render.camera.position.y * (1.f - scale);
+		node.position.z = render.camera.position.z * (1.f - scale);
+		parameters.centroid.x = part->centroid.x * scale + render.camera.position.x * (1.f - scale);
+		parameters.centroid.y = part->centroid.y * scale + render.camera.position.y * (1.f - scale);
+		parameters.centroid.z = part->centroid.z * scale + render.camera.position.z * (1.f - scale);
+		parameters.radius = part->radius * scale;
+		shader = saber_level.shaders[part->cutout ? 1 : 0];
+		SET_FLAG(shader.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+		rasterizer_model_begin(&parameters, FALSE);
+		rasterizer_model_draw((struct shader *)&shader, part->texture,
+			&part->triangle_buffer, NONE, part->triangle_buffer.count, &part->vertex_buffer, NONE);
+		rasterizer_model_end();
+	}
+	rasterizer_models_end();
+}
+
 void saber_models_level_render(
 	void)
 {
@@ -3118,7 +3287,8 @@ void saber_models_level_render(
 	{
 		struct saber_level_part *part = &saber_level.parts[index];
 
-		if (!render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
+		/* (the sky is drawn in the map sky's place) */
+		if (part->sky || !render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
 			continue;
 		/* (its light, of the structure about its middle, sampled as it is first
 		drawn in a structure) */
