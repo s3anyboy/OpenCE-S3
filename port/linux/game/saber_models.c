@@ -4,38 +4,50 @@ SABER_MODELS.C
 Halo: Combat Evolved Anniversary's remastered models drawn over the map's
 (display.anniversary_models): as a map loads, its Saber3D package
 (<display.anniversary_paks>\<map>.s3dpak, by default paks\ next to the
-game's executable: the Xbox 360's paks360 or Halo:
-The Master Chief Collection's) is read for the templates of the models
-named in saber_model_templates, and each is drawn in place of the map's
-model, textured with the package's textures.
+game's executable: the Xbox 360's paks360 or Halo: The Master Chief
+Collection's) is read for a template of each of the map's models (its
+objects': the structure is no model, and is left as it is), and each that
+has one is drawn as it, textured with the package's textures.
 
-These are the first of them: b30's boulder and Covenant storage crate, to
-see the way through. A template's lower levels of detail (its .lod1, .lod2
-meshes) are the model's geometries of Halo's lower ones.
+A model's template is found by the model's name (template_find): its last
+folder, "weapons\pistol\pistol" pistol, "weapons\pistol\fp\fp" pistol_fp,
+"weapons\needler\projectile\projectile" needler_projectile, as it is or
+with "__h", the map's name ("light_fixture_floor1_b30__h") or another
+"__" kind ("tree_leafy__tree"), the first that has a mesh. Its effects'
+parts (muzzle flashes, lights' cones, overshields, counters' digits) are
+left out, and of a character's ranks the least's meshes alone are drawn
+(saber_paks.c). Its lower levels of detail (its .lod1, .lod2 meshes) are
+the model's geometries of Halo's lower ones.
 
 A template is drawn as a Custom Edition map's model is (mod_models.c does
 the same for the mods' models): its meshes made the vertices of the
 map's model's parts (saber_paks.c reads them, in Halo's axes), compressed
 by the game's own rasterizer_geometry_compress_vertices into the Xbox's
 contiguous memory and given buffers by rasterizer_vertex_buffer_new and
-rasterizer_triangle_buffer_new. Every vertex is the model's first node's.
+rasterizer_triangle_buffer_new. Each vertex moves with the map's model's
+nodes of the names of the template's bones it is blended of (its two most
+weighted; a bone with no such node, the model's first), so the map's
+animations move it. A model of as many nodes as the renderer skins a part
+with or more is left as it is.
 
-A template's units are not Halo's, nor all the same: the boulder's are
-metres, the weapons' tenths of a foot. Each is scaled to the map's model:
-the ratio of the two's sizes, across, taken to the nearest of the units
-templates are seen in.
+A template's units are not Halo's, nor all the same: the scenery's are
+metres, the weapons' and characters' tenths of a foot. Each is scaled to
+the map's model: the ratio of the two's sizes, across, taken to the
+nearest of the units templates are seen in.
 
 What is drawn changes, nothing else: the map's model keeps its nodes,
-markers and regions (what the machines of a network game agree on), and
-every permutation of every region draws the template. Each of the
-template's submeshes is drawn with one of the map's model's shaders (its
-material's place among the template's, of the shaders there are), whose
-base map becomes the package's texture of the submesh's base material
-(its full texture, from the level's package or pak_stream.s3dpak beside
-it, else its 64-pixel TexturesMips64), drawn without alpha testing.
-The shader loses its multipurpose and reflection maps, which are the
-classic model's. The map's model, shader and bitmap tags take the made
-definitions in place, and their own come back as the map goes.
+markers and regions (what the machines of a network game agree on). Its
+first region's permutations draw the template, its others nothing. Each of
+the template's materials is drawn with one of the map's model's shaders
+that can be (model shaders with a base map: the first material the first,
+the next the next ...), whose base map becomes the package's texture of
+the material (its full texture, from the level's package or
+pak_stream.s3dpak beside it, else its 64-pixel TexturesMips64), drawn
+without alpha testing. The shader loses its multipurpose and reflection
+maps, which are the classic model's. A shader or bitmap another model has
+too is drawn so for it as well. The map's model, shader and bitmap tags
+take the made definitions in place, and their own come back as the map
+goes.
 */
 
 /* ---------- headers */
@@ -201,13 +213,6 @@ typedef char verify_model_geometry_part_size[sizeof(struct model_geometry_part) 
 typedef char verify_model_shader_reference_size[sizeof(struct model_shader_reference) == 0x20 ? 1 : -1];
 typedef char verify_shader_model_properties_size[sizeof(struct shader_model_properties) == 0x14C ? 1 : -1];
 
-/* a model of the map and the template it is drawn as */
-struct saber_model_template
-{
-	char const *model_name;
-	char const *template_name;
-};
-
 /* a model made of a template, played over the map's model tag */
 struct saber_model
 {
@@ -247,13 +252,6 @@ struct saber_bitmap
 };
 
 /* ---------- globals */
-
-/* the models drawn as templates: two, to begin with */
-static struct saber_model_template const saber_model_templates[] =
-{
-	{ "scenery\\rocks\\boulder\\boulder", "boulder__h" },
-	{ "scenery\\c_storage\\c_storage", "c_storage__h" },
-};
 
 static struct
 {
@@ -487,6 +485,34 @@ static void saber_model_free(
 	free(made);
 }
 
+/* a part's centroid's node: the node most of its vertices' weight is on */
+static void part_centroid_node(
+	struct model_geometry_part *part,
+	struct saber_mesh_part const *source)
+{
+	real weights[MAXIMUM_NODES_PER_MODEL];
+	long index;
+	long best = 0;
+
+	csmemset(weights, 0, sizeof(weights));
+	for (index = 0; index < source->vertex_count; index++)
+	{
+		struct model_vertex_uncompressed const *vertex = &source->vertices[index];
+
+		if (vertex->nodes[0] >= 0 && vertex->nodes[0] < MAXIMUM_NODES_PER_MODEL)
+			weights[vertex->nodes[0]] += vertex->node_weights[0];
+		if (vertex->nodes[1] >= 0 && vertex->nodes[1] < MAXIMUM_NODES_PER_MODEL)
+			weights[vertex->nodes[1]] += vertex->node_weights[1];
+	}
+	for (index = 1; index < MAXIMUM_NODES_PER_MODEL; index++)
+	{
+		if (weights[index] > weights[best])
+			best = index;
+	}
+	part->centroid_primary_node_index = (short)best;
+	part->centroid_secondary_node_index = (short)best;
+}
+
 /* The model the template makes of the map's model: the map's, its every
 permutation drawing the template's geometry (`shader_indices`, the shader
 each part is drawn with). NULL, with *reason saying why, when it cannot be
@@ -576,9 +602,13 @@ static struct saber_model *saber_model_new(
 			*permutation = *TAG_BLOCK_GET_ELEMENT(&map_region->permutations, permutation_index,
 				struct model_region_permutation);
 			/* (super high the template's most detailed, each lower Halo level
-			its next, and the rest its least) */
+			its next, and the rest its least; the template whole, drawn by
+			the first region alone) */
 			for (detail = 0; detail < 5; detail++)
-				permutation->geometry_indices[detail] = (short)MIN(level_count - 1, 4 - detail);
+			{
+				permutation->geometry_indices[detail] = region_index ? NONE :
+					(short)MIN(level_count - 1, 4 - detail);
+			}
 		}
 	}
 	made->model.regions.address = made->regions;
@@ -616,6 +646,7 @@ static struct saber_model *saber_model_new(
 		part->previous_part_index = NONE;
 		part->next_part_index = NONE;
 		part->centroid_primary_node_weight = 1.f;
+		part_centroid_node(part, source);
 		for (index = 0; index < source->vertex_count; index++)
 		{
 			scaled[index] = source->vertices[index];
@@ -684,44 +715,6 @@ static long model_shader_tag(
 	shader = shader_definition_get(reference->shader.index);
 
 	return shader && shader->base.type == SHADER_TYPE_MODEL ? reference->shader.index : NONE;
-}
-
-/* the map's model tag `model_name`, or (a map whose tags are named
-otherwise) one whose name ends as it does, its last folder and name
-("c_storage\\c_storage"), or NONE */
-static long model_tag_find(
-	char const *model_name)
-{
-	long tag_index = tag_loaded(MODELS_GROUP_TAG, model_name);
-	char const *tail = model_name + strlen(model_name);
-	struct tag_iterator iterator;
-	long separators = 0;
-
-	if (tag_index != NONE)
-		return tag_index;
-	while (tail > model_name && separators < 2)
-	{
-		tail--;
-		if (*tail == '\\')
-			separators++;
-	}
-	if (separators == 2)
-		tail++;
-	tag_iterator_new(&iterator, MODELS_GROUP_TAG);
-	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
-	{
-		char const *name = tag_get_name(tag_index);
-		size_t length = strlen(name);
-		size_t tail_length = strlen(tail);
-
-		if (length >= tail_length && !_stricmp(name + length - tail_length, tail) &&
-			(length == tail_length || name[length - tail_length - 1] == '\\'))
-		{
-			return tag_index;
-		}
-	}
-
-	return NONE;
 }
 
 /* the stream's package, pak_stream.s3dpak, beside the level's, or NULL */
@@ -926,55 +919,316 @@ static boolean shader_plug(
 	return TRUE;
 }
 
-/* Draws the map's model `model_name` as the package's template
-`template_name`: its textures read and its model made before any of the
-map's tags are played over, so that one that cannot be drawn is the map's
-as it was. */
-static void model_play(
-	struct saber_pak *pak,
-	char const *model_name,
-	char const *template_name)
+/* whether a part's material is an effect's (a muzzle flash, a light's
+cone, an overshield, a weapon's counter's digits), which a model shader
+would draw solid: such parts are left out */
+static boolean material_effect(
+	char const *material)
 {
-	long tag_index = model_tag_find(model_name);
-	struct model *definition;
-	struct saber_template template_;
-	struct saber_model *made = NULL;
-	short shader_indices[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
-	long shader_tags[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
-	struct saber_bitmap *bitmaps[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
-	long bitmap_count = 0;
-	long shader_count = 0;
-	unsigned char *bytes;
-	unsigned long size = 0;
-	char const *reason = "the package has not got it";
-	long entry;
+	return !strncmp(material, "sfx_", 4) || !strncmp(material, "lig_", 4) || !strncmp(material, "fx_", 3) ||
+		strstr(material, "digits") != NULL;
+}
+
+/* the template's parts less those of effects (let go of) */
+static void template_effects_remove(
+	struct saber_template *template_)
+{
+	long kept = 0;
 	long index;
 
-	if (tag_index == NONE)
+	for (index = 0; index < template_->part_count; index++)
 	{
-		platform_log("anniversary: this map has no %s", model_name);
-		return;
+		struct saber_mesh_part *part = &template_->parts[index];
+
+		if (part->material_index >= 0 && part->material_index < template_->material_count &&
+			material_effect(template_->materials[part->material_index]))
+		{
+			free(part->vertices);
+			free(part->triangles);
+			continue;
+		}
+		template_->parts[kept++] = *part;
 	}
-	definition = model_definition_get(tag_index);
+	template_->part_count = kept;
+}
+
+/* a Halo node's name as the templates' bones are compared: lower case,
+spaces for underscores */
+static void node_name_compared(
+	char const *name,
+	char *compared,
+	size_t size)
+{
+	size_t index;
+
+	for (index = 0; name[index] && index + 1 < size; index++)
+	{
+		char character = name[index];
+
+		compared[index] = character == '_' ? ' ' : (character >= 'A' && character <= 'Z') ? (char)(character - 'A' + 'a') :
+			character;
+	}
+	compared[index] = 0;
+}
+
+/* Has the template's vertices name the map's model's nodes: each bone the
+node of its name, else the first. */
+static void template_nodes_map(
+	struct saber_template *template_,
+	struct model const *model)
+{
+	short *nodes = malloc(sizeof(*nodes) * ((size_t)template_->bone_count + 1));
+	long bone;
+	long part_index;
+
+	if (!nodes)
+		return;
+	for (bone = 0; bone < template_->bone_count; bone++)
+	{
+		long node_index;
+
+		nodes[bone] = 0;
+		for (node_index = 0; node_index < model->nodes.count; node_index++)
+		{
+			char compared[64];
+
+			node_name_compared(TAG_BLOCK_GET_ELEMENT(&model->nodes, node_index, struct model_node)->name, compared,
+				sizeof(compared));
+			if (!strcmp(compared, template_->bones[bone]))
+			{
+				nodes[bone] = (short)node_index;
+				break;
+			}
+		}
+	}
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[part_index];
+		long index;
+
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			struct model_vertex_uncompressed *vertex = &part->vertices[index];
+
+			vertex->nodes[0] = vertex->nodes[0] >= 0 && vertex->nodes[0] < template_->bone_count ? nodes[vertex->nodes[0]] : 0;
+			vertex->nodes[1] = vertex->nodes[1] >= 0 && vertex->nodes[1] < template_->bone_count ? nodes[vertex->nodes[1]] : 0;
+		}
+	}
+	free(nodes);
+}
+
+/* the package's template of a model of the map, by the model's name: its
+last folder (or, for a first-person model, its folder's, "_fp"), lower
+case with underscores for spaces, as it is or followed by "__h" or another
+"__" kind, or by the map's name and those ("light_fixture_floor1_b30__h").
+The first that has a mesh, read (*template_name its name); FALSE when none
+has */
+static boolean template_find(
+	struct saber_pak *pak,
+	char const *model_name,
+	char const *map_name,
+	struct saber_template *template_,
+	char *template_name,
+	size_t template_name_size)
+{
+	char base[128];
+	char const *end = model_name + strlen(model_name);
+	char const *start;
+	size_t length;
+	size_t index;
+	long pass;
+	long count = saber_pak_entry_count(pak);
+
+	/* (its last folder: "weapons\\pistol\\pistol" pistol, "...\\pistol\\fp\\fp"
+	pistol_fp) */
+	start = end;
+	while (start > model_name && start[-1] != '\\')
+		start--;
+	if (!_stricmp(start, "fp") && start > model_name)
+	{
+		char const *folder_end = start - 1;
+		char const *folder = folder_end;
+
+		while (folder > model_name && folder[-1] != '\\')
+			folder--;
+		while (folder > model_name && folder_end - folder == 2 && !_strnicmp(folder, "fp", 2))
+		{
+			folder_end = folder - 1;
+			folder = folder_end;
+			while (folder > model_name && folder[-1] != '\\')
+				folder--;
+		}
+		length = MIN((size_t)(folder_end - folder), sizeof(base) - 4);
+		memcpy(base, folder, length);
+		strcpy(base + length, "_fp");
+	}
+	else if (!_stricmp(start, "projectile") && start > model_name)
+	{
+		/* (a projectile's is its weapon's: "weapons\\needler\\projectile\\
+		projectile" needler_projectile) */
+		char const *folder_end = start - 1;
+		char const *folder;
+
+		while (folder_end > model_name && folder_end[-1] != '\\')
+			folder_end--;
+		folder_end = folder_end > model_name ? folder_end - 1 : folder_end;
+		folder = folder_end;
+		while (folder > model_name && folder[-1] != '\\')
+			folder--;
+		length = MIN((size_t)(folder_end - folder), sizeof(base) - 12);
+		memcpy(base, folder, length);
+		strcpy(base + length, "_projectile");
+	}
+	else
+	{
+		length = MIN((size_t)(end - start), sizeof(base) - 1);
+		memcpy(base, start, length);
+		base[length] = 0;
+	}
+	for (index = 0; base[index]; index++)
+	{
+		if (base[index] == ' ')
+			base[index] = '_';
+		else if (base[index] >= 'A' && base[index] <= 'Z')
+			base[index] = (char)(base[index] - 'A' + 'a');
+	}
+
+	/* (as it is; "__h"; with the map's name, "__h"; any other "__" kind,
+	without and with the map's name) */
+	for (pass = 0; pass < 6; pass++)
+	{
+		long entry;
+
+		for (entry = 0; entry < count; entry++)
+		{
+			char const *name = saber_pak_entry_name(pak, entry);
+			char wanted[200];
+			boolean match;
+
+			if (saber_pak_entry_type(pak, entry) != _saber_entry_templates)
+				continue;
+			switch (pass)
+			{
+			case 0:
+				match = !strcmp(name, base);
+				break;
+			case 1:
+				snprintf(wanted, sizeof(wanted), "%s__h", base);
+				match = !strcmp(name, wanted);
+				break;
+			case 2:
+				snprintf(wanted, sizeof(wanted), "%s_%s__h", base, map_name);
+				match = !strcmp(name, wanted);
+				break;
+			case 3:
+				snprintf(wanted, sizeof(wanted), "%s_%s", base, map_name);
+				match = !strcmp(name, wanted);
+				break;
+			default:
+				if (pass == 4)
+					snprintf(wanted, sizeof(wanted), "%s__", base);
+				else
+					snprintf(wanted, sizeof(wanted), "%s_%s__", base, map_name);
+				/* (a far plane's stand-in is not the model) */
+				match = !strncmp(name, wanted, strlen(wanted)) && !strstr(name, "farplane") && !strstr(name, "_far_");
+				break;
+			}
+			if (match)
+			{
+				unsigned long size = 0;
+				unsigned char *bytes = saber_pak_read(pak, entry, &size);
+				char const *reason;
+				boolean read = bytes && saber_template_read(template_, bytes, size, saber_pak_xbox360(pak), &reason);
+
+				if (bytes)
+					free(bytes);
+				if (read)
+				{
+					template_effects_remove(template_);
+					if (template_->part_count > 0)
+					{
+						snprintf(template_name, template_name_size, "%s", name);
+						return TRUE;
+					}
+				}
+				saber_template_dispose(template_);
+			}
+		}
+	}
+
+	return FALSE;
+}
+
+/* Draws the map's model `tag_index` as the package's template of it, if it
+has one: its textures read and its model made before any of the map's tags
+are played over, so that one that cannot be drawn is the map's as it was.
+TRUE if it is drawn. */
+static boolean model_play(
+	struct saber_pak *pak,
+	long tag_index,
+	char const *map_name)
+{
+	struct model *definition = model_definition_get(tag_index);
+	struct saber_template template_;
+	char template_name[128];
+	struct saber_model *made = NULL;
+	short *shader_indices = NULL;
+	long shader_tags[MAXIMUM_SHADERS_PER_MODEL];
+	struct saber_bitmap *bitmaps[MAXIMUM_SHADERS_PER_MODEL];
+	short usable[MAXIMUM_SHADERS_PER_MODEL];
+	short material_shaders[256];
+	long usable_count = 0;
+	long material_count = 0;
+	long bitmap_count = 0;
+	long shader_count = 0;
+	long level_parts[5] = { 0, 0, 0, 0, 0 };
+	char const *reason = "out of memory";
+	long index;
+
 	for (made = saber_models_globals.models; made; made = made->next)
 	{
 		if (made->tag_index == tag_index)
-			return;
+			return FALSE;
 	}
 	csmemset(&template_, 0, sizeof(template_));
-	entry = saber_pak_find(pak, template_name, _saber_entry_templates);
-	bytes = entry == NONE ? NULL : saber_pak_read(pak, entry, &size);
-	if (!bytes || !saber_template_read(&template_, bytes, size, saber_pak_xbox360(pak), &reason))
+	if (!template_find(pak, tag_get_name(tag_index), map_name, &template_, template_name, sizeof(template_name)))
+		return FALSE;
+	shader_indices = malloc(sizeof(*shader_indices) * ((size_t)template_.part_count + 1));
+	if (!shader_indices)
 		goto refused;
-	reason = "its template has more parts than a model's geometry can";
-	if (template_.part_count > MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+	for (index = 0; index < template_.part_count; index++)
+		level_parts[MIN(template_.parts[index].lod, 4)]++;
+	reason = "a level of detail of its template has more parts than a model's geometry can";
+	for (index = 0; index < 5; index++)
+	{
+		if (level_parts[index] > MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+			goto refused;
+	}
+	/* (the renderer skins a part of a map's model by the model's nodes, at
+	most so many) */
+	reason = "the map's model has more nodes than its parts are drawn with";
+	if (definition->nodes.count <= 0 || definition->nodes.count >= RASTERIZER_MAXIMUM_NODES_PER_MODEL)
 		goto refused;
-	reason = "the map's model has no shader";
-	if (definition->shaders.count <= 0)
-		goto refused;
+	template_nodes_map(&template_, definition);
 
-	/* each part's shader, by its material, and the shader's base map the
-	material's texture */
+	/* the map's model's shaders that can be drawn with a texture (model
+	shaders with a base map), and each material's: the first's the first,
+	the next's the next ... */
+	for (index = 0; index < definition->shaders.count && usable_count < MAXIMUM_SHADERS_PER_MODEL; index++)
+	{
+		long shader_tag = model_shader_tag(definition, (short)index);
+
+		if (shader_tag != NONE &&
+			((struct shader_model_definition *)shader_definition_get(shader_tag))->model.base_map.index != NONE)
+		{
+			usable[usable_count++] = (short)index;
+		}
+	}
+	reason = "the map's model has no model shader with a base map";
+	if (!usable_count)
+		goto refused;
+	for (index = 0; index < 256; index++)
+		material_shaders[index] = NONE;
 	for (index = 0; index < template_.part_count; index++)
 	{
 		short material = template_.parts[index].material_index;
@@ -983,16 +1237,13 @@ static void model_play(
 		long other;
 
 		reason = "a part's material is not one of its template's";
-		if (material < 0 || material >= template_.material_count)
+		if (material < 0 || material >= template_.material_count || material >= 256)
 			goto refused;
-		shader_indices[index] = (short)(material % definition->shaders.count);
+		if (material_shaders[material] == NONE)
+			material_shaders[material] = usable[material_count++ % usable_count];
+		shader_indices[index] = material_shaders[material];
 		shader_tag = model_shader_tag(definition, shader_indices[index]);
-		reason = "a shader of the map's model is not a model shader with a base map";
-		if (shader_tag == NONE)
-			goto refused;
 		bitmap_tag = ((struct shader_model_definition *)shader_definition_get(shader_tag))->model.base_map.index;
-		if (bitmap_tag == NONE)
-			goto refused;
 		for (other = 0; other < shader_count && shader_tags[other] != shader_tag; other++)
 		{
 		}
@@ -1025,12 +1276,12 @@ static void model_play(
 	platform_log("anniversary: %s drawn as the template %s (%ld parts, %ld levels of detail)",
 		tag_get_name(tag_index), template_name, made->part_count, made->geometry_count);
 	saber_template_dispose(&template_);
-	free(bytes);
+	free(shader_indices);
 
-	return;
+	return TRUE;
 
 refused:
-	platform_log("anniversary: %s is drawn as the map's: the template %s: %s", model_name, template_name,
+	platform_log("anniversary: %s is drawn as the map's: the template %s: %s", tag_get_name(tag_index), template_name,
 		reason);
 	for (index = 0; index < bitmap_count; index++)
 	{
@@ -1038,8 +1289,10 @@ refused:
 		free(bitmaps[index]);
 	}
 	saber_template_dispose(&template_);
-	if (bytes)
-		free(bytes);
+	if (shader_indices)
+		free(shader_indices);
+
+	return FALSE;
 }
 
 /* ---------- public code */
@@ -1050,7 +1303,6 @@ void saber_models_tags_loaded(
 	char path[1024];
 	struct saber_pak *pak;
 	char const *reason;
-	long index;
 
 	/* (what was made for a map whose tags went without its being let go of
 	is not written over this one's) */
@@ -1084,8 +1336,25 @@ void saber_models_tags_loaded(
 		memcpy(saber_models_globals.folder, path, length);
 		saber_models_globals.folder[length] = 0;
 	}
-	for (index = 0; index < NUMBEROF(saber_model_templates); index++)
-		model_play(pak, saber_model_templates[index].model_name, saber_model_templates[index].template_name);
+	/* (every model of the map's: its objects', not its structure's, which
+	is no model) */
+	{
+		struct tag_iterator iterator;
+		char const *name = strrchr(map_name, '\\');
+		long tag_index;
+		long drawn = 0;
+		long models = 0;
+
+		name = name ? name + 1 : map_name;
+		tag_iterator_new(&iterator, MODELS_GROUP_TAG);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		{
+			models++;
+			if (model_play(pak, tag_index, name))
+				drawn++;
+		}
+		platform_log("anniversary: %ld of the map's %ld models drawn as templates", drawn, models);
+	}
 	saber_pak_close(pak);
 	if (saber_models_globals.stream)
 		saber_pak_close(saber_models_globals.stream);

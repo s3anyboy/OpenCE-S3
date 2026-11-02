@@ -50,8 +50,8 @@ on the Xbox 360, which are big-endian. What is read of one, as Reclaimer
 
 Saber3D's axes are forward x, right -z and up y, Halo's forward x, left y
 and up z: a point of the template is Halo's with its y and z exchanged,
-which turns its triangles over (they are turned back, to agree with the
-normals the template gives). A template's own units vary (Halo's are not
+which turns its triangles over; they are turned to face as Halo's do
+(clockwise about the normals the template gives). A template's own units vary (Halo's are not
 among them): saber_models.c scales them to the map's model.
 
 A texture (TexturesMips64, Textures) starts "TCIP" at 6 (little-endian:
@@ -110,6 +110,10 @@ enum
 	_block_triangle_range = 0x0501,
 	_block_submesh_materials = 0x0B01,
 	_block_material_index = 0x0E01,
+	_block_bone_index = 0xFA00,
+	_block_blend = 0x1601,
+	_block_blend_indices = 0x3301,
+	_block_blend_weights = 0x1A01,
 };
 
 enum
@@ -190,6 +194,11 @@ struct template_node
 	boolean has_mesh_flags;
 	/* its level of detail, of its name (".lod1.c": 1; none, 0) */
 	short lod;
+	/* its name, its bone (NONE: it is none) and its mesh's blending */
+	unsigned long name_start;
+	unsigned long name_length;
+	long bone_index;
+	struct block blend;
 };
 
 struct template_walk
@@ -606,12 +615,21 @@ static void node_read(
 		node = &walk->nodes[walk->node_count++];
 		csmemset(node, 0, sizeof(*node));
 		node->id = read_short(bytes + name_end + 1);
+		node->name_start = block.start;
+		node->name_length = name_end - block.start;
+		node->bone_index = NONE;
+		/* (".lod1.w", or a name that is the level alone, "lod2") */
 		for (index = (long)block.start; index + 4 <= (long)name_end; index++)
 		{
-			if (bytes[index] == '.' && bytes[index + 1] == 'l' && bytes[index + 2] == 'o' && bytes[index + 3] == 'd' &&
-				index + 4 < (long)name_end && bytes[index + 4] >= '0' && bytes[index + 4] <= '9')
+			if ((index == (long)block.start || bytes[index] == '.') && index + 4 < (long)name_end)
 			{
-				node->lod = (short)(bytes[index + 4] - '0');
+				unsigned long at = bytes[index] == '.' ? (unsigned long)index + 1 : (unsigned long)index;
+
+				if (at + 3 < name_end && bytes[at] == 'l' && bytes[at + 1] == 'o' && bytes[at + 2] == 'd' &&
+					bytes[at + 3] >= '0' && bytes[at + 3] <= '9')
+				{
+					node->lod = (short)(bytes[at + 3] - '0');
+				}
 			}
 		}
 		node->parent_id = NONE;
@@ -629,6 +647,12 @@ static void node_read(
 		}
 		if (block_find(bytes, node_block->start, node_block->end, _block_parent, &block) && block.end - block.start >= 4)
 			node->parent_id = (long)read_u32(bytes + block.start);
+		if (block_find(bytes, node_block->start, node_block->end, _block_bone_index, &block) &&
+			block.end - block.start >= 4)
+		{
+			node->bone_index = (long)read_u32(bytes + block.start);
+		}
+		block_find(bytes, node_block->start, node_block->end, _block_blend, &node->blend);
 		if (block_find(bytes, node_block->start, node_block->end, _block_mesh_flags, &block) &&
 			block.end - block.start >= 4)
 		{
@@ -694,6 +718,99 @@ static void node_world_transform(
 			break;
 		matrix_multiply(transform, node->transform);
 	}
+}
+
+/* whether a node, or a node it is under, is a rank's variant that is not
+the least's (an Elite's or a Grunt's "_major", "officer" ...: Halo draws its
+ranks as one model of their colours, so the minor's mesh alone is drawn) */
+static boolean node_rank_variant(
+	struct template_walk const *walk,
+	struct template_node const *node)
+{
+	static char const *const ranks[] = { "major", "officer", "special", "spec_ops", "specops", "zealot", "stealth",
+		"ultra", "commander", "honor" };
+	long depth;
+
+	for (depth = 0; node && depth < MAXIMUM_NODE_DEPTH; depth++)
+	{
+		char name[64];
+		unsigned long length = MIN(node->name_length, sizeof(name) - 1);
+		long rank;
+
+		memcpy(name, walk->bytes + node->name_start, length);
+		name[length] = 0;
+		for (rank = 0; rank < (long)NUMBEROF(ranks); rank++)
+		{
+			if (strstr(name, ranks[rank]))
+				return TRUE;
+		}
+		node = node->parent_id == NONE ? NULL : node_of_id(walk, node->parent_id);
+	}
+
+	return FALSE;
+}
+
+/* The slot among the template's bones of the bone a node moves with: its
+own, if it is one, else its nearest parent's that is, else (a template
+whose parts are not bones, as the vehicles') its own; its name made as
+Halo's nodes' are compared (lower case, spaces for underscores, without
+Saber3D's leading "." and trailing ".x"). NONE when there is no room. */
+static long bone_slot(
+	struct saber_template *template_,
+	struct template_walk const *walk,
+	struct template_node const *node)
+{
+	struct template_node const *bone = node;
+	char name[64];
+	unsigned long start;
+	unsigned long length;
+	unsigned long index;
+	long depth;
+	long slot;
+
+	for (depth = 0; bone && bone->bone_index == NONE && depth < MAXIMUM_NODE_DEPTH; depth++)
+		bone = bone->parent_id == NONE ? NULL : node_of_id(walk, bone->parent_id);
+	if (!bone || bone->bone_index == NONE)
+		bone = node;
+	start = bone->name_start;
+	length = bone->name_length;
+	if (length && walk->bytes[start] == '.')
+	{
+		start++;
+		length--;
+	}
+	for (index = 0; index < length; index++)
+	{
+		if (walk->bytes[start + index] == '.')
+		{
+			length = index;
+			break;
+		}
+	}
+	length = MIN(length, sizeof(name) - 1);
+	for (index = 0; index < length; index++)
+	{
+		char character = (char)walk->bytes[start + index];
+
+		name[index] = character == '_' ? ' ' : (character >= 'A' && character <= 'Z') ? (char)(character - 'A' + 'a') :
+			character;
+	}
+	name[length] = 0;
+	for (slot = 0; slot < template_->bone_count; slot++)
+	{
+		if (!strcmp(template_->bones[slot], name))
+			return slot;
+	}
+	{
+		char (*bones)[64] = realloc(template_->bones, sizeof(*template_->bones) * ((size_t)template_->bone_count + 1));
+
+		if (!bones)
+			return NONE;
+		template_->bones = bones;
+		strcpy(bones[template_->bone_count], name);
+	}
+
+	return template_->bone_count++;
 }
 
 /* the transform of normals of a row-vector transform: the inverse
@@ -827,6 +944,11 @@ static boolean mesh_read(
 	long submesh_count[MAXIMUM_SUBMESHES];
 	short submesh_material[MAXIMUM_SUBMESHES];
 	long submesh_total = 0;
+	long rigid_slot;
+	unsigned char const *blend_indices = NULL;
+	unsigned char const *blend_weights = NULL;
+	long blend_count = 0;
+	long blend_slots[256];
 	long index;
 
 	*reason = "a mesh is not as a template's is";
@@ -834,7 +956,7 @@ static boolean mesh_read(
 		return TRUE;
 	vertex_count = (long)read_u32(bytes + node->positions.start);
 	triangle_count = (long)read_u32(bytes + node->triangles.start);
-	if (vertex_count <= 0 || triangle_count <= 0)
+	if (vertex_count <= 0 || triangle_count <= 0 || node_rank_variant(walk, node))
 		return TRUE;
 	if (vertex_count > 0x100000 || triangle_count > 0x100000 ||
 		(unsigned long)triangle_count * 6 > node->triangles.end - node->triangles.start - 4)
@@ -869,6 +991,38 @@ static boolean mesh_read(
 			(unsigned long)vertex_count * (unsigned long)vertex_size > node->vertex_data.end - node->vertex_data.start - 13)
 		{
 			uv_offset = -1;
+		}
+	}
+
+	/* the bones it moves with: its own node's, or each vertex's blend of the
+	nodes it names (each a mesh's id from the first, its bone that mesh's) */
+	*reason = "out of memory";
+	rigid_slot = bone_slot(template_, walk, node);
+	if (rigid_slot == NONE)
+		return FALSE;
+	if (node->blend.end > node->blend.start)
+	{
+		struct block indices;
+		struct block weights;
+
+		if (block_find(bytes, node->blend.start, node->blend.end, _block_blend_indices, &indices) &&
+			indices.end - indices.start >= 4 + 4 * (unsigned long)vertex_count)
+		{
+			short first_id = read_short(bytes + indices.start);
+
+			blend_count = MIN(MAX(read_short(bytes + indices.start + 2), 0), 256);
+			blend_indices = bytes + indices.start + 4;
+			for (index = 0; index < blend_count; index++)
+			{
+				struct template_node const *blended = node_of_id(walk, first_id + index);
+
+				blend_slots[index] = blended ? bone_slot(template_, walk, blended) : NONE;
+			}
+			if (block_find(bytes, node->blend.start, node->blend.end, _block_blend_weights, &weights) &&
+				weights.end - weights.start >= 4 * (unsigned long)vertex_count)
+			{
+				blend_weights = bytes + weights.start;
+			}
 		}
 	}
 
@@ -991,15 +1145,57 @@ static boolean mesh_read(
 			vertex->texcoord.x = unit_short(xbox360 ? read_short_big(uv) : read_short(uv));
 			vertex->texcoord.y = unit_short(xbox360 ? read_short_big(uv + 2) : read_short(uv + 2));
 		}
-		vertex->nodes[0] = 0;
-		vertex->nodes[1] = 0;
+		vertex->nodes[0] = (short)rigid_slot;
+		vertex->nodes[1] = (short)rigid_slot;
 		vertex->node_weights[0] = 1.f;
 		vertex->node_weights[1] = 0.f;
+		if (blend_indices)
+		{
+			unsigned char const *indices = blend_indices + 4 * index;
+			unsigned char const *weights = blend_weights ? blend_weights + 4 * index : NULL;
+			long best[2] = { NONE, NONE };
+			long weight[2] = { -1, -1 };
+			long influence;
+
+			/* (its two most weighted; a skin compound's weights are none,
+			its first index the whole) */
+			for (influence = 0; influence < 4; influence++)
+			{
+				long value = weights ? (long)weights[influence] : (influence ? 0 : 255);
+
+				if (indices[influence] >= blend_count)
+					continue;
+				if (value > weight[0])
+				{
+					best[1] = best[0];
+					weight[1] = weight[0];
+					best[0] = influence;
+					weight[0] = value;
+				}
+				else if (value > weight[1])
+				{
+					best[1] = influence;
+					weight[1] = value;
+				}
+			}
+			if (best[0] != NONE && weight[0] <= 0)
+				weight[0] = 255;
+			if (best[0] != NONE && blend_slots[indices[best[0]]] != NONE)
+			{
+				vertex->nodes[0] = vertex->nodes[1] = (short)blend_slots[indices[best[0]]];
+				if (best[1] != NONE && weight[1] > 0 && blend_slots[indices[best[1]]] != NONE)
+				{
+					vertex->nodes[1] = (short)blend_slots[indices[best[1]]];
+					vertex->node_weights[0] = (real)weight[0] / (real)(weight[0] + weight[1]);
+					vertex->node_weights[1] = 1.f - vertex->node_weights[0];
+				}
+			}
+		}
 		tangents[index].i = tangents[index].j = tangents[index].k = 0.f;
 	}
 
-	/* its triangles; turned over, as Halo's axes turn them, unless its
-	normals say otherwise */
+	/* its triangles, turned as Halo's front faces are: clockwise about the
+	normals the template gives */
 	*reason = "a mesh's triangles name vertices it has not got";
 	for (index = 0; index < 3 * triangle_count; index++)
 	{
@@ -1032,7 +1228,9 @@ static boolean mesh_read(
 		if (dot_product3d(&face, &sum) > 0.f)
 			agree++;
 	}
-	flip = TEST_FLAG(flags, _mesh_normals_bit) ? agree * 2 < triangle_count : TRUE;
+	/* (Halo's front faces turn clockwise about their normals, in its axes:
+	(b - a) x (c - a) points in, away from the normal) */
+	flip = TEST_FLAG(flags, _mesh_normals_bit) ? agree * 2 > triangle_count : FALSE;
 	for (index = 0; flip && index < triangle_count; index++)
 	{
 		unsigned short swap = triangles[3 * index + 1];
@@ -1055,7 +1253,7 @@ static boolean mesh_read(
 
 			vector_from_points3d(&a->position, &b->position, &ab);
 			vector_from_points3d(&a->position, &c->position, &ac);
-			cross_product3d(&ab, &ac, &face);
+			cross_product3d(&ac, &ab, &face);
 			add_vectors3d(&a->normal, &face, &a->normal);
 			add_vectors3d(&b->normal, &face, &b->normal);
 			add_vectors3d(&c->normal, &face, &c->normal);
@@ -1244,6 +1442,26 @@ int saber_pak_xbox360(
 	return pak->compressed;
 }
 
+long saber_pak_entry_count(
+	struct saber_pak const *pak)
+{
+	return pak->entry_count;
+}
+
+char const *saber_pak_entry_name(
+	struct saber_pak const *pak,
+	long entry)
+{
+	return entry >= 0 && entry < pak->entry_count ? pak->entries[entry].name : "";
+}
+
+long saber_pak_entry_type(
+	struct saber_pak const *pak,
+	long entry)
+{
+	return entry >= 0 && entry < pak->entry_count ? pak->entries[entry].type : NONE;
+}
+
 long saber_pak_find(
 	struct saber_pak const *pak,
 	char const *name,
@@ -1370,6 +1588,8 @@ void saber_template_dispose(
 		free(template_->parts);
 	if (template_->materials)
 		free(template_->materials);
+	if (template_->bones)
+		free(template_->bones);
 	csmemset(template_, 0, sizeof(*template_));
 }
 

@@ -37,7 +37,8 @@ struct saber_pak;
 struct model_vertex_uncompressed;
 
 /* a template's mesh, made Halo's: its vertices in Halo's axes (not yet
-scaled to Halo's units) and its triangles (three indices each) as Halo
+scaled to Halo's units; their two nodes the template's bones' places, of
+the most weight) and its triangles (three indices each) as Halo
 draws them, a part for each of its submeshes with the material it is drawn
 with (its index in the template's materials) */
 struct saber_mesh_part
@@ -55,6 +56,11 @@ struct saber_template
 {
 	long material_count;
 	char (*materials)[64];
+	/* the bones its vertices move with, by name (as Halo's nodes are
+	compared: lower case, spaces for underscores), which its vertices'
+	nodes are the places of */
+	long bone_count;
+	char (*bones)[64];
 	long part_count;
 	struct saber_mesh_part *parts;
 };
@@ -91,6 +97,10 @@ void saber_pak_close(struct saber_pak *pak);
 /* whether it is the Xbox 360's (compressed; its templates' texture
 coordinates big-endian), not the PC's (Halo: The Master Chief Collection's) */
 int saber_pak_xbox360(struct saber_pak const *pak);
+/* its entries: their count, and each one's name and type */
+long saber_pak_entry_count(struct saber_pak const *pak);
+char const *saber_pak_entry_name(struct saber_pak const *pak, long entry);
+long saber_pak_entry_type(struct saber_pak const *pak, long entry);
 /* the entry of the name and type, or -1 */
 long saber_pak_find(struct saber_pak const *pak, char const *name, long type);
 /* the whole entry, in memory of malloc's (free() it), or NULL */
