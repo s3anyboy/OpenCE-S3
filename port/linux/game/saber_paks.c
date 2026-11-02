@@ -110,6 +110,8 @@ enum
 	_block_mesh_bounds = 0x1D01,
 	_block_scene_object_bounds = 0x3501,
 	_block_mesh_flags = 0x2E01,
+	/* a node's text properties, among them its texture coordinates' compression */
+	_block_properties = 0x1501,
 	_block_positions = 0xF100,
 	_block_vertex_data = 0x3001,
 	_block_triangles = 0xF200,
@@ -221,6 +223,10 @@ struct template_node
 	boolean has_scene_bounds;
 	real scene_translation[3];
 	real scene_scale[3];
+	/* its texture coordinates were stored compressed (unit * tile + shift) */
+	boolean has_uv_decompress;
+	real uv_shift[2];
+	real uv_tile[2];
 };
 
 struct template_walk
@@ -584,6 +590,85 @@ static boolean block_find(
 	return FALSE;
 }
 
+/* whether `text` occurs in `block` */
+static boolean block_contains(
+	unsigned char const *bytes,
+	struct block const *block,
+	char const *text)
+{
+	unsigned long length = (unsigned long)strlen(text);
+	unsigned long index;
+
+	if (length == 0 || block->end < block->start + length)
+		return FALSE;
+	for (index = block->start; index + length <= block->end; index++)
+	{
+		if (memcmp(bytes + index, text, length) == 0)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* the number on the line after `key` in `block`, or FALSE */
+static boolean property_real(
+	unsigned char const *bytes,
+	struct block const *block,
+	char const *key,
+	real *value)
+{
+	unsigned long length = (unsigned long)strlen(key);
+	unsigned long index;
+	unsigned long start;
+	long sign;
+	long whole;
+	long frac;
+	long denom;
+	boolean any;
+
+	if (block->end < block->start + length + 2)
+		return FALSE;
+	for (index = block->start; index + length + 1 <= block->end; index++)
+	{
+		if (memcmp(bytes + index, key, length) != 0 || bytes[index + length] != '\n')
+			continue;
+		start = index + length + 1;
+		sign = 1;
+		whole = 0;
+		frac = 0;
+		denom = 1;
+		any = FALSE;
+		if (start < block->end && bytes[start] == '-')
+		{
+			sign = -1;
+			start++;
+		}
+		while (start < block->end && bytes[start] >= '0' && bytes[start] <= '9')
+		{
+			whole = whole * 10 + (long)(bytes[start] - '0');
+			start++;
+			any = TRUE;
+		}
+		if (start < block->end && bytes[start] == '.')
+		{
+			start++;
+			while (start < block->end && bytes[start] >= '0' && bytes[start] <= '9')
+			{
+				frac = frac * 10 + (long)(bytes[start] - '0');
+				denom *= 10;
+				start++;
+				any = TRUE;
+			}
+		}
+		if (!any || denom == 0)
+			return FALSE;
+		*value = (real)sign * ((real)whole + (real)frac / (real)denom);
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
 static void node_read(
 	struct template_walk *walk,
 	struct block const *node_block,
@@ -713,6 +798,18 @@ static void node_read(
 		block_find(bytes, node_block->start, node_block->end, _block_vertex_data, &node->vertex_data);
 		block_find(bytes, node_block->start, node_block->end, _block_triangles, &node->triangles);
 		block_find(bytes, node_block->start, node_block->end, _block_submeshes, &node->submeshes);
+		/* (its texture coordinates, packed into the vertex's unit range:
+		unit * tile + shift. A mesh marked uncompressed already holds them) */
+		if (block_find(bytes, node_block->start, node_block->end, _block_properties, &block) &&
+			block_contains(bytes, &block, "__export_uv_compr_params") &&
+			!block_contains(bytes, &block, "export_no_vertex_compression") &&
+			property_real(bytes, &block, "shiftS", &node->uv_shift[0]) &&
+			property_real(bytes, &block, "shiftT", &node->uv_shift[1]) &&
+			property_real(bytes, &block, "tileS", &node->uv_tile[0]) &&
+			property_real(bytes, &block, "tileT", &node->uv_tile[1]))
+		{
+			node->has_uv_decompress = TRUE;
+		}
 	}
 	nodes_read(walk, node_block->start, node_block->end, depth + 1);
 }
@@ -1479,6 +1576,11 @@ static boolean mesh_read(
 
 			vertex->texcoord.x = unit_short(xbox360 ? read_short_big(uv) : read_short(uv));
 			vertex->texcoord.y = unit_short(xbox360 ? read_short_big(uv + 2) : read_short(uv + 2));
+			if (node->has_uv_decompress)
+			{
+				vertex->texcoord.x = vertex->texcoord.x * node->uv_tile[0] + node->uv_shift[0];
+				vertex->texcoord.y = vertex->texcoord.y * node->uv_tile[1] + node->uv_shift[1];
+			}
 		}
 		vertex->nodes[0] = (short)rigid_slot;
 		vertex->nodes[1] = (short)rigid_slot;
