@@ -102,6 +102,7 @@ texture cache, which draws it among others) */
 #define MODEL_PARTS_HAVE_LOCAL_NODES_BIT 1
 /* rasterizer_xbox_models.c's model shader flags */
 #define SHADER_MODEL_NOT_ALPHA_TESTED_BIT 2
+#define SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT 3
 
 /* bitmaps.c's types and flags */
 enum
@@ -893,6 +894,18 @@ static void bitmap_plug(
 	saber_models_globals.bitmaps = made;
 }
 
+/* whether a model shader lights itself (its self-illumination's colours,
+which its multipurpose map masks) */
+static boolean shader_self_illuminated(
+	struct shader_model_definition const *shader)
+{
+	real_rgb_color const *lower = &shader->model.self_illumination_animation_color_lower_bound;
+	real_rgb_color const *upper = &shader->model.self_illumination_animation_color_upper_bound;
+
+	return lower->red > 0.f || lower->green > 0.f || lower->blue > 0.f ||
+		upper->red > 0.f || upper->green > 0.f || upper->blue > 0.f;
+}
+
 /* Has the map's model shader drawn as its base map alone (the classic
 model's other maps gone, its base map's scale none), FALSE when there is no
 memory for it. */
@@ -914,6 +927,14 @@ static boolean shader_plug(
 	/* (with no multipurpose map to mask it, an object's change colour would
 	tint it whole: the package's textures have their colours) */
 	shader->model.change_color_source = 0;
+	/* (nor drawn as a decal blended over the rest, nor lit by itself,
+	which the multipurpose map masked) */
+	SET_FLAG(shader->model.flags, SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT, FALSE);
+	shader->model.self_illumination_color_source = 0;
+	csmemset(&shader->model.self_illumination_animation_color_lower_bound, 0,
+		sizeof(shader->model.self_illumination_animation_color_lower_bound));
+	csmemset(&shader->model.self_illumination_animation_color_upper_bound, 0,
+		sizeof(shader->model.self_illumination_animation_color_upper_bound));
 	/* (the package's textures' alpha is no alpha test's: drawn whole) */
 	SET_FLAG(shader->model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, TRUE);
 	shader->model.detail_mask = 0;
@@ -1110,7 +1131,10 @@ animations pose it, though the two's skeletons stand otherwise. */
 static void template_nodes_map(
 	struct saber_template *template_,
 	struct model const *model,
-	real scale)
+	real scale,
+	long *matched_bones,
+	long *posed_vertices,
+	long *unposed_vertices)
 {
 	short *nodes = malloc(sizeof(*nodes) * ((size_t)template_->bone_count + 1));
 	long *binds = malloc(sizeof(*binds) * ((size_t)template_->bone_count + 1));
@@ -1171,7 +1195,7 @@ static void template_nodes_map(
 			real_point3d position = { 0.f, 0.f, 0.f };
 			real_vector3d normal = { 0.f, 0.f, 0.f };
 			real_vector3d tangent = { 0.f, 0.f, 0.f };
-			boolean posed = defaults;
+			boolean posed = defaults && template_->bone_count > 0;
 			long influence;
 
 			long slots[2];
@@ -1233,6 +1257,7 @@ static void template_nodes_map(
 			{
 				real along = dot_product3d(&tangent, &normal);
 
+				(*posed_vertices)++;
 				vertex->position = position;
 				vertex->normal = normal;
 				tangent.i -= normal.i * along;
@@ -1250,14 +1275,66 @@ static void template_nodes_map(
 			else
 			{
 				/* (as it is, in the model's space, scaled) */
+				(*unposed_vertices)++;
 				vertex->position.x *= scale;
 				vertex->position.y *= scale;
 				vertex->position.z *= scale;
 			}
 		}
 	}
+	for (bone = 0; bone < template_->bone_count; bone++)
+	{
+		if (binds[bone] == bone)
+			(*matched_bones)++;
+	}
 	free(nodes);
 	free(binds);
+}
+
+/* Turns each part's triangles to face as Halo's do, clockwise about their
+vertices' normals, if most do not: a template posed by a skeleton
+(template_nodes_map) may be turned over by it, its bones' own spaces
+Saber3D's, of the other hand to Halo's axes. */
+static void parts_face_halo(
+	struct saber_template *template_)
+{
+	long part_index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[part_index];
+		long agree = 0;
+		long index;
+
+		for (index = 0; index < part->triangle_count; index++)
+		{
+			struct model_vertex_uncompressed const *a = &part->vertices[part->triangles[3 * index]];
+			struct model_vertex_uncompressed const *b = &part->vertices[part->triangles[3 * index + 1]];
+			struct model_vertex_uncompressed const *c = &part->vertices[part->triangles[3 * index + 2]];
+			real_vector3d ab;
+			real_vector3d ac;
+			real_vector3d face;
+			real_vector3d sum;
+
+			vector_from_points3d(&a->position, &b->position, &ab);
+			vector_from_points3d(&a->position, &c->position, &ac);
+			cross_product3d(&ab, &ac, &face);
+			sum.i = a->normal.i + b->normal.i + c->normal.i;
+			sum.j = a->normal.j + b->normal.j + c->normal.j;
+			sum.k = a->normal.k + b->normal.k + c->normal.k;
+			if (dot_product3d(&face, &sum) > 0.f)
+				agree++;
+		}
+		if (agree * 2 <= part->triangle_count)
+			continue;
+		for (index = 0; index < part->triangle_count; index++)
+		{
+			unsigned short swap = part->triangles[3 * index + 1];
+
+			part->triangles[3 * index + 1] = part->triangles[3 * index + 2];
+			part->triangles[3 * index + 2] = swap;
+		}
+	}
 }
 
 /* the package's template of a model of the map, by the model's name: its
@@ -1426,6 +1503,9 @@ static boolean model_play(
 	long shader_count = 0;
 	long level_parts[5] = { 0, 0, 0, 0, 0 };
 	real scale;
+	long matched_bones = 0;
+	long posed_vertices = 0;
+	long unposed_vertices = 0;
 	char const *reason = "out of memory";
 	long index;
 
@@ -1462,19 +1542,49 @@ static boolean model_play(
 	{
 		scale = template_scale(&template_, template_name, definition);
 	}
-	template_nodes_map(&template_, definition, scale);
+	template_nodes_map(&template_, definition, scale, &matched_bones, &posed_vertices, &unposed_vertices);
+	parts_face_halo(&template_);
+	if (posed_vertices)
+	{
+		platform_log("anniversary: %s's bones: %ld of %ld are the model's nodes; %ld vertices posed by them, %ld not",
+			template_name, matched_bones, template_.bone_count, posed_vertices, unposed_vertices);
+	}
 
 	/* the map's model's shaders that can be drawn with a texture (model
-	shaders with a base map), and each material's: the first's the first,
-	the next's the next ... */
-	for (index = 0; index < definition->shaders.count && usable_count < MAXIMUM_SHADERS_PER_MODEL; index++)
+	shaders with a base map), each tag once, and each material's: the
+	first's the first, the next's the next ... Those drawn solid and unlit
+	by themselves come first, then the self-illuminated (a grunt's "inset
+	lights"), then the decals blended over the rest, which would draw a
+	material all but unseen */
 	{
-		long shader_tag = model_shader_tag(definition, (short)index);
+		long pass;
 
-		if (shader_tag != NONE &&
-			((struct shader_model_definition *)shader_definition_get(shader_tag))->model.base_map.index != NONE)
+		for (pass = 0; pass < 3; pass++)
 		{
-			usable[usable_count++] = (short)index;
+			for (index = 0; index < definition->shaders.count && usable_count < MAXIMUM_SHADERS_PER_MODEL; index++)
+			{
+				long shader_tag = model_shader_tag(definition, (short)index);
+				struct shader_model_definition const *shader;
+				boolean decal;
+				boolean lit;
+				long other;
+
+				if (shader_tag == NONE)
+					continue;
+				shader = (struct shader_model_definition const *)shader_definition_get(shader_tag);
+				if (shader->model.base_map.index == NONE)
+					continue;
+				decal = TEST_FLAG(shader->model.flags, SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT);
+				lit = shader_self_illuminated(shader);
+				if (pass != (decal ? 2 : lit ? 1 : 0))
+					continue;
+				for (other = 0; other < usable_count &&
+					model_shader_tag(definition, usable[other]) != shader_tag; other++)
+				{
+				}
+				if (other == usable_count)
+					usable[usable_count++] = (short)index;
+			}
 		}
 	}
 	reason = "the map's model has no model shader with a base map";
