@@ -65,6 +65,10 @@ struct saber_mesh_part
 	short lod;
 	/* the rank it is drawn for (_saber_rank_all: every one) */
 	short rank;
+	/* whether it is a skin compound's, and then where its first vertex's
+	bone stands (in Halo's axes, the template's units) */
+	short compound;
+	real anchor[3];
 };
 
 struct saber_template
@@ -140,15 +144,18 @@ int saber_texture_read(struct saber_texture *texture, unsigned char const *bytes
 void saber_texture_dispose(struct saber_texture *texture);
 /* whether a texture's alpha cuts it out (leaves, grass: many texels clear
 and many solid), which is drawn alpha tested; not a texture whose alpha is
-another mask, all low or all high */
-int saber_texture_cutout(struct saber_texture const *texture);
+another mask, all low or all high; `foliage`, a texture named as leaves
+or branches are, whose soft edges leave less of it solid) */
+int saber_texture_cutout(struct saber_texture const *texture, int foliage);
 /* the colour-change mask of a package's texture entry (a "_mpmask", one
 channel, or a "_br", whose first channel differs from its background where
 its armour is: `banded`), made a texture of Halo's multipurpose map: DXT1,
 the mask in its blue (which this build's model shaders take colour change
-from), nothing in its other channels; FALSE if it is no mask read */
+from), nothing in its other channels; FALSE if it is no mask read. A
+banded mask leaves out where the texture it masks, `base` (or NULL), is
+coloured already. */
 int saber_texture_read_mask(struct saber_texture *texture, unsigned char const *bytes, unsigned long size,
-	int banded);
+	int banded, struct saber_texture const *base);
 /* a texture of no colour change, 4 by 4 (a multipurpose map's for a
 material without a mask) */
 int saber_texture_blank(struct saber_texture *texture);

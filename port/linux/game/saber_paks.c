@@ -721,6 +721,30 @@ static void node_world_transform(
 	}
 }
 
+/* whether a node, or a node it is under, is a damaged copy of the
+template ("_damaged": a ghost's, beside its whole "__base"), which Halo
+draws as permutations of its own, not over the whole one */
+static boolean node_damaged(
+	struct template_walk const *walk,
+	struct template_node const *node)
+{
+	long depth;
+
+	for (depth = 0; node && depth < MAXIMUM_NODE_DEPTH; depth++)
+	{
+		char name[64];
+		unsigned long length = MIN(node->name_length, sizeof(name) - 1);
+
+		memcpy(name, walk->bytes + node->name_start, length);
+		name[length] = 0;
+		if (strstr(name, "damaged"))
+			return TRUE;
+		node = node->parent_id == NONE ? NULL : node_of_id(walk, node->parent_id);
+	}
+
+	return FALSE;
+}
+
 /* the rank a node, or the nearest node it is under that is of one, is
 drawn for (an Elite's "metal_major", a Grunt's "back_minor": Saber3D draws
 each rank as meshes of its own), or _saber_rank_all */
@@ -1094,6 +1118,8 @@ static boolean mesh_read(
 	/* (a skin compound's vertex is in the space of the bone it names: the
 	bone whose space the transform is now, NONE the mesh's) */
 	long transform_bone = NONE;
+	boolean compound = FALSE;
+	real anchor[3] = { 0.f, 0.f, 0.f };
 	long index;
 
 	*reason = "a mesh is not as a template's is";
@@ -1101,7 +1127,7 @@ static boolean mesh_read(
 		return TRUE;
 	vertex_count = (long)read_u32(bytes + node->positions.start);
 	triangle_count = (long)read_u32(bytes + node->triangles.start);
-	if (vertex_count <= 0 || triangle_count <= 0)
+	if (vertex_count <= 0 || triangle_count <= 0 || node_damaged(walk, node))
 		return TRUE;
 	if (vertex_count > 0x100000 || triangle_count > 0x100000 ||
 		(unsigned long)triangle_count * 6 > node->triangles.end - node->triangles.start - 4)
@@ -1277,6 +1303,13 @@ static boolean mesh_read(
 					node_world_transform(walk, blend_nodes[bone], transform);
 				normal_transform(transform, normals);
 				transform_bone = bone;
+			}
+			if (!compound)
+			{
+				compound = TRUE;
+				anchor[0] = transform[12];
+				anchor[1] = -transform[14];
+				anchor[2] = transform[13];
 			}
 		}
 		world.x = point.x * transform[0] + point.y * transform[4] + point.z * transform[8] + transform[12];
@@ -1488,6 +1521,8 @@ static boolean mesh_read(
 			part->material_index = submesh_material[index];
 			part->lod = node->lod;
 			part->rank = node_rank(walk, node);
+			part->compound = (short)compound;
+			memcpy(part->anchor, anchor, sizeof(anchor));
 			part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
 			part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
 			template_->part_count++;
@@ -1869,7 +1904,8 @@ int saber_texture_read(
 }
 
 int saber_texture_cutout(
-	struct saber_texture const *texture)
+	struct saber_texture const *texture,
+	int foliage)
 {
 	long block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
 	long blocks = (long)(texture->width / 4) * (long)(texture->height / 4);
@@ -1906,7 +1942,7 @@ int saber_texture_cutout(
 				long alpha = ((bytes[texel / 2] >> (4 * (texel % 2))) & 15) * 17;
 
 				clear += alpha < 64;
-				solid += alpha > 192;
+				solid += alpha > (foliage ? 128 : 192);
 			}
 		}
 		else
@@ -1932,13 +1968,14 @@ int saber_texture_cutout(
 				else
 					alpha = index == 6 ? 0 : 255;
 				clear += alpha < 64;
-				solid += alpha > 192;
+				solid += alpha > (foliage ? 128 : 192);
 			}
 		}
 	}
 
-	/* (a twentieth clear and a fifth solid, at least) */
-	return clear * 20 >= blocks * 16 && solid * 5 >= blocks * 16;
+	/* (a twentieth clear and a fifth solid, at least; foliage's a tenth
+	more than half solid, its leaves' edges soft) */
+	return clear * 20 >= blocks * 16 && solid * (foliage ? 10 : 5) >= blocks * 16;
 }
 
 /* a 565 colour's blue of a value 0 to 255 */
@@ -1948,11 +1985,62 @@ static unsigned long blue565(
 	return (unsigned long)((value * 31 + 127) / 255);
 }
 
+/* the colour of a texture's texel (its most detailed mipmap), each channel
+of 255 */
+static void texture_texel(
+	struct saber_texture const *texture,
+	long x,
+	long y,
+	long *red,
+	long *green,
+	long *blue)
+{
+	long block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	long blocks_wide = MAX(texture->width / 4, 1);
+	long offset = ((y / 4) * blocks_wide + x / 4) * block_size + (block_size - 8);
+	unsigned char const *block;
+	unsigned long colors[2];
+	long channels[4][3];
+	long index;
+	long which;
+
+	*red = *green = *blue = 0;
+	if (!texture->pixels || offset < 0 || offset + 8 > texture->pixels_size)
+		return;
+	block = texture->pixels + offset;
+	colors[0] = (unsigned long)block[0] | ((unsigned long)block[1] << 8);
+	colors[1] = (unsigned long)block[2] | ((unsigned long)block[3] << 8);
+	for (which = 0; which < 2; which++)
+	{
+		channels[which][0] = (long)((colors[which] >> 11) & 31) * 255 / 31;
+		channels[which][1] = (long)((colors[which] >> 5) & 63) * 255 / 63;
+		channels[which][2] = (long)(colors[which] & 31) * 255 / 31;
+	}
+	for (which = 0; which < 3; which++)
+	{
+		if (colors[0] > colors[1] || texture->format != _bitmap_format_dxt1)
+		{
+			channels[2][which] = (2 * channels[0][which] + channels[1][which]) / 3;
+			channels[3][which] = (channels[0][which] + 2 * channels[1][which]) / 3;
+		}
+		else
+		{
+			channels[2][which] = (channels[0][which] + channels[1][which]) / 2;
+			channels[3][which] = 0;
+		}
+	}
+	index = (long)((block[4 + (y % 4)] >> (2 * (x % 4))) & 3);
+	*red = channels[index][0];
+	*green = channels[index][1];
+	*blue = channels[index][2];
+}
+
 int saber_texture_read_mask(
 	struct saber_texture *texture,
 	unsigned char const *bytes,
 	unsigned long size,
-	int banded)
+	int banded,
+	struct saber_texture const *base)
 {
 	boolean big_endian;
 	long width;
@@ -2089,6 +2177,24 @@ int saber_texture_read_mask(
 			long apart = (long)mask[texel] - background;
 
 			mask[texel] = (unsigned char)(apart > 8 || apart < -8 ? 255 : 0);
+			/* (but not where the texture is coloured already: an Elite's
+			armour baked blue, which colour change would darken; its grey
+			plates take it) */
+			if (mask[texel] && base && base->width > 0 && base->height > 0)
+			{
+				long red;
+				long green;
+				long blue;
+				long most;
+				long least;
+
+				texture_texel(base, (texel % width) * base->width / width, (texel / width) * base->height / height,
+					&red, &green, &blue);
+				most = MAX(red, MAX(green, blue));
+				least = MIN(red, MIN(green, blue));
+				if (most > 24 && (most - least) * 5 > most)
+					mask[texel] = 0;
+			}
 		}
 	}
 

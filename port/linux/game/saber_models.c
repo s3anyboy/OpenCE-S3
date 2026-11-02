@@ -1081,6 +1081,7 @@ static boolean mask_find(
 	struct saber_pak *pak,
 	char const *texture_name,
 	boolean banded,
+	struct saber_texture const *base,
 	struct saber_texture *mask)
 {
 	struct saber_pak *paks[3];
@@ -1109,7 +1110,7 @@ static boolean mask_find(
 			if (entry == NONE)
 				continue;
 			bytes = saber_pak_read(paks[index], entry, &size);
-			read = bytes && saber_texture_read_mask(mask, bytes, size, suffix);
+			read = bytes && saber_texture_read_mask(mask, bytes, size, suffix, base);
 			if (bytes)
 				free(bytes);
 			if (read)
@@ -1156,14 +1157,16 @@ static boolean mask_set_put(
 Elite's rank), masked as the package's "_mpmask" or "_br" texture masks it:
 its shader's multipurpose map the masks, each at its material's
 permutation (a material with none, a mask of nothing). Nothing if the
-classic shader has no colour change. (A "_br" only if `banded`: not for a
-template whose ranks have meshes and textures of their own, an Elite's.) */
+classic shader has no colour change. (A "_br" only if `banded`, and only
+where the material's texture `base` is grey: an Elite's grey plates, not
+its armour baked blue or red.) */
 static void material_mask_play(
 	struct saber_pak *pak,
 	long shader_tag,
 	char const *texture_name,
 	long permutation,
-	boolean banded)
+	boolean banded,
+	struct saber_texture const *base)
 {
 	struct shader_model_definition *shader = (struct shader_model_definition *)shader_definition_get(shader_tag);
 	struct saber_shader const *played;
@@ -1185,7 +1188,7 @@ static void material_mask_play(
 	/* (a bitmap that is a base map's too is left as it is) */
 	if (set && !set->masks)
 		return;
-	found = mask_find(pak, texture_name, banded, &mask);
+	found = mask_find(pak, texture_name, banded, base, &mask);
 	if (!found && !set)
 		return;
 	if (!set)
@@ -1228,9 +1231,30 @@ would draw solid: such parts are left out */
 static boolean material_effect(
 	char const *material)
 {
-	/* (and an energy shield's: a Jackal's, whose own the map's model draws) */
+	/* (and an energy shield's: a Jackal's, whose own the map's model draws;
+	and a far plane's stand-ins, a tree's flat cards of itself seen from
+	afar, drawn opaque about it close to) */
 	return !strncmp(material, "sfx_", 4) || !strncmp(material, "lig_", 4) || !strncmp(material, "fx_", 3) ||
-		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8);
+		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8) ||
+		strstr(material, "farplane") != NULL;
+}
+
+/* whether a material is a plant's leaves or branches, by its name
+("tree_hr_branches_01", "grs_fern_01") */
+static boolean material_foliage(
+	char const *material)
+{
+	static char const *const words[] = { "branch", "leaf", "leaves", "grass", "grs_", "fern", "foliage", "frond",
+		"palm", "vine", "flower", "shrub", "needle", "plant", "bush" };
+	long index;
+
+	for (index = 0; index < (long)NUMBEROF(words); index++)
+	{
+		if (strstr(material, words[index]))
+			return TRUE;
+	}
+
+	return FALSE;
 }
 
 /* the template's parts less those of effects and of no material, and past
@@ -1290,8 +1314,9 @@ static void template_effects_remove(
 }
 
 /* the template's parts less those far from the rest (let go of): a
-part's middle more than four times the size of the template's largest part
-from that part's (c_uplink__h carries crates of a scene 69 metres off) */
+part's middle, or a skin compound's bone, more than four times the size of
+the template's largest part from that part's (c_uplink__h carries crates
+of a scene 69 metres off) */
 static void template_strays_remove(
 	struct saber_template *template_)
 {
@@ -1336,9 +1361,24 @@ static void template_strays_remove(
 	{
 		struct saber_mesh_part *part = &template_->parts[index];
 		real_vector3d apart;
+		real anchor_apart = 0.f;
 
+		/* (or a skin compound's whose bone stands far off: another of the
+		scene's copies, put back over the template by its bone, as
+		c_uplink__h's "uplink 1" and its crates, a ghost's second hull) */
+		if (part->compound)
+		{
+			real_point3d anchor;
+			real_vector3d to_anchor;
+
+			anchor.x = part->anchor[0];
+			anchor.y = part->anchor[1];
+			anchor.z = part->anchor[2];
+			vector_from_points3d(&middles[largest], &anchor, &to_anchor);
+			anchor_apart = magnitude3d(&to_anchor);
+		}
 		vector_from_points3d(&middles[largest], &middles[index], &apart);
-		if (magnitude3d(&apart) > 4.f * radii[largest])
+		if (magnitude3d(&apart) > 4.f * radii[largest] || anchor_apart > 4.f * radii[largest])
 		{
 			free(part->vertices);
 			free(part->triangles);
@@ -2114,7 +2154,8 @@ static boolean model_play(
 			material_textures[place] = NULL;
 			goto refused;
 		}
-		material_cutouts[place] = saber_texture_cutout(material_textures[place]) ? TRUE : FALSE;
+		material_cutouts[place] = saber_texture_cutout(material_textures[place],
+			material_foliage(template_.materials[material])) ? TRUE : FALSE;
 		/* (one that is not cut out drawn whole, though its shader be alpha
 		tested for another's) */
 		if (!material_cutouts[place])
@@ -2216,8 +2257,12 @@ static boolean model_play(
 		}
 		if (material < template_.material_count)
 		{
+			struct saber_bitmap const *played = bitmap_played_get(material_bitmaps[index]);
+
 			material_mask_play(pak, model_shader_tag(definition, material_shaders[index]),
-				template_.materials[material], material_permutations[index], made->rank_count <= 1);
+				template_.materials[material], material_permutations[index], TRUE,
+				played && material_permutations[index] < played->count ?
+					&played->textures[material_permutations[index]] : NULL);
 		}
 	}
 	*definition = made->model;
