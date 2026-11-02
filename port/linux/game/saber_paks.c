@@ -1576,7 +1576,11 @@ static boolean mesh_read(
 
 			vertex->texcoord.x = unit_short(xbox360 ? read_short_big(uv) : read_short(uv));
 			vertex->texcoord.y = unit_short(xbox360 ? read_short_big(uv + 2) : read_short(uv + 2));
-			if (node->has_uv_decompress)
+			/* (a level mesh's repeat is the shader's map scale, applied as
+			the texture is sampled. Folded in here, a beach's tile of a few
+			hundred is clamped to -1..1 by the renderer and every triangle
+			of it shows one texel. A template's tile is small enough to keep) */
+			if (node->has_uv_decompress && !walk->level)
 			{
 				vertex->texcoord.x = vertex->texcoord.x * node->uv_tile[0] + node->uv_shift[0];
 				vertex->texcoord.y = vertex->texcoord.y * node->uv_tile[1] + node->uv_shift[1];
@@ -1772,6 +1776,17 @@ static boolean mesh_read(
 			part->rank = node_rank(walk, node);
 			part->compound = (short)compound;
 			memcpy(part->anchor, anchor, sizeof(anchor));
+			part->uv_scale[0] = 1.f;
+			part->uv_scale[1] = 1.f;
+			if (walk->level && node->has_uv_decompress)
+			{
+				if (node->uv_tile[0] != 0.f)
+					part->uv_scale[0] = node->uv_tile[0];
+				if (node->uv_tile[1] != 0.f)
+					part->uv_scale[1] = node->uv_tile[1];
+				part->uv_offset[0] = node->uv_shift[0];
+				part->uv_offset[1] = node->uv_shift[1];
+			}
 			part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
 			part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
 			template_->part_count++;

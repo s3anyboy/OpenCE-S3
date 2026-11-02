@@ -70,6 +70,11 @@ struct saber_mesh_part
 	bone stands (in Halo's axes, the template's units) */
 	short compound;
 	real anchor[3];
+	/* how many times its texture repeats, and from where (a level mesh's
+	__export_uv_compr_params). 1 and 0 until then. The repeat is not folded
+	into the coordinates: the renderer keeps a coordinate in -1..1 */
+	real uv_scale[2];
+	real uv_offset[2];
 };
 
 struct saber_template

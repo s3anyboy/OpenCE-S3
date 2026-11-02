@@ -2473,6 +2473,9 @@ struct saber_level_part
 	/* a sky mesh (clouds, the sky, stars, a planet): drawn by
 	saber_models_level_sky_render, not with the structure */
 	boolean sky;
+	/* the texture's repeat (1 until a mesh says otherwise). Applied as the
+	shader's map scale, so a coordinate kept in -1..1 still tiles */
+	real uv_scale[2];
 	real_rectangle3d bounds;
 	real_point3d centroid;
 	real radius;
@@ -2756,6 +2759,8 @@ static boolean saber_level_play(
 			continue;
 		}
 		made->texture = slots[material];
+		made->uv_scale[0] = part->uv_scale[0] != 0.f ? part->uv_scale[0] : 1.f;
+		made->uv_scale[1] = part->uv_scale[1] != 0.f ? part->uv_scale[1] : 1.f;
 		made->cutout = material_card(level.materials[material]) ||
 			(sky && strncmp(level.materials[material], "cloud", 5) == 0) ||
 			saber_texture_cutout(&saber_level.textures[made->texture], TRUE) ? TRUE : FALSE;
@@ -3249,6 +3254,8 @@ void saber_models_level_sky_render(
 		parameters.centroid.z = part->centroid.z * scale + render.camera.position.z * (1.f - scale);
 		parameters.radius = part->radius * scale;
 		shader = saber_level.shaders[part->cutout ? 1 : 0];
+		shader.model.map_u_scale = part->uv_scale[0];
+		shader.model.map_v_scale = part->uv_scale[1];
 		SET_FLAG(shader.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
 		rasterizer_model_begin(&parameters, FALSE);
 		rasterizer_model_draw((struct shader *)&shader, part->texture,
@@ -3286,6 +3293,7 @@ void saber_models_level_render(
 	for (index = 0; index < saber_level.part_count; index++)
 	{
 		struct saber_level_part *part = &saber_level.parts[index];
+		struct shader_model_definition shader;
 
 		/* (the sky is drawn in the map sky's place) */
 		if (part->sky || !render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
@@ -3317,8 +3325,11 @@ void saber_models_level_render(
 		parameters.lighting = part->lighting;
 		parameters.centroid = part->centroid;
 		parameters.radius = part->radius;
+		shader = saber_level.shaders[part->cutout ? 1 : 0];
+		shader.model.map_u_scale = part->uv_scale[0];
+		shader.model.map_v_scale = part->uv_scale[1];
 		rasterizer_model_begin(&parameters, FALSE);
-		rasterizer_model_draw((struct shader *)&saber_level.shaders[part->cutout ? 1 : 0], part->texture,
+		rasterizer_model_draw((struct shader *)&shader, part->texture,
 			&part->triangle_buffer, NONE, part->triangle_buffer.count, &part->vertex_buffer, NONE);
 		rasterizer_model_end();
 	}
