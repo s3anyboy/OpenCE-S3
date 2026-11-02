@@ -132,8 +132,6 @@ SCREENS = {
              "The overshield rises up the body and stays lit,\nin its own color. Online: the host's choice.", None),
             ("MODEL DETAIL:", "display.model_detail", [("STOCK", "stock"), ("NATIVE", "native"), ("HIGHEST", "highest")],
              "Stock picks models' detail by the Xbox's 480 lines;\nnative by this display's; highest, always the best.", None),
-            ("REMASTERED BSP:", "display.remastered_bsp", ON_OFF,
-             "The level drawn as Halo CE Anniversary's remastered\ngeometry (the map's .s3dpak). Applies when a map loads.", None),
             ("SHIELD GLOW:", "display.shield_glow", ON_OFF,
              "Shields light their surroundings as they flare.\nOnline: the host's choice.", None),
             ("GLOW INTENSITY:", "display.shield_glow_intensity", [("DEFAULT", "default"), ("LIGHT SHOW", "light_show")],
@@ -290,7 +288,7 @@ _video = SCREENS["video_settings"]
 _graphics = {"display.show_fps", "display.high_res_hud",
              "display.high_res_text", "display.anti_aliasing",
              "display.anisotropic_filtering", "display.shadow_resolution", "display.per_pixel_lighting",
-             "display.model_detail", "display.remastered_bsp"}
+             "display.model_detail"}
 # (the visual modifiers: a screen of their own, Extra Effects)
 _extra_effects = {"display.shield_glow", "display.shield_glow_intensity",
                   "display.overshield_effect", "display.hdr", "display.hdr_output", "display.hdr_tone_mapping", "display.hdr_paper_white",
@@ -349,6 +347,8 @@ SCREENS["video_settings/fov_viewmodels"] = {
          "Your legs in first person, seen looking down,\nmoving as you run. Your body as others see it.", None),
         ("ANNIVERSARY MODELS:", "display.anniversary_models", ON_OFF,
          "Halo CE Anniversary's remastered models (from\nthe map's .s3dpak). Applies when a map loads.", None),
+        ("REMASTERED BSP:", "display.remastered_bsp", ON_OFF,
+         "The level drawn as Halo CE Anniversary's remastered\ngeometry (the map's .s3dpak). Applies when a map loads.", None),
         ("SHIELD COLOR:", "display.shield_color", [("DEFAULT", "default")] + [(c.upper(), c) for c in SHIELD_COLORS],
          "Your shield's flare in an armor color, whatever\nyour armor. Only you see it. Default: its own.", None),
     ],

@@ -138,7 +138,8 @@ saying why not (saber_template_dispose lets go of what it made either way) */
 int saber_template_read(struct saber_template *template_, unsigned char const *bytes, unsigned long size,
 	int xbox360, char const **reason);
 /* the level's geometry of the package's level geometry entry (its ".lg"),
-read as a template of it: its every mesh, in place */
+read as a template of it: its every mesh, in place, including meshes drawn
+of a sharingObj's buffers (0x2901) with that mesh's 0x3501 placement */
 int saber_level_geometry_read(struct saber_template *template_, unsigned char const *bytes, unsigned long size,
 	int xbox360, char const **reason);
 void saber_template_dispose(struct saber_template *template_);

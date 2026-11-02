@@ -34,6 +34,10 @@ on the Xbox 360, which are big-endian. What is read of one, as Reclaimer
 		0x2B01 its parent's id
 		0x2E01 its mesh's flags (an i16, then the flags: compressed
 		positions, normals)
+		0x2901 a level mesh drawn of another's buffers (its sharingObj):
+		that mesh's id, then the first vertex and triangle there
+		0x3501 a level mesh's placement: int16 translation then int16
+		scale of each axis, applied after its (or its source's) positions
 		0xF100 its positions: an i32 count; compressed, the i16 translation
 		and scale of each axis, then four i16 a vertex (three of its
 		position, of 32767 to the scale, and one its normal); otherwise
@@ -104,6 +108,7 @@ enum
 	_block_parent = 0x2B01,
 	_block_mesh_source = 0x2901,
 	_block_mesh_bounds = 0x1D01,
+	_block_scene_object_bounds = 0x3501,
 	_block_mesh_flags = 0x2E01,
 	_block_positions = 0xF100,
 	_block_vertex_data = 0x3001,
@@ -210,10 +215,12 @@ struct template_node
 	unsigned long source_triangle;
 	long own_vertex_count;
 	long own_triangle_count;
-	/* its bounds (a level's mesh's vertices are its source's, of -1 to 1,
-	across them) */
-	boolean has_bounds;
-	real bounds[6];
+	/* a level mesh's placement over its vertices (0x3501: int16
+	translation then int16 scale, applied after the source's compressed
+	positions and before the node's transform, as Reclaimer does) */
+	boolean has_scene_bounds;
+	real scene_translation[3];
+	real scene_scale[3];
 };
 
 struct template_walk
@@ -678,16 +685,17 @@ static void node_read(
 			node->source_vertex = read_u32(bytes + block.start + 2);
 			node->source_triangle = read_u32(bytes + block.start + 6);
 		}
-		if (block_find(bytes, node_block->start, node_block->end, _block_mesh_bounds, &block) &&
-			block.end - block.start >= 28)
+		node->scene_scale[0] = node->scene_scale[1] = node->scene_scale[2] = 1.f;
+		if (block_find(bytes, node_block->start, node_block->end, _block_scene_object_bounds, &block) &&
+			block.end - block.start >= 12)
 		{
-			node->has_bounds = TRUE;
-			for (index = 0; index < 6; index++)
-			{
-				node->bounds[index] = read_real(bytes + block.start + 4 + 4 * index);
-				if (!real_finite(node->bounds[index]))
-					node->has_bounds = FALSE;
-			}
+			node->has_scene_bounds = TRUE;
+			node->scene_translation[0] = (real)read_short(bytes + block.start);
+			node->scene_translation[1] = (real)read_short(bytes + block.start + 2);
+			node->scene_translation[2] = (real)read_short(bytes + block.start + 4);
+			node->scene_scale[0] = (real)read_short(bytes + block.start + 6);
+			node->scene_scale[1] = (real)read_short(bytes + block.start + 8);
+			node->scene_scale[2] = (real)read_short(bytes + block.start + 10);
 		}
 		if (block_find(bytes, node_block->start, node_block->end, _block_bone_index, &block) &&
 			block.end - block.start >= 4)
@@ -1168,6 +1176,7 @@ static boolean mesh_read(
 	real normals[9];
 	real_point3d translation = { 0.f, 0.f, 0.f };
 	real_point3d scale = { 1.f, 1.f, 1.f };
+	boolean global_indices = FALSE;
 	long agree = 0;
 	boolean flip;
 	long submesh_first[MAXIMUM_SUBMESHES];
@@ -1237,16 +1246,6 @@ static boolean mesh_read(
 		scale.x = (real)read_short(bytes + data + 6);
 		scale.y = (real)read_short(bytes + data + 8);
 		scale.z = (real)read_short(bytes + data + 10);
-		/* (a level's mesh's, across its own bounds) */
-		if (source != node && node->has_bounds)
-		{
-			translation.x = (node->bounds[0] + node->bounds[3]) / 2.f;
-			translation.y = (node->bounds[1] + node->bounds[4]) / 2.f;
-			translation.z = (node->bounds[2] + node->bounds[5]) / 2.f;
-			scale.x = (node->bounds[3] - node->bounds[0]) / 2.f;
-			scale.y = (node->bounds[4] - node->bounds[1]) / 2.f;
-			scale.z = (node->bounds[5] - node->bounds[2]) / 2.f;
-		}
 		data += 12;
 		if ((unsigned long)source_vertex_count * 8 > source->positions.end - data)
 			return FALSE;
@@ -1349,6 +1348,15 @@ static boolean mesh_read(
 		submesh_material[0] = 0;
 		submesh_total = 1;
 	}
+	else if (source != node)
+	{
+		/* (a submesh's first triangle is of this mesh, not of the source) */
+		for (index = 0; index < submesh_total; index++)
+		{
+			if (submesh_first[index] >= triangle_count && submesh_first[index] >= (long)first_triangle)
+				submesh_first[index] -= (long)first_triangle;
+		}
+	}
 
 	*reason = "out of memory";
 	vertices = malloc(sizeof(*vertices) * (size_t)vertex_count);
@@ -1394,6 +1402,17 @@ static boolean mesh_read(
 			point.x = read_real(bytes + data + 12 * index);
 			point.y = read_real(bytes + data + 12 * index + 4);
 			point.z = read_real(bytes + data + 12 * index + 8);
+		}
+		/* (a level mesh's 0x3501: scale then translation, over the source's
+		positions, before the node's transform) */
+		if (walk->level && node->has_scene_bounds)
+		{
+			point.x = point.x * node->scene_scale[0] + node->scene_translation[0];
+			point.y = point.y * node->scene_scale[1] + node->scene_translation[1];
+			point.z = point.z * node->scene_scale[2] + node->scene_translation[2];
+			normal.i *= node->scene_scale[0];
+			normal.j *= node->scene_scale[1];
+			normal.k *= node->scene_scale[2];
 		}
 		/* (a skin compound's, of no weights, is a copy of a mesh put in the
 		space of the bone its first index names, as a warthog's four tires
@@ -1501,18 +1520,26 @@ static boolean mesh_read(
 
 	/* its triangles, turned as Halo's front faces are: clockwise about the
 	normals the template gives */
-	*reason = "a mesh's triangles name vertices it has not got";
 	for (index = 0; index < 3 * triangle_count; index++)
 	{
-		triangles[index] = (unsigned short)read_short(bytes + source->triangles.start + 4 + 6 * first_triangle +
+		unsigned short vertex = (unsigned short)read_short(bytes + source->triangles.start + 4 + 6 * first_triangle +
 			2 * index);
-		if (triangles[index] >= vertex_count)
+
+		if (vertex >= vertex_count)
+			global_indices = TRUE;
+		triangles[index] = vertex;
+	}
+	if (global_indices)
+	{
+		if (source == node)
+			goto skip_mesh;
+		for (index = 0; index < 3 * triangle_count; index++)
 		{
-			free(vertices);
-			free(triangles);
-			free(tangents);
-			free(remap);
-			return FALSE;
+			unsigned long vertex = triangles[index];
+
+			if (vertex < base_vertex || vertex >= base_vertex + (unsigned long)vertex_count)
+				goto skip_mesh;
+			triangles[index] = (unsigned short)(vertex - base_vertex);
 		}
 	}
 	for (index = 0; index < triangle_count; index++)
@@ -1655,6 +1682,14 @@ static boolean mesh_read(
 			count -= part_triangles;
 		}
 	}
+	free(vertices);
+	free(triangles);
+	free(tangents);
+	free(remap);
+
+	return TRUE;
+
+skip_mesh:
 	free(vertices);
 	free(triangles);
 	free(tangents);
