@@ -70,6 +70,12 @@ goes.
 #include "rasterizer/rasterizer_geometry.h"
 #include "rasterizer/rasterizer_model_types.h"
 #include "rasterizer/rasterizer_swizzle.h"
+#include "rasterizer/rasterizer_models.h"
+#include "render/render.h"
+#include "render/render_cameras_internal.h"
+#include "objects/object_lights_rendering.h"
+#include "scenario/scenario.h"
+#include "structures/structure_bsp_definitions.h"
 #include "shaders/shader_definitions.h"
 #include "shaders/shader_texture_animation.h"
 #include "tag_files/tag_groups.h"
@@ -90,6 +96,8 @@ void halo_custom_edition_texels_channels(void const *texels, unsigned char chann
 
 /* the game's (port) */
 char *tag_get_name(long tag_index);
+void *cache_files_tag_instances(long *count);
+void cache_files_set_tag_instances(void *instances, long count);
 
 /* ---------- constants */
 
@@ -300,7 +308,14 @@ static struct
 	boolean stream_tried;
 	/* the models drawn with ranks' geometries */
 	long ranked_count;
+	/* the shaders and bitmaps of the map's models that have no template,
+	drawn as they are: none of them is played over (a sapling's leaves'
+	shader, a tree's too) */
+	long *kept_tags;
+	long kept_count;
 } saber_models_globals;
+
+static boolean tag_kept(long tag_index);
 
 /* ---------- private code */
 
@@ -1157,9 +1172,10 @@ static boolean mask_set_put(
 Elite's rank), masked as the package's "_mpmask" or "_br" texture masks it:
 its shader's multipurpose map the masks, each at its material's
 permutation (a material with none, a mask of nothing). Nothing if the
-classic shader has no colour change. (A "_br" only if `banded`, and only
-where the material's texture `base` is grey: an Elite's grey plates, not
-its armour baked blue or red.) */
+classic shader has no colour change. (A "_br" only if `banded`, a
+character's, by its skeleton: c_uplink's would mask its whole body in
+scenery's black; and only where the material's texture `base` is grey: an
+Elite's grey plates, not its armour baked blue or red.) */
 static void material_mask_play(
 	struct saber_pak *pak,
 	long shader_tag,
@@ -1184,6 +1200,8 @@ static void material_mask_play(
 		return;
 	}
 	mask_tag = played->map_shader.model.multipurpose_map.index;
+	if (tag_kept(mask_tag))
+		return;
 	set = bitmap_played_get(mask_tag);
 	/* (a bitmap that is a base map's too is left as it is) */
 	if (set && !set->masks)
@@ -1231,12 +1249,9 @@ would draw solid: such parts are left out */
 static boolean material_effect(
 	char const *material)
 {
-	/* (and an energy shield's: a Jackal's, whose own the map's model draws;
-	and a far plane's stand-ins, a tree's flat cards of itself seen from
-	afar, drawn opaque about it close to) */
+	/* (and an energy shield's: a Jackal's, whose own the map's model draws) */
 	return !strncmp(material, "sfx_", 4) || !strncmp(material, "lig_", 4) || !strncmp(material, "fx_", 3) ||
-		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8) ||
-		strstr(material, "farplane") != NULL;
+		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8);
 }
 
 /* whether a material is a plant's leaves or branches, by its name
@@ -1280,6 +1295,32 @@ static void template_effects_remove(
 		template_->parts[kept++] = *part;
 	}
 	template_->part_count = kept;
+	/* (and a far plane's stand-ins, a tree's flat cards of itself seen from
+	afar, drawn opaque about it close to: unless they are all it has, a
+	sapling's leaves and trunk) */
+	{
+		boolean others = FALSE;
+
+		for (index = 0; index < template_->part_count; index++)
+		{
+			if (!strstr(template_->materials[template_->parts[index].material_index], "farplane"))
+				others = TRUE;
+		}
+		kept = 0;
+		for (index = 0; index < template_->part_count; index++)
+		{
+			struct saber_mesh_part *part = &template_->parts[index];
+
+			if (others && strstr(template_->materials[part->material_index], "farplane"))
+			{
+				free(part->vertices);
+				free(part->triangles);
+				continue;
+			}
+			template_->parts[kept++] = *part;
+		}
+		template_->part_count = kept;
+	}
 	{
 		/* (at each level, every rank's and each rank's own together) */
 		long level_parts[5][NUMBER_OF_SABER_RANKS];
@@ -1964,6 +2005,78 @@ static void template_specials_merge(
 	saber_template_dispose(&special);
 }
 
+/* whether a shader or bitmap is one a model drawn as it is draws with */
+static boolean tag_kept(
+	long tag_index)
+{
+	long index;
+
+	for (index = 0; index < saber_models_globals.kept_count; index++)
+	{
+		if (saber_models_globals.kept_tags[index] == tag_index)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+static void tag_keep(
+	long tag_index)
+{
+	long *grown;
+
+	if (tag_index == NONE || tag_kept(tag_index))
+		return;
+	grown = realloc(saber_models_globals.kept_tags, sizeof(*grown) * ((size_t)saber_models_globals.kept_count + 1));
+	if (!grown)
+		return;
+	saber_models_globals.kept_tags = grown;
+	grown[saber_models_globals.kept_count++] = tag_index;
+}
+
+/* Keeps the shaders and bitmaps of the map's models that the package has
+no template of, so that a model drawn as a template does not play over
+what they draw with. */
+static void classic_models_keep(
+	struct saber_pak *pak,
+	char const *map_name)
+{
+	struct tag_iterator iterator;
+	long tag_index;
+
+	tag_iterator_new(&iterator, MODELS_GROUP_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct model const *model = model_definition_get(tag_index);
+		struct saber_template template_;
+		char template_name[128];
+		short index;
+
+		csmemset(&template_, 0, sizeof(template_));
+		if (template_find(pak, tag_get_name(tag_index), map_name, &template_, template_name, sizeof(template_name)))
+		{
+			saber_template_dispose(&template_);
+			continue;
+		}
+		for (index = 0; index < model->shaders.count; index++)
+		{
+			long shader_tag = TAG_BLOCK_GET_ELEMENT(&model->shaders, index, struct model_shader_reference)->shader.index;
+			struct shader const *shader = shader_tag == NONE ? NULL : shader_definition_get(shader_tag);
+
+			if (!shader)
+				continue;
+			tag_keep(shader_tag);
+			if (shader->base.type == SHADER_TYPE_MODEL)
+			{
+				struct shader_model_definition const *model_shader = (struct shader_model_definition const *)shader;
+
+				tag_keep(model_shader->model.base_map.index);
+				tag_keep(model_shader->model.multipurpose_map.index);
+			}
+		}
+	}
+}
+
 /* Draws the map's model `tag_index` as the package's template of it, if it
 has one: its textures read and its model made before any of the map's tags
 are played over, so that one that cannot be drawn is the map's as it was.
@@ -1996,6 +2109,7 @@ static boolean model_play(
 	long material_count = 0;
 	long shader_count = 0;
 	real scale;
+	boolean skinned = FALSE;
 	long matched_bones = 0;
 	long posed_vertices = 0;
 	long unposed_vertices = 0;
@@ -2018,6 +2132,7 @@ static boolean model_play(
 	/* (a skinned template's by its skeleton, else by its size) */
 	if (skeleton_scale(&template_, definition, &scale))
 	{
+		skinned = TRUE;
 		platform_log("anniversary: %s's units are %f world units, by its skeleton", template_name, scale);
 	}
 	else
@@ -2059,7 +2174,8 @@ static boolean model_play(
 				if (shader_tag == NONE)
 					continue;
 				shader = (struct shader_model_definition const *)shader_definition_get(shader_tag);
-				if (shader->model.base_map.index == NONE)
+				/* (nor one a model drawn as it is draws with, nor its base map) */
+				if (shader->model.base_map.index == NONE || tag_kept(shader_tag) || tag_kept(shader->model.base_map.index))
 					continue;
 				decal = TEST_FLAG(shader->model.flags, SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT);
 				lit = shader_self_illuminated(shader);
@@ -2260,7 +2376,7 @@ static boolean model_play(
 			struct saber_bitmap const *played = bitmap_played_get(material_bitmaps[index]);
 
 			material_mask_play(pak, model_shader_tag(definition, material_shaders[index]),
-				template_.materials[material], material_permutations[index], TRUE,
+				template_.materials[material], material_permutations[index], skinned,
 				played && material_permutations[index] < played->count ?
 					&played->textures[material_permutations[index]] : NULL);
 		}
@@ -2297,6 +2413,443 @@ refused:
 	return FALSE;
 }
 
+
+/* ---------- the level (display.remastered_bsp) */
+
+/* the most textures the level's geometry is drawn with, and how far from
+the middle of the world a part of it is drawn (its sky's and far
+mountains' are past where Halo draws, in world units) */
+#define MAXIMUM_SABER_LEVEL_TEXTURES 512
+#define MAXIMUM_SABER_LEVEL_DISTANCE 800.f
+/* a metre, in world units */
+#define SABER_LEVEL_UNITS (1.f / 3.048f)
+
+/* an entry of the map's tag table (cache_files.c's; menu_tags.c's too) */
+struct saber_tag_instance
+{
+	long group_tag;
+	long parent_group_tags[2];
+	long tag_index;
+	char *name;
+	void *base_address;
+	unsigned long unused[2];
+};
+
+typedef char verify_saber_tag_instance_size[sizeof(struct saber_tag_instance) == 0x20 ? 1 : -1];
+
+/* a part of the level's geometry: its buffers, the texture (of the level's
+bitmap) it is drawn with, whether that is cut out, its bounds and the
+light it is drawn in (sampled of the structure, as an object's) */
+struct saber_level_part
+{
+	struct vertex_buffer vertex_buffer;
+	struct triangle_buffer triangle_buffer;
+	short texture;
+	boolean cutout;
+	real_rectangle3d bounds;
+	real_point3d centroid;
+	real radius;
+	short lit_bsp;
+	struct render_lighting lighting;
+};
+
+static struct
+{
+	boolean drawn;
+	struct saber_level_part *parts;
+	long part_count;
+	byte *vertices;
+	boolean vertices_contiguous;
+	/* its shaders, solid and cut out, of the map's first model shader,
+	whose base map is its bitmap */
+	struct shader_model_definition shaders[2];
+	/* its bitmap: a tag of its own, added to the map's tag table */
+	long bitmap_tag;
+	struct bitmap_group group;
+	struct bitmap_data *bitmaps;
+	struct saber_texture *textures;
+	long texture_count;
+	struct saber_tag_instance *instances;
+	struct saber_tag_instance *map_instances;
+	long map_instance_count;
+} saber_level;
+
+static void saber_level_free(
+	boolean give_back)
+{
+	long index;
+
+	for (index = 0; saber_level.parts && index < saber_level.part_count; index++)
+	{
+		rasterizer_triangle_buffer_delete(&saber_level.parts[index].triangle_buffer);
+		rasterizer_vertex_buffer_delete(&saber_level.parts[index].vertex_buffer);
+	}
+	if (saber_level.parts)
+		free(saber_level.parts);
+	if (saber_level.vertices)
+	{
+		if (saber_level.vertices_contiguous)
+			XPhysicalFree(saber_level.vertices);
+		else
+			free(saber_level.vertices);
+	}
+	for (index = 0; saber_level.textures && index < saber_level.texture_count; index++)
+		saber_texture_dispose(&saber_level.textures[index]);
+	if (saber_level.textures)
+		free(saber_level.textures);
+	if (saber_level.bitmaps)
+		free(saber_level.bitmaps);
+	if (saber_level.instances)
+	{
+		long count;
+		void *current = cache_files_tag_instances(&count);
+
+		/* (the map's table back, while ours is the one in use) */
+		if (give_back && current == (void *)saber_level.instances)
+			cache_files_set_tag_instances(saber_level.map_instances, saber_level.map_instance_count);
+		if (cache_files_tag_instances(&count) != (void *)saber_level.instances)
+			free(saber_level.instances);
+	}
+	csmemset(&saber_level, 0, sizeof(saber_level));
+	saber_level.bitmap_tag = NONE;
+}
+
+/* a bitmap tag of the level's own, added to the end of the map's tag
+table: NONE if it cannot be */
+static long saber_level_bitmap_tag_add(
+	void)
+{
+	long count;
+	struct saber_tag_instance *instances = cache_files_tag_instances(&count);
+	struct saber_tag_instance *grown;
+	struct saber_tag_instance const *bitmap = NULL;
+	long salt = 0;
+	long index;
+
+	if (!instances || count <= 0 || count >= UNSIGNED_SHORT_MAX - 1)
+		return NONE;
+	for (index = 0; index < count; index++)
+	{
+		long instance_salt = (long)((unsigned long)instances[index].tag_index >> 16);
+
+		salt = MAX(salt, instance_salt);
+		if (!bitmap && instances[index].group_tag == BITMAP_GROUP_TAG)
+			bitmap = &instances[index];
+	}
+	if (!bitmap)
+		return NONE;
+	grown = malloc(sizeof(*grown) * ((size_t)count + 1));
+	if (!grown)
+		return NONE;
+	memcpy(grown, instances, sizeof(*grown) * (size_t)count);
+	grown[count] = *bitmap;
+	grown[count].tag_index = (long)(((unsigned long)(salt + 1) << 16) | (unsigned long)count);
+	grown[count].name = "anniversary\\remastered bsp";
+	grown[count].base_address = &saber_level.group;
+	saber_level.instances = grown;
+	saber_level.map_instances = instances;
+	saber_level.map_instance_count = count;
+	cache_files_set_tag_instances(grown, count + 1);
+
+	return grown[count].tag_index;
+}
+
+/* whether a level's material is drawn: not an effect's, a far plane's, a
+lightmap's, water's (the map's water is drawn) or none */
+static boolean saber_level_material_drawn(
+	char const *material)
+{
+	return !material_effect(material) && !strstr(material, "farplane") && !strstr(material, "_lm") &&
+		!strstr(material, "water") &&
+		strncmp(material, "cloud", 5) && strncmp(material, "basis_sky", 9) && strncmp(material, "stars", 5) &&
+		strncmp(material, "planet", 6);
+}
+
+/* Draws the level's structure as the package's level geometry (its
+".lg"): read, its parts made buffers, its textures a bitmap of its own,
+drawn by saber_models_level_render in place of the structure's. FALSE if
+it cannot be. */
+static boolean saber_level_play(
+	struct saber_pak *pak)
+{
+	struct saber_template level;
+	long entry = NONE;
+	long index;
+	unsigned long size = 0;
+	unsigned char *bytes;
+	char const *reason = "out of memory";
+	short *slots = NULL;
+	long compressed_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_compressed);
+	long uncompressed_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_model_uncompressed);
+	unsigned long vertices_size = 0;
+	struct model_vertex_compressed *vertices;
+	word *strips;
+	long drawn = 0;
+	long triangles = 0;
+	real_rectangle3d bounds;
+
+	csmemset(&level, 0, sizeof(level));
+	for (index = 0; index < saber_pak_entry_count(pak); index++)
+	{
+		if (saber_pak_entry_type(pak, index) == _saber_entry_level_geometry)
+		{
+			entry = index;
+			break;
+		}
+	}
+	if (entry == NONE)
+	{
+		platform_log("anniversary: no remastered structure: the package has no level geometry");
+		return FALSE;
+	}
+	bytes = saber_pak_read(pak, entry, &size);
+	if (!bytes || !saber_level_geometry_read(&level, bytes, size, saber_pak_xbox360(pak), &reason))
+	{
+		if (bytes)
+			free(bytes);
+		platform_log("anniversary: no remastered structure: %s: %s", saber_pak_entry_name(pak, entry), reason);
+		saber_template_dispose(&level);
+		return FALSE;
+	}
+	free(bytes);
+
+	/* its parts drawn: of a material drawn, not far off; in world units */
+	saber_level.texture_count = 0;
+	slots = malloc(sizeof(*slots) * ((size_t)level.material_count + 1));
+	saber_level.textures = malloc(sizeof(*saber_level.textures) * MAXIMUM_SABER_LEVEL_TEXTURES);
+	saber_level.bitmaps = malloc(sizeof(*saber_level.bitmaps) * MAXIMUM_SABER_LEVEL_TEXTURES);
+	saber_level.parts = malloc(sizeof(*saber_level.parts) * ((size_t)level.part_count + 1));
+	if (!slots || !saber_level.textures || !saber_level.bitmaps || !saber_level.parts)
+		goto refused;
+	csmemset(saber_level.textures, 0, sizeof(*saber_level.textures) * MAXIMUM_SABER_LEVEL_TEXTURES);
+	csmemset(saber_level.parts, 0, sizeof(*saber_level.parts) * ((size_t)level.part_count + 1));
+	for (index = 0; index < level.material_count; index++)
+		slots[index] = NONE;
+	saber_level.bitmap_tag = saber_level_bitmap_tag_add();
+	reason = "a bitmap of its own cannot be added to the map's tags";
+	if (saber_level.bitmap_tag == NONE)
+		goto refused;
+	bounds.x0 = bounds.y0 = bounds.z0 = REAL_MAX;
+	bounds.x1 = bounds.y1 = bounds.z1 = -REAL_MAX;
+	for (index = 0; index < level.part_count; index++)
+	{
+		struct saber_mesh_part *part = &level.parts[index];
+		struct saber_level_part *made = &saber_level.parts[saber_level.part_count];
+		short material = part->material_index;
+		long vertex;
+
+		if (material < 0 || material >= level.material_count || !saber_level_material_drawn(level.materials[material]) ||
+			part->vertex_count <= 0 || part->triangle_count <= 0)
+		{
+			part->vertex_count = 0;
+			continue;
+		}
+		made->bounds.x0 = made->bounds.y0 = made->bounds.z0 = REAL_MAX;
+		made->bounds.x1 = made->bounds.y1 = made->bounds.z1 = -REAL_MAX;
+		for (vertex = 0; vertex < part->vertex_count; vertex++)
+		{
+			struct model_vertex_uncompressed *point = &part->vertices[vertex];
+
+			point->position.x *= SABER_LEVEL_UNITS;
+			point->position.y *= SABER_LEVEL_UNITS;
+			point->position.z *= SABER_LEVEL_UNITS;
+			point->nodes[0] = 0;
+			point->nodes[1] = 0;
+			point->node_weights[0] = 1.f;
+			point->node_weights[1] = 0.f;
+			made->bounds.x0 = MIN(made->bounds.x0, point->position.x);
+			made->bounds.x1 = MAX(made->bounds.x1, point->position.x);
+			made->bounds.y0 = MIN(made->bounds.y0, point->position.y);
+			made->bounds.y1 = MAX(made->bounds.y1, point->position.y);
+			made->bounds.z0 = MIN(made->bounds.z0, point->position.z);
+			made->bounds.z1 = MAX(made->bounds.z1, point->position.z);
+		}
+		made->centroid.x = (made->bounds.x0 + made->bounds.x1) / 2.f;
+		made->centroid.y = (made->bounds.y0 + made->bounds.y1) / 2.f;
+		made->centroid.z = (made->bounds.z0 + made->bounds.z1) / 2.f;
+		{
+			real_vector3d across;
+
+			across.i = made->bounds.x1 - made->bounds.x0;
+			across.j = made->bounds.y1 - made->bounds.y0;
+			across.k = made->bounds.z1 - made->bounds.z0;
+			made->radius = magnitude3d(&across) / 2.f;
+		}
+		if (magnitude3d((real_vector3d *)&made->centroid) > MAXIMUM_SABER_LEVEL_DISTANCE)
+		{
+			part->vertex_count = 0;
+			continue;
+		}
+		/* (its texture: read as its material is first drawn) */
+		if (slots[material] == NONE)
+		{
+			struct saber_texture *texture = &saber_level.textures[saber_level.texture_count];
+			char const *source = NULL;
+			char const *texture_reason = NULL;
+
+			if (saber_level.texture_count >= MAXIMUM_SABER_LEVEL_TEXTURES ||
+				!texture_find(pak, level.materials[material], texture, &source, &texture_reason))
+			{
+				slots[material] = -2;
+			}
+			else if (!bitmap_describe(texture, saber_level.bitmap_tag, &saber_level.bitmaps[saber_level.texture_count]))
+			{
+				saber_texture_dispose(texture);
+				slots[material] = -2;
+			}
+			else
+			{
+				slots[material] = (short)saber_level.texture_count++;
+				if (!saber_texture_cutout(texture, material_foliage(level.materials[material])))
+					saber_texture_make_solid(texture);
+			}
+		}
+		if (slots[material] < 0)
+		{
+			part->vertex_count = 0;
+			continue;
+		}
+		made->texture = slots[material];
+		made->cutout = saber_texture_cutout(&saber_level.textures[made->texture], TRUE) ? TRUE : FALSE;
+		made->lit_bsp = NONE;
+		vertices_size += (unsigned long)part->vertex_count * (unsigned long)compressed_size +
+			(unsigned long)part->triangle_count * 6 * sizeof(word);
+		bounds.x0 = MIN(bounds.x0, made->bounds.x0);
+		bounds.x1 = MAX(bounds.x1, made->bounds.x1);
+		bounds.y0 = MIN(bounds.y0, made->bounds.y0);
+		bounds.y1 = MAX(bounds.y1, made->bounds.y1);
+		bounds.z0 = MIN(bounds.z0, made->bounds.z0);
+		bounds.z1 = MAX(bounds.z1, made->bounds.z1);
+		saber_level.part_count++;
+	}
+	reason = "none of its parts is drawn";
+	if (!saber_level.part_count)
+		goto refused;
+
+	/* its bitmap: each texture a bitmap (the permutation of a shader
+	reference, of rasterizer_model_draw) */
+	saber_level.group.sequences.count = 0;
+	saber_level.group.bitmaps.count = saber_level.texture_count;
+	saber_level.group.bitmaps.address = saber_level.bitmaps;
+	saber_level.group.bitmaps.definition = NULL;
+
+	/* its shaders: the map's first model shader's, its base map the bitmap */
+	{
+		struct tag_iterator iterator;
+		long shader_tag;
+		boolean found = FALSE;
+
+		tag_iterator_new(&iterator, SHADER_DEFINITION_TAG);
+		while (!found && (shader_tag = tag_iterator_next(&iterator)) != NONE)
+		{
+			struct shader const *shader = shader_definition_get(shader_tag);
+
+			if (shader && shader->base.type == SHADER_TYPE_MODEL)
+			{
+				struct saber_shader const *played;
+
+				saber_level.shaders[0] = *(struct shader_model_definition const *)shader;
+				/* (its own definition, if a model drawn as a template changed it) */
+				for (played = saber_models_globals.shaders; played; played = played->next)
+				{
+					if (played->tag_index == shader_tag)
+						saber_level.shaders[0] = played->map_shader;
+				}
+				found = TRUE;
+			}
+		}
+		reason = "the map has no model shader to draw it with";
+		if (!found)
+			goto refused;
+	}
+	{
+		struct shader_model_properties *model = &saber_level.shaders[0].model;
+
+		model->map_u_scale = 1.f;
+		model->map_v_scale = 1.f;
+		model->base_map.index = saber_level.bitmap_tag;
+		model->multipurpose_map.index = NONE;
+		model->detail_map.index = NONE;
+		model->reflection_cube_map.index = NONE;
+		model->change_color_source = 0;
+		model->detail_mask = 0;
+		model->self_illumination_color_source = 0;
+		csmemset(&model->self_illumination_animation_color_lower_bound, 0,
+			sizeof(model->self_illumination_animation_color_lower_bound));
+		csmemset(&model->self_illumination_animation_color_upper_bound, 0,
+			sizeof(model->self_illumination_animation_color_upper_bound));
+		csmemset(&model->texture_animation, 0, sizeof(model->texture_animation));
+		SET_FLAG(model->flags, SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT, FALSE);
+		SET_FLAG(model->flags, SHADER_MODEL_TWO_SIDED_BIT, FALSE);
+		SET_FLAG(model->flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, TRUE);
+		saber_level.shaders[1] = saber_level.shaders[0];
+		SET_FLAG(saber_level.shaders[1].model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+		SET_FLAG(saber_level.shaders[1].model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
+	}
+
+	/* its buffers */
+	reason = "out of memory";
+	saber_level.vertices = geometry_allocate(vertices_size + 1, &saber_level.vertices_contiguous);
+	if (!saber_level.vertices)
+		goto refused;
+	vertices = (struct model_vertex_compressed *)saber_level.vertices;
+	{
+		long made_index = 0;
+
+		for (index = 0; index < level.part_count; index++)
+		{
+			if (level.parts[index].vertex_count > 0)
+				vertices += level.parts[index].vertex_count;
+		}
+		strips = (word *)vertices;
+		vertices = (struct model_vertex_compressed *)saber_level.vertices;
+		for (index = 0; index < level.part_count; index++)
+		{
+			struct saber_mesh_part const *part = &level.parts[index];
+			struct saber_level_part *made;
+			long strip_count;
+
+			if (part->vertex_count <= 0)
+				continue;
+			made = &saber_level.parts[made_index];
+			rasterizer_geometry_compress_vertices(_rasterizer_vertex_type_model_uncompressed, part->vertex_count, vertices,
+				part->vertex_count * compressed_size, part->vertices, part->vertex_count * uncompressed_size);
+			strip_count = part_strip(part, strips);
+			reason = "the renderer cannot make its buffers";
+			if (!rasterizer_vertex_buffer_new(&made->vertex_buffer, _rasterizer_vertex_type_model_compressed,
+					part->vertex_count, vertices, part->vertex_count * compressed_size) ||
+				!rasterizer_triangle_buffer_new(&made->triangle_buffer, _triangle_buffer_type_precompiled_strip,
+					strip_count - 2, strips))
+			{
+				saber_level.part_count = made_index;
+				goto refused;
+			}
+			vertices += part->vertex_count;
+			strips += strip_count;
+			triangles += part->triangle_count;
+			made_index++;
+		}
+		drawn = made_index;
+	}
+	saber_level.drawn = TRUE;
+	platform_log("anniversary: the structure drawn as %s: %ld parts, %ld triangles, %ld textures; "
+		"its bounds %.1f %.1f %.1f to %.1f %.1f %.1f world units", saber_pak_entry_name(pak, entry), drawn, triangles,
+		saber_level.texture_count, bounds.x0, bounds.y0, bounds.z0, bounds.x1, bounds.y1, bounds.z1);
+	saber_template_dispose(&level);
+	free(slots);
+
+	return TRUE;
+
+refused:
+	platform_log("anniversary: the structure is drawn as the map's: %s", reason);
+	saber_template_dispose(&level);
+	if (slots)
+		free(slots);
+	saber_level_free(TRUE);
+
+	return FALSE;
+}
+
 /* ---------- public code */
 
 void saber_models_tags_loaded(
@@ -2309,8 +2862,11 @@ void saber_models_tags_loaded(
 	/* (what was made for a map whose tags went without its being let go of
 	is not written over this one's) */
 	saber_models_tags_unloaded(FALSE);
-	if (!map_name || !*map_name || !config_boolean("display.anniversary_models"))
+	if (!map_name || !*map_name ||
+		(!config_boolean("display.anniversary_models") && !config_boolean("display.remastered_bsp")))
+	{
 		return;
+	}
 	/* (in display.anniversary_paks's folder, else in paks next to the
 	executable: a config.toml written before paks was the default keeps
 	the data folder's anniversary) */
@@ -2340,6 +2896,7 @@ void saber_models_tags_loaded(
 	}
 	/* (every model of the map's: its objects', not its structure's, which
 	is no model) */
+	if (config_boolean("display.anniversary_models"))
 	{
 		struct tag_iterator iterator;
 		char const *name = strrchr(map_name, '\\');
@@ -2348,6 +2905,7 @@ void saber_models_tags_loaded(
 		long models = 0;
 
 		name = name ? name + 1 : map_name;
+		classic_models_keep(pak, name);
 		tag_iterator_new(&iterator, MODELS_GROUP_TAG);
 		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 		{
@@ -2357,6 +2915,9 @@ void saber_models_tags_loaded(
 		}
 		platform_log("anniversary: %ld of the map's %ld models drawn as templates", drawn, models);
 	}
+	/* (and its structure, display.remastered_bsp) */
+	if (config_boolean("display.remastered_bsp"))
+		saber_level_play(pak);
 	saber_pak_close(pak);
 	if (saber_models_globals.stream)
 		saber_pak_close(saber_models_globals.stream);
@@ -2367,7 +2928,12 @@ void saber_models_tags_loaded(
 void saber_models_tags_unloaded(
 	int give_back)
 {
+	saber_level_free(give_back ? TRUE : FALSE);
 	saber_models_globals.ranked_count = 0;
+	if (saber_models_globals.kept_tags)
+		free(saber_models_globals.kept_tags);
+	saber_models_globals.kept_tags = NULL;
+	saber_models_globals.kept_count = 0;
 	while (saber_models_globals.models)
 	{
 		struct saber_model *made = saber_models_globals.models;
@@ -2479,11 +3045,84 @@ short saber_models_geometry_index(
 	return geometry_index;
 }
 
+int saber_models_level_drawn(
+	void)
+{
+	return saber_level.drawn;
+}
+
+void saber_models_level_render(
+	void)
+{
+	static real_rgb_color const colors[4] = { { 1.f, 1.f, 1.f }, { 1.f, 1.f, 1.f }, { 1.f, 1.f, 1.f }, { 1.f, 1.f, 1.f } };
+	static real const values[8] = { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f };
+	struct rasterizer_model_begin_parameters parameters;
+	real_matrix4x3 node;
+	short bsp_index = global_structure_bsp_index_get();
+	long index;
+
+	if (!saber_level.drawn)
+		return;
+	csmemset(&node, 0, sizeof(node));
+	node.scale = 1.f;
+	node.forward.i = 1.f;
+	node.left.j = 1.f;
+	node.up.k = 1.f;
+	csmemset(&parameters, 0, sizeof(parameters));
+	parameters.unique_identifier = NONE;
+	parameters.skinning.node_matrices = &node;
+	parameters.skinning.node_matrix_count = 1;
+	parameters.animation.colors = colors;
+	parameters.animation.values = values;
+	parameters.base_map_scale.i = 1.f;
+	parameters.base_map_scale.j = 1.f;
+	for (index = 0; index < saber_level.part_count; index++)
+	{
+		struct saber_level_part *part = &saber_level.parts[index];
+
+		if (!render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
+			continue;
+		/* (its light, of the structure about its middle, sampled as it is first
+		drawn in a structure) */
+		if (part->lit_bsp != bsp_index)
+		{
+			real_point3d above = part->centroid;
+
+			above.z = part->bounds.z1 + 0.1f;
+			csmemset(&part->lighting, 0, sizeof(part->lighting));
+			if (!lights_distant_lighting_at_point(0, &above, &part->lighting))
+			{
+				csmemset(&part->lighting, 0, sizeof(part->lighting));
+				part->lighting.ambient_color.red = 0.5f;
+				part->lighting.ambient_color.green = 0.5f;
+				part->lighting.ambient_color.blue = 0.5f;
+				part->lighting.distant_light_count = 1;
+				part->lighting.distant_lights[0].color.red = 0.6f;
+				part->lighting.distant_lights[0].color.green = 0.6f;
+				part->lighting.distant_lights[0].color.blue = 0.55f;
+				part->lighting.distant_lights[0].direction.k = -1.f;
+				part->lighting.shadow_vector.k = -1.f;
+			}
+			part->lighting.point_light_count = 0;
+			part->lit_bsp = bsp_index;
+		}
+		parameters.lighting = part->lighting;
+		parameters.centroid = part->centroid;
+		parameters.radius = part->radius;
+		rasterizer_model_begin(&parameters, FALSE);
+		rasterizer_model_draw((struct shader *)&saber_level.shaders[part->cutout ? 1 : 0], part->texture,
+			&part->triangle_buffer, NONE, part->triangle_buffer.count, &part->vertex_buffer, NONE);
+		rasterizer_model_end();
+	}
+}
+
 int saber_bitmaps_contain(
 	struct bitmap_data const *bitmap)
 {
 	struct saber_bitmap const *played;
 
+	if (saber_level.bitmaps && bitmap >= saber_level.bitmaps && bitmap < saber_level.bitmaps + saber_level.texture_count)
+		return TRUE;
 	for (played = saber_models_globals.bitmaps; played; played = played->next)
 	{
 		if (bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
@@ -2499,6 +3138,17 @@ int saber_bitmaps_read(
 {
 	struct saber_bitmap const *played;
 
+	if (saber_level.bitmaps && bitmap >= saber_level.bitmaps && bitmap < saber_level.bitmaps + saber_level.texture_count)
+	{
+		struct saber_texture const *texture = &saber_level.textures[bitmap - saber_level.bitmaps];
+
+		if (!texture->pixels || texture->pixels_size < bitmap->pixels_size)
+			return FALSE;
+		memcpy(buffer, texture->pixels, (size_t)bitmap->pixels_size);
+		halo_custom_edition_texels_channels(buffer, _custom_edition_channels_xbox);
+		rasterizer_xbox_bitmap_rebuild_hardware_format(bitmap);
+		return TRUE;
+	}
 	for (played = saber_models_globals.bitmaps; played; played = played->next)
 	{
 		if (bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)

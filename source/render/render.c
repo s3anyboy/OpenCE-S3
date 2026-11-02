@@ -90,6 +90,7 @@ symbols in this file:
 /* port: static transparent part links for the newly loaded model tags. */
 #include "models/models.h"
 #include "structure_culling.h" /* port: port/linux/game/structure_culling.c */
+#include "saber.h" /* port: port/linux/game/saber_models.c */
 
 /* ---------- constants */
 
@@ -345,7 +346,17 @@ static void render_window(
 		lights_preprocess_scene();
 		render_objects();
 		structure_render_preprocess();
-		structure_render_lightmaps();
+		/* port: the structure drawn as Halo: Combat Evolved Anniversary's level
+		geometry in place of its lightmapped surfaces (display.remastered_bsp,
+		port/linux/game/saber_models.c); its collision, water and fog stay */
+		if (saber_models_level_drawn())
+		{
+			saber_models_level_render();
+		}
+		else
+		{
+			structure_render_lightmaps();
+		}
 		rasterizer_lens_flares_submit_occlusion_tests();
 		render_object_shadows();
 		lights_render_diffuse();
@@ -368,7 +379,10 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
-		structure_render_diffuse_texture();
+		if (!saber_models_level_drawn())
+		{
+			structure_render_diffuse_texture();
+		}
 
 		rasterizer_decals_begin(_decal_layer_primary);
 		for (rendered_cluster_index = 0;
@@ -389,10 +403,13 @@ static void render_window(
 		rasterizer_decals_end();
 
 		lights_render_specular();
-		structure_render_specular_lightmaps();
-		structure_render_reflection_lightmap_masks();
-		structure_render_reflection_mirrors();
-		structure_render_reflections();
+		if (!saber_models_level_drawn())
+		{
+			structure_render_specular_lightmaps();
+			structure_render_reflection_lightmap_masks();
+			structure_render_reflection_mirrors();
+			structure_render_reflections();
+		}
 		structure_render_transparent_geometry();
 		structure_render_fog();
 		game_engine_post_rasterize_objects();
@@ -411,7 +428,12 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
-		structure_render_detail_objects();
+		/* port: (the structure's grass, on its own surfaces, not drawn over the
+		level geometry's) */
+		if (!saber_models_level_drawn())
+		{
+			structure_render_detail_objects();
+		}
 		rasterizer_transparent_geometry_draw(FALSE);
 		rasterizer_transparent_geometry_stop();
 		structure_render_fog_screen();

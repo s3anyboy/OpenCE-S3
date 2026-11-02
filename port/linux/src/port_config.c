@@ -301,6 +301,13 @@ static const struct config_setting config_settings[] =
 		"anniversary_paks: every object's model it has a template of (not the\n"
 		"level's structure). Only what is drawn changes.\n"
 		"Read as a map loads." },
+	{ "display.remastered_bsp", _config_boolean, "false", "HALO_REMASTERED_BSP", _environment_value, _platform_all,
+		"Draw the level's structure as Halo: Combat Evolved Anniversary's\n"
+		"remastered level geometry, from the map's Saber3D package (its level\n"
+		"geometry, <map>_x360.lg) in anniversary_paks, in place of the map's\n"
+		"lightmapped surfaces. Collision, water and fog stay the map's; the\n"
+		"geometry is lit as objects are, by the map's lightmaps.\n"
+		"Read as a map loads." },
 	{ "display.anniversary_paks", _config_string, "\"paks\"", "HALO_ANNIVERSARY_PAKS", _environment_value, _platform_all,
 		"The folder of Halo: Combat Evolved Anniversary's packages (.s3dpak)\n"
 		"that anniversary_models draws from: a path, or a folder next to the\n"

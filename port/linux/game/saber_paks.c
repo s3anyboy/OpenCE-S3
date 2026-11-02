@@ -102,6 +102,8 @@ enum
 	_block_mesh = 0xB903,
 	_block_transform = 0xF900,
 	_block_parent = 0x2B01,
+	_block_mesh_source = 0x2901,
+	_block_mesh_bounds = 0x1D01,
 	_block_mesh_flags = 0x2E01,
 	_block_positions = 0xF100,
 	_block_vertex_data = 0x3001,
@@ -123,7 +125,7 @@ enum
 	_mesh_normals_bit,
 };
 
-#define MAXIMUM_NODES 4096
+#define MAXIMUM_NODES 16384
 #define MAXIMUM_NODE_DEPTH 64
 #define MAXIMUM_SUBMESHES 256
 
@@ -200,6 +202,18 @@ struct template_node
 	unsigned long name_length;
 	long bone_index;
 	struct block blend;
+	/* a level's mesh drawn of another's buffers (its "sharingObj"): that
+	mesh's id (NONE: its own), its first vertex and triangle there, and its
+	own counts of them */
+	long source_id;
+	unsigned long source_vertex;
+	unsigned long source_triangle;
+	long own_vertex_count;
+	long own_triangle_count;
+	/* its bounds (a level's mesh's vertices are its source's, of -1 to 1,
+	across them) */
+	boolean has_bounds;
+	real bounds[6];
 };
 
 struct template_walk
@@ -209,6 +223,9 @@ struct template_walk
 	struct template_node *nodes;
 	long node_count;
 	boolean failed;
+	/* whether it is a level's geometry (whose collision meshes are not
+	drawn) */
+	boolean level;
 };
 
 /* ---------- private code */
@@ -634,6 +651,12 @@ static void node_read(
 			}
 		}
 		node->parent_id = NONE;
+		node->source_id = NONE;
+		if (block.end - name_end >= 18)
+		{
+			node->own_vertex_count = (long)read_u32(bytes + name_end + 10);
+			node->own_triangle_count = (long)read_u32(bytes + name_end + 14);
+		}
 		for (index = 0; index < 16; index++)
 			node->transform[index] = (index % 5) ? 0.f : 1.f;
 		if (block_find(bytes, node_block->start, node_block->end, _block_transform, &block) &&
@@ -648,6 +671,24 @@ static void node_read(
 		}
 		if (block_find(bytes, node_block->start, node_block->end, _block_parent, &block) && block.end - block.start >= 4)
 			node->parent_id = (long)read_u32(bytes + block.start);
+		if (block_find(bytes, node_block->start, node_block->end, _block_mesh_source, &block) &&
+			block.end - block.start >= 10)
+		{
+			node->source_id = read_short(bytes + block.start);
+			node->source_vertex = read_u32(bytes + block.start + 2);
+			node->source_triangle = read_u32(bytes + block.start + 6);
+		}
+		if (block_find(bytes, node_block->start, node_block->end, _block_mesh_bounds, &block) &&
+			block.end - block.start >= 28)
+		{
+			node->has_bounds = TRUE;
+			for (index = 0; index < 6; index++)
+			{
+				node->bounds[index] = read_real(bytes + block.start + 4 + 4 * index);
+				if (!real_finite(node->bounds[index]))
+					node->has_bounds = FALSE;
+			}
+		}
 		if (block_find(bytes, node_block->start, node_block->end, _block_bone_index, &block) &&
 			block.end - block.start >= 4)
 		{
@@ -788,6 +829,24 @@ static short node_rank(
 	}
 
 	return _saber_rank_all;
+}
+
+/* whether a name (not 0-terminated) has a word in it */
+static boolean memmem_name(
+	unsigned char const *name,
+	unsigned long length,
+	char const *word)
+{
+	unsigned long word_length = (unsigned long)strlen(word);
+	unsigned long at;
+
+	for (at = 0; at + word_length <= length; at++)
+	{
+		if (!memcmp(name + at, word, word_length))
+			return TRUE;
+	}
+
+	return FALSE;
 }
 
 /* the inverse of a 4x4 row-major matrix (Gauss-Jordan); FALSE if it has
@@ -1089,7 +1148,13 @@ static boolean mesh_read(
 	char const **reason)
 {
 	unsigned char const *bytes = walk->bytes;
-	unsigned long flags = node->mesh_flags;
+	/* (the mesh whose buffers it is drawn of: its own, or its source's) */
+	struct template_node const *source = node->source_id == NONE ? node : node_of_id(walk, node->source_id);
+	unsigned long flags = source ? source->mesh_flags : 0;
+	unsigned long base_vertex = node->source_id == NONE ? 0 : node->source_vertex;
+	unsigned long first_triangle = node->source_id == NONE ? 0 : node->source_triangle;
+	unsigned long vertex_data_start = 0;
+	long source_vertex_count;
 	long vertex_count;
 	long triangle_count;
 	long vertex_size = 0;
@@ -1123,21 +1188,48 @@ static boolean mesh_read(
 	long index;
 
 	*reason = "a mesh is not as a template's is";
-	if (node->positions.end - node->positions.start < 4 || node->triangles.end - node->triangles.start < 4)
+	/* (a template's meshes of another's buffers are left out, as they were
+	before the level's were read: only a level's are drawn so) */
+	if (source != node && !walk->level)
 		return TRUE;
-	vertex_count = (long)read_u32(bytes + node->positions.start);
-	triangle_count = (long)read_u32(bytes + node->triangles.start);
+	if (!source || source->positions.end - source->positions.start < 4 ||
+		source->triangles.end - source->triangles.start < 4)
+	{
+		return TRUE;
+	}
+	vertex_count = (long)read_u32(bytes + source->positions.start);
+	triangle_count = (long)read_u32(bytes + source->triangles.start);
+	source_vertex_count = vertex_count;
 	if (vertex_count <= 0 || triangle_count <= 0 || node_damaged(walk, node))
 		return TRUE;
 	if (vertex_count > 0x100000 || triangle_count > 0x100000 ||
-		(unsigned long)triangle_count * 6 > node->triangles.end - node->triangles.start - 4)
+		(unsigned long)triangle_count * 6 > source->triangles.end - source->triangles.start - 4)
 	{
 		return FALSE;
 	}
-	data = node->positions.start + 4;
+	/* (a level's mesh: its own of its source's vertices and triangles; a
+	source drawn by its meshes, not itself) */
+	if (source != node)
+	{
+		if (node->own_vertex_count <= 0 || node->own_triangle_count <= 0 ||
+			base_vertex + (unsigned long)node->own_vertex_count > (unsigned long)vertex_count ||
+			first_triangle + (unsigned long)node->own_triangle_count > (unsigned long)triangle_count)
+		{
+			return TRUE;
+		}
+		vertex_count = node->own_vertex_count;
+		triangle_count = node->own_triangle_count;
+	}
+	else if (node->name_length >= 10 && memmem_name(bytes + node->name_start, node->name_length, "sharingObj"))
+	{
+		return TRUE;
+	}
+	if (walk->level && memmem_name(bytes + node->name_start, node->name_length, "collision"))
+		return TRUE;
+	data = source->positions.start + 4;
 	if (TEST_FLAG(flags, _mesh_compressed_bit))
 	{
-		if (node->positions.end - data < 12)
+		if (source->positions.end - data < 12)
 			return FALSE;
 		translation.x = (real)read_short(bytes + data);
 		translation.y = (real)read_short(bytes + data + 2);
@@ -1145,21 +1237,37 @@ static boolean mesh_read(
 		scale.x = (real)read_short(bytes + data + 6);
 		scale.y = (real)read_short(bytes + data + 8);
 		scale.z = (real)read_short(bytes + data + 10);
+		/* (a level's mesh's, across its own bounds) */
+		if (source != node && node->has_bounds)
+		{
+			translation.x = (node->bounds[0] + node->bounds[3]) / 2.f;
+			translation.y = (node->bounds[1] + node->bounds[4]) / 2.f;
+			translation.z = (node->bounds[2] + node->bounds[5]) / 2.f;
+			scale.x = (node->bounds[3] - node->bounds[0]) / 2.f;
+			scale.y = (node->bounds[4] - node->bounds[1]) / 2.f;
+			scale.z = (node->bounds[5] - node->bounds[2]) / 2.f;
+		}
 		data += 12;
-		if ((unsigned long)vertex_count * 8 > node->positions.end - data)
+		if ((unsigned long)source_vertex_count * 8 > source->positions.end - data)
 			return FALSE;
+		data += 8 * base_vertex;
 	}
-	else if ((unsigned long)vertex_count * 12 > node->positions.end - data)
+	else if ((unsigned long)source_vertex_count * 12 > source->positions.end - data)
 	{
 		return FALSE;
 	}
-	if (node->vertex_data.end - node->vertex_data.start >= 13 &&
-		(long)read_u32(bytes + node->vertex_data.start) == vertex_count)
+	else
 	{
-		vertex_size = bytes[node->vertex_data.start + 12];
+		data += 12 * base_vertex;
+	}
+	if (source->vertex_data.end - source->vertex_data.start >= 13 &&
+		(long)read_u32(bytes + source->vertex_data.start) == source_vertex_count)
+	{
+		vertex_size = bytes[source->vertex_data.start + 12];
 		uv_offset = texcoord_offset(vertex_size);
-		if (uv_offset < 0 ||
-			(unsigned long)vertex_count * (unsigned long)vertex_size > node->vertex_data.end - node->vertex_data.start - 13)
+		vertex_data_start = source->vertex_data.start + 13 + (unsigned long)vertex_size * base_vertex;
+		if (uv_offset < 0 || (unsigned long)source_vertex_count * (unsigned long)vertex_size >
+			source->vertex_data.end - source->vertex_data.start - 13)
 		{
 			uv_offset = -1;
 		}
@@ -1337,7 +1445,7 @@ static boolean mesh_read(
 		}
 		if (uv_offset >= 0)
 		{
-			unsigned char const *uv = bytes + node->vertex_data.start + 13 + vertex_size * index + uv_offset;
+			unsigned char const *uv = bytes + vertex_data_start + vertex_size * index + uv_offset;
 
 			vertex->texcoord.x = unit_short(xbox360 ? read_short_big(uv) : read_short(uv));
 			vertex->texcoord.y = unit_short(xbox360 ? read_short_big(uv + 2) : read_short(uv + 2));
@@ -1396,7 +1504,8 @@ static boolean mesh_read(
 	*reason = "a mesh's triangles name vertices it has not got";
 	for (index = 0; index < 3 * triangle_count; index++)
 	{
-		triangles[index] = (unsigned short)read_short(bytes + node->triangles.start + 4 + 2 * index);
+		triangles[index] = (unsigned short)read_short(bytes + source->triangles.start + 4 + 6 * first_triangle +
+			2 * index);
 		if (triangles[index] >= vertex_count)
 		{
 			free(vertices);
@@ -1700,6 +1809,9 @@ unsigned char *saber_pak_read(
 	return bytes;
 }
 
+static int template_blocks_read(struct saber_template *template_, unsigned char const *bytes, unsigned long size,
+	struct block const *root, int xbox360, boolean level, char const **reason);
+
 int saber_template_read(
 	struct saber_template *template_,
 	unsigned char const *bytes,
@@ -1707,15 +1819,48 @@ int saber_template_read(
 	int xbox360,
 	char const **reason)
 {
-	struct template_walk walk;
 	struct block root;
-	struct block materials;
-	long index;
 
 	csmemset(template_, 0, sizeof(*template_));
 	*reason = "it is not a template";
 	if (!block_at(bytes, 0, size, &root) || root.type != _block_template)
 		return FALSE;
+
+	return template_blocks_read(template_, bytes, size, &root, xbox360, FALSE, reason);
+}
+
+int saber_level_geometry_read(
+	struct saber_template *template_,
+	unsigned char const *bytes,
+	unsigned long size,
+	int xbox360,
+	char const **reason)
+{
+	struct block root;
+
+	csmemset(template_, 0, sizeof(*template_));
+	root.type = _block_template;
+	root.start = 0;
+	root.end = size;
+
+	return template_blocks_read(template_, bytes, size, &root, xbox360, TRUE, reason);
+}
+
+/* a template of the blocks in `root` (a template's, or a level's whole
+geometry, of the same blocks at its top) */
+static int template_blocks_read(
+	struct saber_template *template_,
+	unsigned char const *bytes,
+	unsigned long size,
+	struct block const *root_block,
+	int xbox360,
+	boolean level,
+	char const **reason)
+{
+	struct template_walk walk;
+	struct block root = *root_block;
+	struct block materials;
+	long index;
 
 	/* its materials */
 	if (block_find(bytes, root.start, root.end, _block_materials, &materials) && materials.end - materials.start >= 4)
@@ -1748,6 +1893,7 @@ int saber_template_read(
 	csmemset(&walk, 0, sizeof(walk));
 	walk.bytes = bytes;
 	walk.size = size;
+	walk.level = level;
 	walk.nodes = malloc(sizeof(*walk.nodes) * MAXIMUM_NODES);
 	if (!walk.nodes)
 		return FALSE;

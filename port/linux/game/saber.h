@@ -23,6 +23,7 @@ enum
 	_saber_entry_textures = 6,
 	_saber_entry_textures_mips64 = 7,
 	_saber_entry_templates = 12,
+	_saber_entry_level_geometry = 16,
 };
 
 /* the ranks a template's mesh can be of (an Elite's "metal_major", a
@@ -136,6 +137,10 @@ unsigned char *saber_pak_read(struct saber_pak *pak, long entry, unsigned long *
 saying why not (saber_template_dispose lets go of what it made either way) */
 int saber_template_read(struct saber_template *template_, unsigned char const *bytes, unsigned long size,
 	int xbox360, char const **reason);
+/* the level's geometry of the package's level geometry entry (its ".lg"),
+read as a template of it: its every mesh, in place */
+int saber_level_geometry_read(struct saber_template *template_, unsigned char const *bytes, unsigned long size,
+	int xbox360, char const **reason);
 void saber_template_dispose(struct saber_template *template_);
 
 /* the texture of a package's textures entry (its TexturesMips64 or
@@ -178,6 +183,11 @@ void saber_models_tags_unloaded(int give_back);
 package's texture, its pixels put in buffer */
 int saber_bitmaps_read(struct bitmap_data *bitmap, void *buffer);
 int saber_bitmaps_contain(struct bitmap_data const *bitmap);
+/* (render.c) whether the level's structure is drawn as the package's level
+geometry (display.remastered_bsp), and its drawing, in place of the
+structure's lightmapped surfaces */
+int saber_models_level_drawn(void);
+void saber_models_level_render(void);
 struct model;
 /* (models.c, render_model_parts) the geometry of a model drawn as a
 template that the object `object_index` is drawn with: its rank's (by its
