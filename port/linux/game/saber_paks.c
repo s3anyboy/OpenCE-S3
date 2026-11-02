@@ -3040,7 +3040,8 @@ static long block_texel_alpha(
 
 /* a star field's black punched out (DXT1: colour 0 no greater than colour
 1, and index 3 clear). The black is the sky behind the stars, and it is
-stored with no alpha */
+stored with no alpha. A block blends a star into that black, so the grey
+around a star is the same sky and is punched with it */
 static void texture_punch_black(
 	struct saber_texture *texture)
 {
@@ -3112,7 +3113,7 @@ static void texture_punch_black(
 				luma = green[index];
 			if (blue[index] > luma)
 				luma = blue[index];
-			if (luma < 16)
+			if (luma < 96)
 			{
 				dark[texel] = 1;
 				dark_count++;
@@ -3199,9 +3200,47 @@ static void texture_punch_black(
 	}
 }
 
-/* a card's alpha made the test's. Its picture is stored near an alpha of
-140, under 255 and around the test's 127, and the card around it at 0: a
-texel clear enough stays clear, and the picture is made solid */
+/* a card's alpha lifted for blending. The picture sits near 140 and the
+card around it at 0. Cutting that on a line slices the planet's limb off;
+clear stays clear, and the rest is lifted so the body is solid and the
+limb fades */
+static long card_alpha_lift(
+	long alpha)
+{
+	if (alpha < 12)
+		return 0;
+	if (alpha >= 96)
+		return 255;
+
+	return (alpha - 12) * 255 / 84;
+}
+
+/* the DXT5 index of a lifted alpha. Alpha 0 is 255 and alpha 1 is 0, so
+the six steps between them run down from solid to clear */
+static long card_alpha_index(
+	long lifted)
+{
+	static const long level[8] = { 255, 0, 218, 182, 145, 109, 72, 36 };
+	long best = 1;
+	long distance = 255;
+	long index;
+
+	for (index = 0; index < 8; index++)
+	{
+		long delta = lifted - level[index];
+
+		if (delta < 0)
+			delta = -delta;
+		if (delta < distance)
+		{
+			distance = delta;
+			best = index;
+		}
+	}
+
+	return best;
+}
+
 static void texture_card_alpha(
 	struct saber_texture *texture)
 {
@@ -3221,8 +3260,9 @@ static void texture_card_alpha(
 			memset(alpha, 0, sizeof(alpha));
 			for (texel = 0; texel < 16; texel++)
 			{
-				if (block_texel_alpha(block, texture->format, texel) >= 48)
-					alpha[texel / 2] |= (unsigned char)(15 << (4 * (texel % 2)));
+				long lifted = card_alpha_lift(block_texel_alpha(block, texture->format, texel));
+
+				alpha[texel / 2] |= (unsigned char)(((lifted * 15 + 127) / 255) << (4 * (texel % 2)));
 			}
 			memcpy(block, alpha, 8);
 		}
@@ -3233,17 +3273,16 @@ static void texture_card_alpha(
 
 			for (texel = 0; texel < 16; texel++)
 			{
-				/* (alpha 0 no greater than alpha 1: index 6 is clear and
-				index 7 is solid) */
-				long index = block_texel_alpha(block, texture->format, texel) >= 48 ? 7 : 6;
+				long index = card_alpha_index(card_alpha_lift(
+					block_texel_alpha(block, texture->format, texel)));
 
 				if (texel < 8)
 					low |= (unsigned long)index << (3 * texel);
 				else
 					high |= (unsigned long)index << (3 * (texel - 8));
 			}
-			block[0] = 0;
-			block[1] = 255;
+			block[0] = 255;
+			block[1] = 0;
 			block[2] = (unsigned char)low;
 			block[3] = (unsigned char)(low >> 8);
 			block[4] = (unsigned char)(low >> 16);

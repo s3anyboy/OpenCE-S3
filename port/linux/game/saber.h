@@ -176,11 +176,11 @@ int saber_texture_blank(struct saber_texture *texture);
 /* a texture's alpha made solid throughout (DXT3's and DXT5's), for one not
 cut out that is drawn by a shader alpha tested for another's sake */
 void saber_texture_make_solid(struct saber_texture *texture);
-/* a sky texture's empty texels made clear, so the alpha test drops them.
-A star field (`stars`) is black where the sky behind it shows, and that
-black has no alpha: those texels are punched out. A planet's or a moon's
-card keeps its picture, and its clear texels (a blue stored with no alpha,
-which would otherwise fill the card) are made clear and the picture solid */
+/* a sky texture's empty texels made clear. A star field (`stars`) is black
+where the sky behind it shows, and that black has no alpha: those texels,
+and the grey a block blends around each star, are punched out. A planet's
+or a moon's card keeps its picture: the clear texels stay clear and the
+limb is lifted so it fades instead of being cut off */
 void saber_texture_sky_alpha(struct saber_texture *texture, int stars);
 
 /* ---------- prototypes/SABER_MODELS.C */

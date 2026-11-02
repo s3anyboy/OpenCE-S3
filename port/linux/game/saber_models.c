@@ -2569,6 +2569,9 @@ struct saber_level_part
 	boolean in_front;
 	/* the halo ring: drawn after the planet, which would cover it */
 	boolean over;
+	/* blended on its texture's alpha: a planet, a moon, the halo ring.
+	The card around them fades out. Cutting it on a line slices the planet */
+	boolean blend;
 	/* the skydome: the sky is centred on it */
 	boolean dome;
 	/* the texture's repeat (1 until a mesh says otherwise). Applied as the
@@ -2788,6 +2791,11 @@ static boolean saber_level_play(
 			strncmp(level.materials[material], "basis_sky", 9) == 0);
 		made->over = sky && strstr(level.materials[material], "ring") != NULL;
 		made->dome = sky && strncmp(level.materials[material], "stars", 5) == 0;
+		/* (a planet, a moon and the ring are blended: their card is clear
+		and the picture fades at its edge. A test would cut the planet off) */
+		made->blend = sky && (strstr(level.materials[material], "planet") != NULL ||
+			strncmp(level.materials[material], "basis_sky", 9) == 0 ||
+			strstr(level.materials[material], "ring") != NULL);
 		if (!sky && !saber_level_material_drawn(level.materials[material]))
 		{
 			part->vertex_count = 0;
@@ -3426,6 +3434,9 @@ void saber_models_level_sky_render(
 		shader.model.map_u_scale = part->uv_scale[0];
 		shader.model.map_v_scale = part->uv_scale[1];
 		SET_FLAG(shader.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+		/* (its alpha blended, so the card fades. The test would cut it) */
+		if (part->blend)
+			SET_FLAG(shader.model.flags, SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT, TRUE);
 		rasterizer_model_begin(&parameters, FALSE);
 		rasterizer_model_draw((struct shader *)&shader, part->texture,
 			&part->triangle_buffer, NONE, part->triangle_buffer.count, &part->vertex_buffer, NONE);
