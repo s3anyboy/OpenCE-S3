@@ -1650,8 +1650,11 @@ level's structure is not one), found by the model's name (its last folder, as `p
 `weapons\pistol\pistol`, `pistol_fp` for its first-person model, with `__h`,
 the map's name or another kind, as `light_fixture_floor1_b30__h` or
 `tree_leafy__tree`). A template's effects (muzzle flashes, lights' cones,
-overshields) are left out, of a character's ranks the least's meshes alone
-are drawn, its `.lod1`, `.lod2` meshes are drawn at Halo's lower levels of
+overshields, a Jackal's energy shield, which the map's model draws as it
+always has) are left out. A character's ranks' meshes (an Elite's officer
+armour, a Grunt's major backpack, an Elite's spec ops and zealot armour from
+its `_special` template) are drawn for each object of that rank, told by its
+colour: blue minor, red major, dark spec ops, gold zealot. Its `.lod1`, `.lod2` meshes are drawn at Halo's lower levels of
 detail, and its vertices move with the map's model's nodes of the names of
 its bones (or of their nearest parents'), put where those nodes stand in
 the map's model's default pose, so the map's animations move them as the

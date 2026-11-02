@@ -37,7 +37,13 @@ nearest of the units templates are seen in.
 
 What is drawn changes, nothing else: the map's model keeps its nodes,
 markers and regions (what the machines of a network game agree on). Its
-first region's permutations draw the template, its others nothing. Each of
+first region's permutations draw the template, its others nothing. A
+template's meshes of a rank (an Elite's "metal_major", a Grunt's
+"back_major"; an Elite's spec ops' and zealots' in its "_special" template)
+are drawn for that rank alone, the rank of an object by its colour (blue
+minor, red major, dark spec ops, gold zealot), as Halo draws its ranks one
+model coloured. The map's model's parts drawn by transparent shaders (a
+Jackal's energy shield) are drawn with the template's. Each of
 the template's materials is drawn with one of the map's model's shaders
 that can be (model shaders with a base map: the first material the first,
 the next the next ...), whose base map becomes the package's texture of
@@ -59,6 +65,7 @@ goes.
 #include "cache/cache_files.h"
 #include "math/real_math.h"
 #include "models/model_definitions.h"
+#include "objects/objects.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_geometry.h"
 #include "rasterizer/rasterizer_model_types.h"
@@ -232,11 +239,18 @@ struct saber_model
 	struct model model;
 	struct model_region *regions;
 	struct model_region_permutation *permutations;
-	/* a geometry of each of the template's levels of detail */
-	struct model_geometry geometries[5];
+	/* a geometry of each of the template's levels of detail, for each rank
+	it is drawn for (those of the rank `ranks[0]` first, ...) */
+	struct model_geometry geometries[5 * NUMBER_OF_SABER_RANKS];
 	long geometry_count;
+	long level_count;
+	long rank_count;
+	short ranks[NUMBER_OF_SABER_RANKS];
 	struct model_geometry_part *parts;
 	long part_count;
+	/* the geometries' parts: each a part's, or a part of the map's model's
+	(neither theirs to let go of) */
+	struct model_geometry_part *geometry_parts;
 	byte *vertices;
 	unsigned long vertices_size;
 	boolean vertices_contiguous;
@@ -284,6 +298,8 @@ static struct
 	char folder[1024];
 	struct saber_pak *stream;
 	boolean stream_tried;
+	/* the models drawn with ranks' geometries */
+	long ranked_count;
 } saber_models_globals;
 
 /* ---------- private code */
@@ -490,6 +506,8 @@ static void saber_model_free(
 	}
 	if (made->shaders)
 		free(made->shaders);
+	if (made->geometry_parts)
+		free(made->geometry_parts);
 	if (made->regions)
 		free(made->regions);
 	if (made->permutations)
@@ -549,14 +567,17 @@ static struct saber_model *saber_model_new(
 	long next = 0;
 	struct model_vertex_compressed *vertices;
 	word *strips;
-	/* the template's levels of detail there are parts of, and its parts in
-	the order of their levels (each level's parts a geometry's) */
+	/* the template's levels of detail there are parts of */
 	short levels[5];
 	long level_count = 0;
-	long order[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
-	long first[5];
 	long level;
 	long made_index;
+	long rank_index;
+	long default_rank = 0;
+	/* the map's model's parts drawn by transparent shaders */
+	struct model_geometry_part const *clear_parts[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
+	long clear_count = 0;
+	long geometry_part_count = 0;
 
 	*reason = "out of memory";
 	if (!made)
@@ -572,13 +593,65 @@ static struct saber_model *saber_model_new(
 		if (part_index < template_->part_count)
 			levels[level_count++] = (short)level;
 	}
-	for (level = 0, made_index = 0; level < level_count; level++)
+	/* (its ranks, the least first; one of every rank's, if it has none) */
+	for (rank_index = _saber_rank_minor; rank_index < NUMBER_OF_SABER_RANKS; rank_index++)
 	{
-		first[level] = made_index;
 		for (part_index = 0; part_index < template_->part_count; part_index++)
 		{
-			if (MIN(template_->parts[part_index].lod, 4) == levels[level])
-				order[made_index++] = part_index;
+			if (template_->parts[part_index].rank == rank_index)
+				break;
+		}
+		if (part_index < template_->part_count)
+			made->ranks[made->rank_count++] = (short)rank_index;
+	}
+	if (!made->rank_count)
+		made->ranks[made->rank_count++] = _saber_rank_all;
+	made->level_count = level_count;
+	/* (the map's model's transparent parts, of each region's first
+	permutation's most detailed geometry; a model whose parts have local
+	nodes has none drawn so) */
+	if (!TEST_FLAG(map_model->flags, MODEL_PARTS_HAVE_LOCAL_NODES_BIT))
+	{
+		short seen[16];
+		long seen_count = 0;
+
+		for (region_index = 0; region_index < map_model->regions.count && seen_count < (long)NUMBEROF(seen);
+			region_index++)
+		{
+			struct model_region const *map_region = TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index,
+				struct model_region);
+			struct model_geometry const *geometry;
+			short geometry_index;
+			long other;
+
+			if (map_region->permutations.count <= 0)
+				continue;
+			geometry_index = TAG_BLOCK_GET_ELEMENT(&map_region->permutations, 0,
+				struct model_region_permutation)->geometry_indices[4];
+			if (!VALID_INDEX(geometry_index, map_model->geometries.count))
+				continue;
+			for (other = 0; other < seen_count && seen[other] != geometry_index; other++)
+			{
+			}
+			if (other < seen_count)
+				continue;
+			seen[seen_count++] = geometry_index;
+			geometry = TAG_BLOCK_GET_ELEMENT(&map_model->geometries, geometry_index, struct model_geometry);
+			for (part_index = 0; part_index < geometry->parts.count && clear_count < MAXIMUM_PARTS_PER_MODEL_GEOMETRY;
+				part_index++)
+			{
+				struct model_geometry_part const *part = TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index,
+					struct model_geometry_part);
+				long shader_tag = VALID_INDEX(part->shader_index, map_model->shaders.count) ?
+					TAG_BLOCK_GET_ELEMENT(&map_model->shaders, part->shader_index,
+						struct model_shader_reference)->shader.index : NONE;
+
+				if (shader_tag != NONE &&
+					((struct shader *)shader_definition_get(shader_tag))->base.type != SHADER_TYPE_MODEL)
+				{
+					clear_parts[clear_count++] = part;
+				}
+			}
 		}
 	}
 	made->tag_index = tag_index;
@@ -647,7 +720,7 @@ static struct saber_model *saber_model_new(
 	vertices = (struct model_vertex_compressed *)made->vertices;
 	for (made_index = 0; made_index < template_->part_count; made_index++)
 	{
-		struct saber_mesh_part const *source = &template_->parts[order[made_index]];
+		struct saber_mesh_part const *source = &template_->parts[made_index];
 		struct model_geometry_part *part = &made->parts[made_index];
 		struct model_vertex_uncompressed *scaled = malloc(sizeof(*scaled) * ((size_t)source->vertex_count + 1));
 		long strip_count;
@@ -656,7 +729,7 @@ static struct saber_model *saber_model_new(
 		*reason = "out of memory";
 		if (!scaled)
 			goto refused;
-		part->shader_index = shader_indices[order[made_index]];
+		part->shader_index = shader_indices[made_index];
 		part->previous_part_index = NONE;
 		part->next_part_index = NONE;
 		part->centroid_primary_node_weight = 1.f;
@@ -692,18 +765,67 @@ static struct saber_model *saber_model_new(
 		vertices += source->vertex_count;
 		strips += strip_count;
 	}
-	for (level = 0; level < level_count; level++)
+	/* its geometries: of each rank, each level's parts of every rank and of
+	that one, and the map's transparent parts */
+	made->geometry_parts = malloc(sizeof(*made->geometry_parts) *
+		((size_t)MAXIMUM_PARTS_PER_MODEL_GEOMETRY * (size_t)level_count * (size_t)made->rank_count + 1));
+	*reason = "out of memory";
+	if (!made->geometry_parts)
+		goto refused;
+	for (rank_index = 0; rank_index < made->rank_count; rank_index++)
 	{
-		long end = level + 1 < level_count ? first[level + 1] : made->part_count;
+		short rank = made->ranks[rank_index];
 
-		made->geometries[level].parts.count = end - first[level];
-		made->geometries[level].parts.address = made->parts + first[level];
-		made->geometries[level].parts.definition = NULL;
+		if (rank == _saber_rank_minor)
+			default_rank = rank_index;
+		for (level = 0; level < level_count; level++)
+		{
+			struct model_geometry *geometry = &made->geometries[rank_index * level_count + level];
+			long first = geometry_part_count;
+			long index;
+
+			for (part_index = 0; part_index < made->part_count; part_index++)
+			{
+				struct saber_mesh_part const *source = &template_->parts[part_index];
+
+				if (MIN(source->lod, 4) != levels[level] ||
+					(source->rank != _saber_rank_all && source->rank != rank) ||
+					geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+				{
+					continue;
+				}
+				made->geometry_parts[geometry_part_count++] = made->parts[part_index];
+			}
+			for (index = 0; index < clear_count && geometry_part_count - first < MAXIMUM_PARTS_PER_MODEL_GEOMETRY;
+				index++)
+			{
+				struct model_geometry_part *part = &made->geometry_parts[geometry_part_count++];
+
+				*part = *clear_parts[index];
+				part->previous_part_index = NONE;
+				part->next_part_index = NONE;
+			}
+			geometry->parts.count = geometry_part_count - first;
+			geometry->parts.address = made->geometry_parts + first;
+			geometry->parts.definition = NULL;
+		}
 	}
-	made->geometry_count = level_count;
-	made->model.geometries.count = level_count;
+	made->geometry_count = level_count * made->rank_count;
+	made->model.geometries.count = made->geometry_count;
 	made->model.geometries.address = made->geometries;
 	made->model.geometries.definition = NULL;
+	/* (Halo's permutations the least rank's, saber_models_geometry_index
+	another's) */
+	for (part_index = 0; part_index < next; part_index++)
+	{
+		long detail;
+
+		for (detail = 0; detail < 5; detail++)
+		{
+			if (made->permutations[part_index].geometry_indices[detail] != NONE)
+				made->permutations[part_index].geometry_indices[detail] += (short)(default_rank * level_count);
+		}
+	}
 
 	return made;
 
@@ -953,10 +1075,12 @@ static boolean shader_plug(
 }
 
 /* the package's colour-change mask of the texture `texture_name` (its
-"_mpmask", else its "_br"), of the most detail there is, or FALSE */
+"_mpmask", else, if `banded`, its "_br"), of the most detail there is, or
+FALSE */
 static boolean mask_find(
 	struct saber_pak *pak,
 	char const *texture_name,
+	boolean banded,
 	struct saber_texture *mask)
 {
 	struct saber_pak *paks[3];
@@ -970,7 +1094,7 @@ static boolean mask_find(
 	types[1] = _saber_entry_textures;
 	paks[2] = pak;
 	types[2] = _saber_entry_textures_mips64;
-	for (suffix = 0; suffix < 2; suffix++)
+	for (suffix = 0; suffix < (banded ? 2 : 1); suffix++)
 	{
 		char name[96];
 
@@ -1032,12 +1156,14 @@ static boolean mask_set_put(
 Elite's rank), masked as the package's "_mpmask" or "_br" texture masks it:
 its shader's multipurpose map the masks, each at its material's
 permutation (a material with none, a mask of nothing). Nothing if the
-classic shader has no colour change. */
+classic shader has no colour change. (A "_br" only if `banded`: not for a
+template whose ranks have meshes and textures of their own, an Elite's.) */
 static void material_mask_play(
 	struct saber_pak *pak,
 	long shader_tag,
 	char const *texture_name,
-	long permutation)
+	long permutation,
+	boolean banded)
 {
 	struct shader_model_definition *shader = (struct shader_model_definition *)shader_definition_get(shader_tag);
 	struct saber_shader const *played;
@@ -1059,7 +1185,7 @@ static void material_mask_play(
 	/* (a bitmap that is a base map's too is left as it is) */
 	if (set && !set->masks)
 		return;
-	found = mask_find(pak, texture_name, &mask);
+	found = mask_find(pak, texture_name, banded, &mask);
 	if (!found && !set)
 		return;
 	if (!set)
@@ -1102,8 +1228,9 @@ would draw solid: such parts are left out */
 static boolean material_effect(
 	char const *material)
 {
+	/* (and an energy shield's: a Jackal's, whose own the map's model draws) */
 	return !strncmp(material, "sfx_", 4) || !strncmp(material, "lig_", 4) || !strncmp(material, "fx_", 3) ||
-		strstr(material, "digits") != NULL;
+		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8);
 }
 
 /* the template's parts less those of effects and of no material, and past
@@ -1130,21 +1257,32 @@ static void template_effects_remove(
 	}
 	template_->part_count = kept;
 	{
-		long level_parts[5] = { 0, 0, 0, 0, 0 };
+		/* (at each level, every rank's and each rank's own together) */
+		long level_parts[5][NUMBER_OF_SABER_RANKS];
 
+		csmemset(level_parts, 0, sizeof(level_parts));
 		kept = 0;
 		for (index = 0; index < template_->part_count; index++)
 		{
 			struct saber_mesh_part *part = &template_->parts[index];
 			long level = MIN(part->lod, 4);
+			long rank = part->rank > 0 && part->rank < NUMBER_OF_SABER_RANKS ? part->rank : _saber_rank_all;
+			long count = level_parts[level][_saber_rank_all];
+			long other;
 
-			if (level_parts[level] >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+			for (other = 1; other < NUMBER_OF_SABER_RANKS; other++)
+			{
+				if (rank == _saber_rank_all || other == rank)
+					count = MAX(count, level_parts[level][_saber_rank_all] + level_parts[level][other]);
+			}
+			if (count >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
 			{
 				free(part->vertices);
 				free(part->triangles);
 				continue;
 			}
-			level_parts[level]++;
+			part->rank = (short)rank;
+			level_parts[level][rank]++;
 			template_->parts[kept++] = *part;
 		}
 		template_->part_count = kept;
@@ -1157,13 +1295,13 @@ from that part's (c_uplink__h carries crates of a scene 69 metres off) */
 static void template_strays_remove(
 	struct saber_template *template_)
 {
-	real_point3d middles[MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5];
-	real radii[MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5];
+	real_point3d middles[MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5 * NUMBER_OF_SABER_RANKS];
+	real radii[MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5 * NUMBER_OF_SABER_RANKS];
 	long largest = NONE;
 	long kept = 0;
 	long index;
 
-	if (template_->part_count > MAXIMUM_PARTS_PER_MODEL_GEOMETRY * 5)
+	if (template_->part_count > (long)NUMBEROF(middles))
 		return;
 	for (index = 0; index < template_->part_count; index++)
 	{
@@ -1693,6 +1831,99 @@ static boolean template_find(
 	return FALSE;
 }
 
+/* The ranks' meshes of the template's "_special" template (an Elite's spec
+ops', stealth's and zealots') posed as the template is, put among its own:
+those of a rank it has none of. */
+static void template_specials_merge(
+	struct saber_pak *pak,
+	struct saber_template *template_,
+	char const *template_name,
+	struct model const *model,
+	real scale)
+{
+	struct saber_template special;
+	char name[160];
+	long entry;
+	unsigned long size = 0;
+	unsigned char *bytes;
+	char const *reason;
+	boolean read;
+	long matched = 0;
+	long posed = 0;
+	long unposed = 0;
+	long merged = 0;
+	long index;
+	/* (the ranks the template has of its own) */
+	boolean had[NUMBER_OF_SABER_RANKS];
+
+	csmemset(had, 0, sizeof(had));
+	for (index = 0; index < template_->part_count; index++)
+	{
+		if (template_->parts[index].rank > 0 && template_->parts[index].rank < NUMBER_OF_SABER_RANKS)
+			had[template_->parts[index].rank] = TRUE;
+	}
+	snprintf(name, sizeof(name), "%s_special", template_name);
+	entry = saber_pak_find(pak, name, _saber_entry_templates);
+	if (entry == NONE)
+		return;
+	bytes = saber_pak_read(pak, entry, &size);
+	csmemset(&special, 0, sizeof(special));
+	read = bytes && saber_template_read(&special, bytes, size, saber_pak_xbox360(pak), &reason);
+	if (bytes)
+		free(bytes);
+	if (!read)
+	{
+		saber_template_dispose(&special);
+		return;
+	}
+	template_effects_remove(&special);
+	/* (by its own skeleton, else the template's scale) */
+	skeleton_scale(&special, model, &scale);
+	template_nodes_map(&special, model, scale, &matched, &posed, &unposed);
+	parts_face_halo(&special);
+	for (index = 0; index < special.part_count; index++)
+	{
+		struct saber_mesh_part *part = &special.parts[index];
+		struct saber_mesh_part *parts;
+		long material;
+
+		if (part->rank == _saber_rank_all || part->material_index < 0 || part->material_index >= special.material_count)
+			continue;
+		if (part->rank < 0 || part->rank >= NUMBER_OF_SABER_RANKS || had[part->rank])
+			continue;
+		for (material = 0; material < template_->material_count &&
+			strcmp(template_->materials[material], special.materials[part->material_index]); material++)
+		{
+		}
+		if (material == template_->material_count)
+		{
+			char (*materials)[64];
+
+			if (template_->material_count >= 255)
+				continue;
+			materials = realloc(template_->materials, sizeof(*materials) * ((size_t)template_->material_count + 1));
+			if (!materials)
+				continue;
+			template_->materials = materials;
+			memcpy(materials[material], special.materials[part->material_index], sizeof(materials[material]));
+			template_->material_count++;
+		}
+		parts = realloc(template_->parts, sizeof(*parts) * ((size_t)template_->part_count + 1));
+		if (!parts)
+			continue;
+		template_->parts = parts;
+		parts[template_->part_count] = *part;
+		parts[template_->part_count].material_index = (short)material;
+		template_->part_count++;
+		part->vertices = NULL;
+		part->triangles = NULL;
+		merged++;
+	}
+	if (merged)
+		platform_log("anniversary: %s's ranks with %ld parts of %s", template_name, merged, name);
+	saber_template_dispose(&special);
+}
+
 /* Draws the map's model `tag_index` as the package's template of it, if it
 has one: its textures read and its model made before any of the map's tags
 are played over, so that one that cannot be drawn is the map's as it was.
@@ -1724,7 +1955,6 @@ static boolean model_play(
 	long usable_count = 0;
 	long material_count = 0;
 	long shader_count = 0;
-	long level_parts[5] = { 0, 0, 0, 0, 0 };
 	real scale;
 	long matched_bones = 0;
 	long posed_vertices = 0;
@@ -1740,17 +1970,6 @@ static boolean model_play(
 	csmemset(&template_, 0, sizeof(template_));
 	if (!template_find(pak, tag_get_name(tag_index), map_name, &template_, template_name, sizeof(template_name)))
 		return FALSE;
-	shader_indices = malloc(sizeof(*shader_indices) * ((size_t)template_.part_count + 1));
-	if (!shader_indices)
-		goto refused;
-	for (index = 0; index < template_.part_count; index++)
-		level_parts[MIN(template_.parts[index].lod, 4)]++;
-	reason = "a level of detail of its template has more parts than a model's geometry can";
-	for (index = 0; index < 5; index++)
-	{
-		if (level_parts[index] > MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
-			goto refused;
-	}
 	/* (the renderer skins a part of a map's model by the model's nodes, at
 	most so many) */
 	reason = "the map's model has more nodes than its parts are drawn with";
@@ -1767,6 +1986,11 @@ static boolean model_play(
 	}
 	template_nodes_map(&template_, definition, scale, &matched_bones, &posed_vertices, &unposed_vertices);
 	parts_face_halo(&template_);
+	template_specials_merge(pak, &template_, template_name, definition, scale);
+	shader_indices = malloc(sizeof(*shader_indices) * ((size_t)template_.part_count + 1));
+	reason = "out of memory";
+	if (!shader_indices)
+		goto refused;
 	if (posed_vertices)
 	{
 		platform_log("anniversary: %s's bones: %ld of %ld are the model's nodes; %ld vertices posed by them, %ld not",
@@ -1993,14 +2217,16 @@ static boolean model_play(
 		if (material < template_.material_count)
 		{
 			material_mask_play(pak, model_shader_tag(definition, material_shaders[index]),
-				template_.materials[material], material_permutations[index]);
+				template_.materials[material], material_permutations[index], made->rank_count <= 1);
 		}
 	}
 	*definition = made->model;
 	made->next = saber_models_globals.models;
 	saber_models_globals.models = made;
-	platform_log("anniversary: %s drawn as the template %s (%ld parts, %ld levels of detail)",
-		tag_get_name(tag_index), template_name, made->part_count, made->geometry_count);
+	if (made->rank_count > 1)
+		saber_models_globals.ranked_count++;
+	platform_log("anniversary: %s drawn as the template %s (%ld parts, %ld levels of detail, %ld ranks)",
+		tag_get_name(tag_index), template_name, made->part_count, made->level_count, made->rank_count);
 	saber_template_dispose(&template_);
 	free(shader_indices);
 
@@ -2096,6 +2322,7 @@ void saber_models_tags_loaded(
 void saber_models_tags_unloaded(
 	int give_back)
 {
+	saber_models_globals.ranked_count = 0;
 	while (saber_models_globals.models)
 	{
 		struct saber_model *made = saber_models_globals.models;
@@ -2127,6 +2354,84 @@ void saber_models_tags_unloaded(
 			saber_texture_dispose(&bitmap->textures[index]);
 		free(bitmap);
 	}
+}
+
+/* the rank an object is drawn as, by its colour (its first change colour,
+of its actor variant's): blue minor, red major, dark spec ops, gold a
+zealot's; the least, else */
+static short object_rank(
+	long object_index)
+{
+	struct object_datum *object = object_index == NONE ? NULL : object_try_and_get(object_index);
+	real_rgb_color const *color;
+	real high;
+	real low;
+
+	if (!object)
+		return _saber_rank_minor;
+	color = &object->object.base_change_colors[0];
+	high = MAX(color->red, MAX(color->green, color->blue));
+	low = MIN(color->red, MIN(color->green, color->blue));
+	if (high < 0.3f)
+		return _saber_rank_spec_ops;
+	if (high - low < 0.25f * high)
+		return high < 0.5f ? _saber_rank_spec_ops : _saber_rank_minor;
+	if (color->blue >= high)
+		return _saber_rank_minor;
+	if (color->red >= high)
+	{
+		if (color->green < 0.35f * color->red)
+			return _saber_rank_major;
+		/* (a Grunt minor's orange is gold too: a model of no zealots draws
+		it the least rank's) */
+		return _saber_rank_commander;
+	}
+
+	return _saber_rank_minor;
+}
+
+short saber_models_geometry_index(
+	struct model const *model,
+	long object_index,
+	short geometry_index)
+{
+	struct saber_model const *made;
+
+	if (!saber_models_globals.ranked_count || geometry_index == NONE)
+		return geometry_index;
+	for (made = saber_models_globals.models; made; made = made->next)
+	{
+		short rank;
+		long rank_index;
+		long chosen = NONE;
+
+		if (made->rank_count <= 1 || model->geometries.address != made->geometries ||
+			geometry_index < 0 || geometry_index >= made->geometry_count)
+		{
+			continue;
+		}
+		/* (a rank it has none of drawn as the nearest it has: stealth as
+		spec ops, either as the least, any other as the least) */
+		rank = object_rank(object_index);
+		while (chosen == NONE)
+		{
+			for (rank_index = 0; rank_index < made->rank_count && made->ranks[rank_index] != rank; rank_index++)
+			{
+			}
+			if (rank_index < made->rank_count)
+				chosen = rank_index;
+			else if (rank == _saber_rank_spec_ops)
+				rank = _saber_rank_stealth;
+			else if (rank != _saber_rank_minor)
+				rank = _saber_rank_minor;
+			else
+				chosen = 0;
+		}
+
+		return (short)(chosen * made->level_count + geometry_index % made->level_count);
+	}
+
+	return geometry_index;
 }
 
 int saber_bitmaps_contain(

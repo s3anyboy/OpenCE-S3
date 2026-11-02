@@ -25,6 +25,19 @@ enum
 	_saber_entry_templates = 12,
 };
 
+/* the ranks a template's mesh can be of (an Elite's "metal_major", a
+Grunt's "back_minor"): none (every rank's), or one of them */
+enum
+{
+	_saber_rank_all = 0,
+	_saber_rank_minor,
+	_saber_rank_major,
+	_saber_rank_spec_ops,
+	_saber_rank_stealth,
+	_saber_rank_commander,
+	NUMBER_OF_SABER_RANKS
+};
+
 /* (saber_lzx_decompress's errors) */
 #define SABER_LZX_ERROR_ARGUMENTS (-1)
 #define SABER_LZX_ERROR_DATA (-2)
@@ -50,6 +63,8 @@ struct saber_mesh_part
 	short material_index;
 	/* its level of detail (0 the most detailed) */
 	short lod;
+	/* the rank it is drawn for (_saber_rank_all: every one) */
+	short rank;
 };
 
 struct saber_template
@@ -156,5 +171,10 @@ void saber_models_tags_unloaded(int give_back);
 package's texture, its pixels put in buffer */
 int saber_bitmaps_read(struct bitmap_data *bitmap, void *buffer);
 int saber_bitmaps_contain(struct bitmap_data const *bitmap);
+struct model;
+/* (models.c, render_model_parts) the geometry of a model drawn as a
+template that the object `object_index` is drawn with: its rank's (by its
+colour), of the geometry `geometry_index` Halo chose */
+short saber_models_geometry_index(struct model const *model, long object_index, short geometry_index);
 
 #endif

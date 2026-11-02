@@ -721,15 +721,30 @@ static void node_world_transform(
 	}
 }
 
-/* whether a node, or a node it is under, is a rank's variant that is not
-the least's (an Elite's or a Grunt's "_major", "officer" ...: Halo draws its
-ranks as one model of their colours, so the minor's mesh alone is drawn) */
-static boolean node_rank_variant(
+/* the rank a node, or the nearest node it is under that is of one, is
+drawn for (an Elite's "metal_major", a Grunt's "back_minor": Saber3D draws
+each rank as meshes of its own), or _saber_rank_all */
+static short node_rank(
 	struct template_walk const *walk,
 	struct template_node const *node)
 {
-	static char const *const ranks[] = { "major", "officer", "special", "spec_ops", "specops", "zealot", "stealth",
-		"ultra", "commander", "honor" };
+	static struct
+	{
+		char const *word;
+		short rank;
+	} const ranks[] = {
+		{ "minor", _saber_rank_minor },
+		{ "major", _saber_rank_major },
+		{ "officer", _saber_rank_major },
+		{ "special", _saber_rank_spec_ops },
+		{ "spec_ops", _saber_rank_spec_ops },
+		{ "specops", _saber_rank_spec_ops },
+		{ "stealth", _saber_rank_stealth },
+		{ "zealot", _saber_rank_commander },
+		{ "ultra", _saber_rank_commander },
+		{ "commander", _saber_rank_commander },
+		{ "honor", _saber_rank_commander },
+	};
 	long depth;
 
 	for (depth = 0; node && depth < MAXIMUM_NODE_DEPTH; depth++)
@@ -742,13 +757,13 @@ static boolean node_rank_variant(
 		name[length] = 0;
 		for (rank = 0; rank < (long)NUMBEROF(ranks); rank++)
 		{
-			if (strstr(name, ranks[rank]))
-				return TRUE;
+			if (strstr(name, ranks[rank].word))
+				return ranks[rank].rank;
 		}
 		node = node->parent_id == NONE ? NULL : node_of_id(walk, node->parent_id);
 	}
 
-	return FALSE;
+	return _saber_rank_all;
 }
 
 /* the inverse of a 4x4 row-major matrix (Gauss-Jordan); FALSE if it has
@@ -1075,6 +1090,10 @@ static boolean mesh_read(
 	unsigned char const *blend_weights = NULL;
 	long blend_count = 0;
 	long blend_slots[256];
+	struct template_node const *blend_nodes[256];
+	/* (a skin compound's vertex is in the space of the bone it names: the
+	bone whose space the transform is now, NONE the mesh's) */
+	long transform_bone = NONE;
 	long index;
 
 	*reason = "a mesh is not as a template's is";
@@ -1082,7 +1101,7 @@ static boolean mesh_read(
 		return TRUE;
 	vertex_count = (long)read_u32(bytes + node->positions.start);
 	triangle_count = (long)read_u32(bytes + node->triangles.start);
-	if (vertex_count <= 0 || triangle_count <= 0 || node_rank_variant(walk, node))
+	if (vertex_count <= 0 || triangle_count <= 0)
 		return TRUE;
 	if (vertex_count > 0x100000 || triangle_count > 0x100000 ||
 		(unsigned long)triangle_count * 6 > node->triangles.end - node->triangles.start - 4)
@@ -1142,6 +1161,7 @@ static boolean mesh_read(
 			{
 				struct template_node const *blended = node_of_id(walk, first_id + index);
 
+				blend_nodes[index] = blended;
 				blend_slots[index] = blended ? bone_slot(template_, walk, blended) : NONE;
 			}
 			if (block_find(bytes, node->blend.start, node->blend.end, _block_blend_weights, &weights) &&
@@ -1240,6 +1260,24 @@ static boolean mesh_read(
 			point.x = read_real(bytes + data + 12 * index);
 			point.y = read_real(bytes + data + 12 * index + 4);
 			point.z = read_real(bytes + data + 12 * index + 8);
+		}
+		/* (a skin compound's, of no weights, is a copy of a mesh put in the
+		space of the bone its first index names, as a warthog's four tires
+		are one tire four times) */
+		if (blend_indices && !blend_weights)
+		{
+			long bone = blend_indices[4 * index] < blend_count && blend_nodes[blend_indices[4 * index]] ?
+				(long)blend_indices[4 * index] : NONE;
+
+			if (bone != transform_bone)
+			{
+				if (bone == NONE)
+					node_world_transform(walk, node, transform);
+				else
+					node_world_transform(walk, blend_nodes[bone], transform);
+				normal_transform(transform, normals);
+				transform_bone = bone;
+			}
 		}
 		world.x = point.x * transform[0] + point.y * transform[4] + point.z * transform[8] + transform[12];
 		world.y = point.x * transform[1] + point.y * transform[5] + point.z * transform[9] + transform[13];
@@ -1449,6 +1487,7 @@ static boolean mesh_read(
 			csmemset(part, 0, sizeof(*part));
 			part->material_index = submesh_material[index];
 			part->lod = node->lod;
+			part->rank = node_rank(walk, node);
 			part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
 			part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
 			template_->part_count++;

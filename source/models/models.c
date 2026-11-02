@@ -87,6 +87,7 @@ symbols in this file:
 #include "cache/cache_files.h"
 #include "rasterizer/rasterizer_transparent_geometry.h"
 #include "model_detail.h" /* port: port/linux/game/model_detail.c */
+#include "saber.h" /* port: port/linux/game/saber_models.c */
 
 /* ---------- constants */
 
@@ -320,6 +321,9 @@ static void render_model_parts(
 				/* port: the level display.model_detail chooses for the permutation
 				(port/linux/game/model_detail.c): stock, the model's */
 				geometry_index = model_detail_geometry_index(model, permutation, geometry_detail_level_index, detail_rules);
+				/* port: an Anniversary model's geometry of the object's rank
+				(port/linux/game/saber_models.c) */
+				geometry_index = saber_models_geometry_index(model, object_index, geometry_index);
 				if (geometry_index!=NONE && !VALID_INDEX(geometry_index, model->geometries.count))
 				{
 					model_data_error(model, "geometry");

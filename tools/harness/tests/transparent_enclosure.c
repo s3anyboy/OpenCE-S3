@@ -36,6 +36,7 @@ static real sphere[6][8] = {{-.22f,0,.7f},{.22f,0,.7f},{0,-.22f,.7f},{0,.22f,.7f
 #define shader_type_is_valid_for_model(t) ((t)>=_shader_type_model)
 #define shader_get_and_verify_type(s,t) (s)
 #define model_data_error(m,e) ((void)0)
+#define saber_models_geometry_index(m,o,g) (g)
 #define render_model_no_geometry FALSE
 #define matrix4x3_transform_point(m,p,o) (*(o)=*(p))
 #define rasterizer_model_draw(s,p,t,ti,tc,v,vi) (selected_geometry[solid_draws++] = (v)->count)
