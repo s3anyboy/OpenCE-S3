@@ -427,6 +427,22 @@ static void render_model_parts(
 							}
 							else if (pass==_render_model_pass_solid)
 							{
+								/* port: a package leaf card is alpha tested and drawn
+								from both sides, though its shader is one an opaque
+								material shares (saber_models_part_cutout) */
+								if (shader->base.type==_shader_type_model &&
+									saber_models_part_cutout(
+										shader_reference->shader.index,
+										forced_shader_permutation_index ?
+											forced_shader_permutation_index :
+											shader_reference->permutation_index))
+								{
+									struct shader_model_definition *model_shader;
+
+									model_shader = (struct shader_model_definition *)shader;
+									SET_FLAG(model_shader->flags, _shader_model_not_alpha_tested_bit, FALSE);
+									SET_FLAG(model_shader->flags, _shader_model_two_sided_bit, TRUE);
+								}
 								if (TEST_FLAG(flags, _render_model_shadow_bit))
 								{
 									rasterizer_environment_shadow_model_draw(

@@ -194,5 +194,8 @@ struct model;
 template that the object `object_index` is drawn with: its rank's (by its
 colour), of the geometry `geometry_index` Halo chose */
 short saber_models_geometry_index(struct model const *model, long object_index, short geometry_index);
+/* (models.c) whether the shader's base map at `permutation` is a package
+texture cut out by its alpha, drawn alpha tested and from both sides */
+int saber_models_part_cutout(long shader_tag, short permutation);
 
 #endif

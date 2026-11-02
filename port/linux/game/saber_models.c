@@ -1272,6 +1272,17 @@ static boolean material_foliage(
 	return FALSE;
 }
 
+/* whether a material is a leaf card (or a far tree's flat stand-in), whose
+texture's alpha is the card's shape. A trunk's bark is not: its name has
+neither of these, and an empty alpha is filled in so the trunk stays */
+static boolean material_card(
+	char const *material)
+{
+	return strstr(material, "branch") != NULL || strstr(material, "leaf") != NULL ||
+		strstr(material, "needle") != NULL || strstr(material, "frond") != NULL ||
+		strstr(material, "foliage") != NULL || strstr(material, "farplane") != NULL;
+}
+
 /* the template's parts less those of effects and of no material, and past
 the most a model's geometry has at a level of detail (let go of) */
 static void template_effects_remove(
@@ -1296,8 +1307,8 @@ static void template_effects_remove(
 	}
 	template_->part_count = kept;
 	/* (and a far plane's stand-ins, a tree's flat cards of itself seen from
-	afar, drawn opaque about it close to: unless they are all it has, a
-	sapling's leaves and trunk) */
+	afar: unless they are all it has, a sapling's leaves and trunk, in which
+	case their texture's alpha cuts them out) */
 	{
 		boolean others = FALSE;
 
@@ -2245,7 +2256,8 @@ static boolean model_play(
 		if (played && other < played->count)
 		{
 			material_permutations[place] = (short)other;
-			material_cutouts[place] = played->cutouts[other];
+			material_cutouts[place] = played->cutouts[other] ||
+				material_card(template_.materials[material]) ? TRUE : FALSE;
 			continue;
 		}
 		existing = played ? played->count : 0;
@@ -2272,6 +2284,11 @@ static boolean model_play(
 		}
 		material_cutouts[place] = saber_texture_cutout(material_textures[place],
 			material_foliage(template_.materials[material])) ? TRUE : FALSE;
+		/* (a leaf card stays cut out by its alpha even when too little of it
+		is solid for the test. Filling that alpha in draws the card's
+		background, the whole quad) */
+		if (!material_cutouts[place] && material_card(template_.materials[material]))
+			material_cutouts[place] = TRUE;
 		/* (one that is not cut out drawn whole, though its shader be alpha
 		tested for another's) */
 		if (!material_cutouts[place])
@@ -2700,7 +2717,8 @@ static boolean saber_level_play(
 			else
 			{
 				slots[material] = (short)saber_level.texture_count++;
-				if (!saber_texture_cutout(texture, material_foliage(level.materials[material])))
+				if (!saber_texture_cutout(texture, material_foliage(level.materials[material])) &&
+					!material_card(level.materials[material]))
 					saber_texture_make_solid(texture);
 			}
 		}
@@ -2710,7 +2728,8 @@ static boolean saber_level_play(
 			continue;
 		}
 		made->texture = slots[material];
-		made->cutout = saber_texture_cutout(&saber_level.textures[made->texture], TRUE) ? TRUE : FALSE;
+		made->cutout = material_card(level.materials[material]) ||
+			saber_texture_cutout(&saber_level.textures[made->texture], TRUE) ? TRUE : FALSE;
 		made->lit_bsp = NONE;
 		vertices_size += (unsigned long)part->vertex_count * (unsigned long)compressed_size +
 			(unsigned long)part->triangle_count * 6 * sizeof(word);
@@ -2999,6 +3018,25 @@ static short object_rank(
 	}
 
 	return _saber_rank_minor;
+}
+
+int saber_models_part_cutout(
+	long shader_tag,
+	short permutation)
+{
+	struct shader const *shader;
+	struct saber_bitmap const *played;
+
+	if (shader_tag == NONE || permutation < 0)
+		return FALSE;
+	shader = shader_definition_get(shader_tag);
+	if (!shader || shader->base.type != SHADER_TYPE_MODEL)
+		return FALSE;
+	played = bitmap_played_get(((struct shader_model_definition const *)shader)->model.base_map.index);
+	if (!played || permutation >= played->count || permutation >= MAXIMUM_SABER_BITMAP_TEXTURES)
+		return FALSE;
+
+	return played->cutouts[permutation] ? TRUE : FALSE;
 }
 
 short saber_models_geometry_index(
