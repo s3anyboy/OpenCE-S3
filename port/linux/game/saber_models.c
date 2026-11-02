@@ -1437,9 +1437,11 @@ static void template_effects_remove(
 }
 
 /* the template's parts less those far from the rest (let go of): a
-part's middle, or a skin compound's bone, more than four times the size of
-the template's largest part from that part's (c_uplink__h carries crates
-of a scene 69 metres off) */
+part's middle, or a skin compound's bone, more than four times the reach of
+the part that spreads furthest, from that part's middle. Measured from the
+part with the most vertices, a pelican's pilot (a metre across) let the
+hull go, fourteen metres off. c_uplink__h's crates sit 69 metres off its
+station, past four times the station's reach */
 static void template_strays_remove(
 	struct saber_template *template_)
 {
@@ -1475,7 +1477,7 @@ static void template_strays_remove(
 		middles[index].z = (low.z + high.z) / 2.f;
 		vector_from_points3d(&low, &high, &across);
 		radii[index] = magnitude3d(&across) / 2.f;
-		if (largest == NONE || part->vertex_count > template_->parts[largest].vertex_count)
+		if (largest == NONE || radii[index] > radii[largest])
 			largest = index;
 	}
 	if (largest == NONE || radii[largest] <= 0.f)
