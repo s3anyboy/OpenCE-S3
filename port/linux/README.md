@@ -1651,7 +1651,8 @@ models are drawn, in what units, and why any is not.
 
 Which models: every model of the map's objects that has a template (the
 level's structure is not one), found by the model's name (its last folder, as `pistol` for
-`weapons\pistol\pistol`, `pistol_fp` for its first-person model, with `__h`,
+`weapons\pistol\pistol`, `pistol_fp` for its first-person model on the Xbox 360,
+and `pistol` again for that model in the Master Chief Collection, with `__h`,
 the map's name or another kind, as `light_fixture_floor1_b30__h` or
 `tree_leafy__tree`). A template's effects (muzzle flashes, lights' cones,
 overshields, a Jackal's energy shield, which the map's model draws as it

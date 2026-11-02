@@ -10,7 +10,8 @@ objects': the structure is no model, and is left as it is), and each that
 has one is drawn as it, textured with the package's textures.
 
 A model's template is found by the model's name (template_find): its last
-folder, "weapons\pistol\pistol" pistol, "weapons\pistol\fp\fp" pistol_fp,
+folder, "weapons\pistol\pistol" pistol, "weapons\pistol\fp\fp" pistol_fp
+on the Xbox 360 and pistol in the Master Chief Collection,
 "weapons\needler\projectile\projectile" needler_projectile, as it is or
 with "__h", the map's name ("light_fixture_floor1_b30__h") or another
 "__" kind ("tree_leafy__tree"), the first that has a mesh. Its effects'
@@ -1850,12 +1851,28 @@ static void parts_face_halo(
 	}
 }
 
+/* a model's tag is a weapon's ("weapons\\pistol\\pistol",
+"weapons\\pistol\\fp\\fp") */
+static boolean weapon_model(
+	char const *name)
+{
+	while (name && *name)
+	{
+		if (!_strnicmp(name, "weapons\\", 8) || !_strnicmp(name, "weapons/", 8))
+			return TRUE;
+		name++;
+	}
+
+	return FALSE;
+}
+
 /* the package's template of a model of the map, by the model's name: its
 last folder (or, for a first-person model, its folder's, "_fp"), lower
 case with underscores for spaces, as it is or followed by "__h" or another
 "__" kind, or by the map's name and those ("light_fixture_floor1_b30__h").
-The first that has a mesh, read (*template_name its name); FALSE when none
-has */
+The Collection's first-person weapon is the weapon's own template (pistol,
+not pistol_fp). The first that has a mesh, read (*template_name its name);
+FALSE when none has */
 static boolean template_find(
 	struct saber_pak *pak,
 	char const *model_name,
@@ -1873,7 +1890,7 @@ static boolean template_find(
 	long count = saber_pak_entry_count(pak);
 
 	/* (its last folder: "weapons\\pistol\\pistol" pistol, "...\\pistol\\fp\\fp"
-	pistol_fp) */
+	pistol_fp, or pistol in the Collection's packages) */
 	start = end;
 	while (start > model_name && start[-1] != '\\')
 		start--;
@@ -1893,7 +1910,11 @@ static boolean template_find(
 		}
 		length = MIN((size_t)(folder_end - folder), sizeof(base) - 4);
 		memcpy(base, folder, length);
-		strcpy(base + length, "_fp");
+		base[length] = 0;
+		/* (a character's hands are cyborg_fp either way; a 360 weapon's
+		first-person model is pistol_fp, and the Collection's is pistol) */
+		if (saber_pak_xbox360(pak) || !weapon_model(model_name))
+			strcpy(base + length, "_fp");
 	}
 	else if (!_stricmp(start, "projectile") && start > model_name)
 	{
