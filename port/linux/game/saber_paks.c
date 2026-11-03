@@ -1470,18 +1470,16 @@ static real unit_short(
 
 /* where a vertex's texture coordinates are in its data, by the data's
 size (Reclaimer's), or -1. `format` is the four bytes before the stride.
-Two level layouts keep them elsewhere than a template of that size: the
-sand's 20-byte vertices (0x200043c2) at 12 rather than 16, and the
+One level layout keeps them elsewhere than a template of that size: the
 cliff's 44-byte vertices (0x2003dfde) at 16 rather than 28. Read from
-the other place, a beach chart spans a fraction of the texture and the
-cliff one texel. A template's own 20-byte vertices are 0x2000c646 and
-stay at 16. */
+28, the cliff is one texel. The beach's 20-byte vertices (0x200043c2)
+stay at 16, the ordinary place for that size: the pair at 12 is a line,
+its v one value, and the sand was that one row of its texture. A
+template's own 20-byte vertices are 0x2000c646 and stay at 16 too. */
 static long texcoord_offset(
 	long size,
 	unsigned long format)
 {
-	if (size == 20 && format == 0x200043c2UL)
-		return 12;
 	if (size == 44 && format == 0x2003dfdeUL)
 		return 16;
 	switch (size)
