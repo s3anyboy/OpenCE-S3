@@ -959,19 +959,6 @@ static void node_read(
 				}
 			}
 		}
-		/* (a weapon's SkinCompound_1 is the whole mesh, _2 and _3 that mesh
-		with fewer triangles, the same shape. The digit is its level, _1
-		the most detailed. Drawn together they are the lowest, the one
-		that covers the others) */
-		for (index = (long)block.start; index + 14 <= (long)name_end; index++)
-		{
-			if (!memcmp(bytes + index, "SkinCompound_", 13) &&
-				bytes[index + 13] >= '1' && bytes[index + 13] <= '9')
-			{
-				node->lod = (short)(bytes[index + 13] - '1');
-				break;
-			}
-		}
 		node->parent_id = NONE;
 		node->source_id = NONE;
 		if (block.end - name_end >= 18)
@@ -2558,6 +2545,172 @@ int saber_level_geometry_read(
 	return template_blocks_read(template_, bytes, size, &root, xbox360, TRUE, reason);
 }
 
+/* a skin compound's vertices and the box they sit in (its compressed
+positions' translation and scale, or the plain positions' own) */
+static boolean compound_bounds(
+	struct template_walk const *walk,
+	struct template_node const *node,
+	long *vertices,
+	real *low,
+	real *high)
+{
+	unsigned char const *bytes = walk->bytes;
+	long count;
+	unsigned long data;
+	long axis;
+
+	if (node->positions.end - node->positions.start < 4)
+		return FALSE;
+	count = (long)read_u32(bytes + node->positions.start);
+	if (count <= 0 || count > 0x100000)
+		return FALSE;
+	data = node->positions.start + 4;
+	if (node->has_mesh_flags && TEST_FLAG(node->mesh_flags, _mesh_compressed_bit))
+	{
+		short packed[6];
+
+		if (node->positions.end - data < 12)
+			return FALSE;
+		for (axis = 0; axis < 6; axis++)
+			packed[axis] = read_short(bytes + data + 2 * (unsigned long)axis);
+		for (axis = 0; axis < 3; axis++)
+		{
+			real scale = (real)packed[axis + 3];
+
+			if (scale < 0.f)
+				scale = -scale;
+			low[axis] = (real)packed[axis] - scale;
+			high[axis] = (real)packed[axis] + scale;
+		}
+	}
+	else
+	{
+		long index;
+
+		if ((unsigned long)count * 12 > node->positions.end - data)
+			return FALSE;
+		for (axis = 0; axis < 3; axis++)
+		{
+			low[axis] = read_real(bytes + data + 4 * axis);
+			high[axis] = low[axis];
+		}
+		for (index = 1; index < count; index++)
+		{
+			for (axis = 0; axis < 3; axis++)
+			{
+				real value = read_real(bytes + data + 12 * (unsigned long)index + 4 * (unsigned long)axis);
+
+				if (value < low[axis])
+					low[axis] = value;
+				if (value > high[axis])
+					high[axis] = value;
+			}
+		}
+	}
+	*vertices = count;
+
+	return TRUE;
+}
+
+/* two compounds of one mesh: each side within a quarter of the longer,
+and the middles that close. A weapon's lower detail is the same gun; a
+pelican's hull and its glass are not */
+static boolean box_same_shape(
+	real const *low_a,
+	real const *high_a,
+	real const *low_b,
+	real const *high_b)
+{
+	long axis;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		real sa = high_a[axis] - low_a[axis];
+		real sb = high_b[axis] - low_b[axis];
+		real longer = sa > sb ? sa : sb;
+		real side = sa > sb ? sa - sb : sb - sa;
+		real middle = (low_a[axis] + high_a[axis]) - (low_b[axis] + high_b[axis]);
+
+		if (middle < 0.f)
+			middle = -middle;
+		middle /= 2.f;
+		if (longer < 1.f)
+			longer = 1.f;
+		if (side > longer / 4.f || middle > longer / 4.f)
+			return FALSE;
+	}
+
+	return TRUE;
+}
+
+/* a weapon's SkinCompound_2 is SkinCompound_1 with fewer triangles, the
+same gun, and drawn together the coarser one covers the other. A pelican's
+compounds are the pieces of the ship, and drawing one of them leaves it
+the glass. The fullest compound is the model when it is at least half of
+them; a copy of its box with seven tenths of the vertices or fewer is the
+next level, and the rest of the pieces stay with the fullest */
+static void skin_compound_lods(
+	struct template_walk *walk)
+{
+	struct template_node *nodes[64];
+	long vertices[64];
+	real low[64][3];
+	real high[64][3];
+	long count = 0;
+	long total = 0;
+	long richest = 0;
+	long index;
+	long level;
+	long previous;
+
+	for (index = 0; index < walk->node_count && count < (long)NUMBEROF(nodes); index++)
+	{
+		struct template_node *node = &walk->nodes[index];
+
+		if (!node->name_length || node->lod != 0 ||
+			!memmem_name(walk->bytes + node->name_start, node->name_length, "SkinCompound_"))
+		{
+			continue;
+		}
+		if (!compound_bounds(walk, node, &vertices[count], low[count], high[count]))
+			continue;
+		nodes[count] = node;
+		total += vertices[count];
+		if (vertices[count] > vertices[richest])
+			richest = count;
+		count++;
+	}
+	if (count < 2 || vertices[richest] * 2 < total)
+		return;
+	previous = vertices[richest];
+	level = 0;
+	for (;;)
+	{
+		long next = NONE;
+		long next_vertices = 0;
+
+		for (index = 0; index < count; index++)
+		{
+			if (nodes[index]->lod != 0 || index == richest)
+				continue;
+			if (!box_same_shape(low[richest], high[richest], low[index], high[index]))
+				continue;
+			if (vertices[index] * 10 > previous * 7)
+				continue;
+			if (next == NONE || vertices[index] > next_vertices)
+			{
+				next = index;
+				next_vertices = vertices[index];
+			}
+		}
+		if (next == NONE || level >= 4)
+			break;
+		level++;
+		nodes[next]->lod = (short)level;
+		previous = next_vertices;
+	}
+}
+
 /* a template of the blocks in `root` (a template's, or a level's whole
 geometry, of the same blocks at its top) */
 static int template_blocks_read(
@@ -2616,6 +2769,7 @@ static int template_blocks_read(
 		free(walk.nodes);
 		return FALSE;
 	}
+	skin_compound_lods(&walk);
 	for (index = 0; index < walk.node_count; index++)
 	{
 		if (!mesh_read(template_, &walk, &walk.nodes[index], xbox360 ? TRUE : FALSE, reason))
