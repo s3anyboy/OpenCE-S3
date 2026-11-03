@@ -1623,6 +1623,15 @@ static boolean material_glass(
 	return strstr(material, "glass") != NULL;
 }
 
+/* a material whose alpha is its shape: a decal, dirt, a grate. A shaded
+alpha on one of these stays a cutout; on a solid part it does not */
+static boolean material_punched(
+	char const *material)
+{
+	return strstr(material, "alpha") != NULL || strstr(material, "decal") != NULL ||
+		strstr(material, "dirt") != NULL || strstr(material, "grate") != NULL;
+}
+
 /* the marine's green eyepiece. It hangs from the helmet heads and the plain
 one, not from the capped sergeant (Marcus, Johnson), and not from the body */
 static boolean material_monicle(
@@ -2705,6 +2714,18 @@ static boolean model_play(
 		background, the whole quad) */
 		if (!material_cutouts[place] && material_card(template_.materials[material]))
 			material_cutouts[place] = TRUE;
+		/* (the pelican's seats and bay: the texture is a shade, clear and
+		solid enough to be taken for a cutout, and testing it discards most
+		of the mesh. Filled in, the metal stays. A leaf, a decal, dirt or a
+		grate keeps the holes) */
+		if (material_cutouts[place] &&
+			!material_card(template_.materials[material]) &&
+			!material_foliage(template_.materials[material]) &&
+			!material_punched(template_.materials[material]) &&
+			saber_texture_shaded_alpha(material_textures[place]))
+		{
+			material_cutouts[place] = FALSE;
+		}
 		/* (a window keeps its alpha and is blended. Filling it in draws the
 		pane solid, and the map's glass over it) */
 		if (material_glass(template_.materials[material]))

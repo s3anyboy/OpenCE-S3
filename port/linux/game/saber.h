@@ -164,6 +164,10 @@ and many solid), which is drawn alpha tested; not a texture whose alpha is
 another mask, all low or all high; `foliage`, a texture named as leaves
 or branches are, whose soft edges leave less of it solid) */
 int saber_texture_cutout(struct saber_texture const *texture, int foliage);
+/* whether a texture's alpha is a shade across the picture rather than
+holes in it: at least as many texels sit between clear and solid as are
+solid. Drawn tested, the shaded faces are discarded */
+int saber_texture_shaded_alpha(struct saber_texture const *texture);
 /* the colour-change mask of a package's texture entry (a "_mpmask", one
 channel, or a "_br", whose first channel differs from its background where
 its armour is: `banded`), made a texture of Halo's multipurpose map: DXT1,
