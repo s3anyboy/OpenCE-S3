@@ -1527,6 +1527,22 @@ static void vertex_basis(
 	normalize3d(&vertex->binormal);
 }
 
+/* qsort's order for the beach's texture-edge lengths */
+static int compare_reals(
+	void const *left,
+	void const *right)
+{
+	real a = *(real const *)left;
+	real b = *(real const *)right;
+
+	if (a < b)
+		return -1;
+	if (a > b)
+		return 1;
+
+	return 0;
+}
+
 /* the mesh of a node made Halo's parts, each submesh's (of at most
 MAXIMUM_PART_TRIANGLES triangles each); FALSE when it is not a mesh that
 can be */
@@ -1568,6 +1584,12 @@ static boolean mesh_read(
 	long submesh_count[MAXIMUM_SUBMESHES];
 	short submesh_material[MAXIMUM_SUBMESHES];
 	long submesh_total = 0;
+	/* (a beach patch names no tile, so its coordinates cover the patch
+	once and the sand is one smudge. This is the repeat that gives it the
+	terrain's grain, 0 until it is measured. The median is that repeat's
+	raw density, and an edge many times the median is a wedge) */
+	real beach_repeat = 0.f;
+	real beach_median = 0.f;
 	long rigid_slot;
 	unsigned char const *blend_indices = NULL;
 	unsigned char const *blend_weights = NULL;
@@ -2140,6 +2162,162 @@ static boolean mesh_read(
 		triangles[3 * index + 1] = triangles[3 * index + 2];
 		triangles[3 * index + 2] = swap;
 	}
+	/* (the rocket launcher's barrel is two rings the length of the weapon
+	apart, and its texture coordinate runs from one ring to the other
+	straight across the atlas, through the gaps between the pictures.
+	Each gap is drawn as a dark ring around the barrel. The barrel's own
+	picture is the strip down the right of its texture. A triangle that
+	long, whose coordinate sweeps one axis and holds the other, is put on
+	that strip: around the barrel across the strip, along the barrel down
+	it. The flat parts of the weapon, whose triangles are short, are left) */
+	if (!walk->level && uv_offset >= 0 && vertex_count > 0 && triangle_count > 0)
+	{
+		boolean rocket = FALSE;
+		long scan;
+
+		for (scan = 0; scan < submesh_total; scan++)
+		{
+			short material = submesh_material[scan];
+
+			if (material >= 0 && material < template_->material_count &&
+				strstr(template_->materials[material], "rocket_launcher_04"))
+			{
+				rocket = TRUE;
+				break;
+			}
+		}
+		if (rocket)
+		{
+			unsigned char *wall = malloc((size_t)vertex_count);
+
+			if (wall)
+			{
+				real u_along_min = 1.f;
+				real u_along_max = 0.f;
+				real u_around_min = 1.f;
+				real u_around_max = 0.f;
+				real v_along_min = 1.f;
+				real v_along_max = 0.f;
+				real v_around_min = 1.f;
+				real v_around_max = 0.f;
+
+				csmemset(wall, 0, (size_t)vertex_count);
+				for (index = 0; index < triangle_count; index++)
+				{
+					long corner[3];
+					long edge;
+					long far0 = 0;
+					long far1 = 1;
+					real longest = 0.f;
+					real shortest = 1e30f;
+					real du;
+					real dv;
+
+					corner[0] = triangles[3 * index];
+					corner[1] = triangles[3 * index + 1];
+					corner[2] = triangles[3 * index + 2];
+					for (edge = 0; edge < 3; edge++)
+					{
+						long from = corner[edge];
+						long to = corner[(edge + 1) % 3];
+						real dx = vertices[to].position.x - vertices[from].position.x;
+						real dy = vertices[to].position.y - vertices[from].position.y;
+						real dz = vertices[to].position.z - vertices[from].position.z;
+						real len = dx * dx + dy * dy + dz * dz;
+
+						if (len > longest)
+						{
+							longest = len;
+							far0 = from;
+							far1 = to;
+						}
+						if (len < shortest)
+							shortest = len;
+					}
+					du = vertices[far1].texcoord.x - vertices[far0].texcoord.x;
+					dv = vertices[far1].texcoord.y - vertices[far0].texcoord.y;
+					if (du < 0.f)
+						du = -du;
+					if (dv < 0.f)
+						dv = -dv;
+					if (shortest > 0.f && longest > shortest * 40.f &&
+						((du > 0.04f && dv < 0.02f) || (dv > 0.04f && du < 0.02f)))
+					{
+						unsigned char kind = (unsigned char)(du >= dv ? 1 : 2);
+
+						for (edge = 0; edge < 3; edge++)
+						{
+							if (wall[corner[edge]] == 0)
+								wall[corner[edge]] = kind;
+						}
+					}
+				}
+				for (index = 0; index < vertex_count; index++)
+				{
+					real u = vertices[index].texcoord.x;
+					real v = vertices[index].texcoord.y;
+
+					if (wall[index] == 1)
+					{
+						if (u < u_along_min)
+							u_along_min = u;
+						if (u > u_along_max)
+							u_along_max = u;
+						if (v < u_around_min)
+							u_around_min = v;
+						if (v > u_around_max)
+							u_around_max = v;
+					}
+					else if (wall[index] == 2)
+					{
+						if (v < v_along_min)
+							v_along_min = v;
+						if (v > v_along_max)
+							v_along_max = v;
+						if (u < v_around_min)
+							v_around_min = u;
+						if (u > v_around_max)
+							v_around_max = u;
+					}
+				}
+				for (index = 0; index < vertex_count; index++)
+				{
+					real along;
+					real around;
+					real along_min;
+					real along_span;
+					real around_min;
+					real around_span;
+
+					if (wall[index] == 1)
+					{
+						along = vertices[index].texcoord.x;
+						around = vertices[index].texcoord.y;
+						along_min = u_along_min;
+						along_span = u_along_max - u_along_min;
+						around_min = u_around_min;
+						around_span = u_around_max - u_around_min;
+					}
+					else if (wall[index] == 2)
+					{
+						along = vertices[index].texcoord.y;
+						around = vertices[index].texcoord.x;
+						along_min = v_along_min;
+						along_span = v_along_max - v_along_min;
+						around_min = v_around_min;
+						around_span = v_around_max - v_around_min;
+					}
+					else
+						continue;
+					vertices[index].texcoord.y = along_span > 0.02f ?
+						0.22f + (along - along_min) / along_span * 0.70f : 0.55f;
+					vertices[index].texcoord.x = around_span > 0.01f ?
+						0.920f + (around - around_min) / around_span * 0.045f : 0.942f;
+				}
+				free(wall);
+			}
+		}
+	}
 
 	/* (with no normals of its own, its faces') */
 	if (!TEST_FLAG(flags, _mesh_normals_bit))
@@ -2201,6 +2379,56 @@ static boolean mesh_read(
 	for (index = 0; index < vertex_count; index++)
 		vertex_basis(&vertices[index], &tangents[index]);
 
+	/* (a beach patch names no tile, unlike the rest of the terrain. Its
+	coordinates cover the patch once, so one copy of the sand is smeared
+	across it, and each patch by a different amount, which is the torn
+	edge between them. The repeat is whatever gives the patch the terrain's
+	grain, about three world units a copy. A patch that already tiles is
+	left to its tile) */
+	if (walk->level && !node->has_uv_decompress && uv_offset >= 0 && triangle_count > 8 &&
+		memmem_name(bytes + node->name_start, node->name_length, "terrain"))
+	{
+		real *ratios = malloc(sizeof(*ratios) * 3 * (size_t)triangle_count);
+		long ratio_count = 0;
+
+		if (ratios)
+		{
+			for (index = 0; index < triangle_count; index++)
+			{
+				long edge;
+
+				for (edge = 0; edge < 3; edge++)
+				{
+					struct model_vertex_uncompressed const *from = &vertices[triangles[3 * index + edge]];
+					struct model_vertex_uncompressed const *to =
+						&vertices[triangles[3 * index + (edge + 1) % 3]];
+					real dx = to->position.x - from->position.x;
+					real dy = to->position.y - from->position.y;
+					real dz = to->position.z - from->position.z;
+					real du = to->texcoord.x - from->texcoord.x;
+					real dv = to->texcoord.y - from->texcoord.y;
+					real world = square_root(dx * dx + dy * dy + dz * dz);
+					real length = square_root(du * du + dv * dv);
+
+					if (world > 0.5f && length > 0.f)
+						ratios[ratio_count++] = length / world;
+				}
+			}
+			if (ratio_count > 6)
+			{
+				qsort(ratios, (size_t)ratio_count, sizeof(*ratios), compare_reals);
+				beach_median = ratios[ratio_count / 2];
+				if (beach_median > 0.0002f && beach_median < 0.2f)
+				{
+					beach_repeat = 0.3f / beach_median;
+					if (beach_repeat > 96.f)
+						beach_repeat = 96.f;
+				}
+			}
+			free(ratios);
+		}
+	}
+
 	/* each submesh's parts, of their vertices alone */
 	*reason = "out of memory";
 	for (index = 0; index < submesh_total; index++)
@@ -2240,6 +2468,11 @@ static boolean mesh_read(
 				part->uv_offset[0] = node->uv_shift[0];
 				part->uv_offset[1] = node->uv_shift[1];
 			}
+			else if (beach_repeat != 0.f)
+			{
+				part->uv_scale[0] = beach_repeat;
+				part->uv_scale[1] = beach_repeat;
+			}
 			part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
 			part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
 			template_->part_count++;
@@ -2259,6 +2492,28 @@ static boolean mesh_read(
 					vertex[corner] = triangles[3 * first + 3 * triangle + corner];
 					if (empty[vertex[corner]])
 						drop = TRUE;
+				}
+				/* (an edge many times the patch's usual texture density runs
+				off its chart and draws the sand as a striped wedge) */
+				if (!drop && beach_median > 0.f)
+				{
+					long edge;
+
+					for (edge = 0; edge < 3; edge++)
+					{
+						struct model_vertex_uncompressed const *from = &vertices[vertex[edge]];
+						struct model_vertex_uncompressed const *to = &vertices[vertex[(edge + 1) % 3]];
+						real dx = to->position.x - from->position.x;
+						real dy = to->position.y - from->position.y;
+						real dz = to->position.z - from->position.z;
+						real du = to->texcoord.x - from->texcoord.x;
+						real dv = to->texcoord.y - from->texcoord.y;
+						real world = square_root(dx * dx + dy * dy + dz * dz);
+						real length = square_root(du * du + dv * dv);
+
+						if (world > 0.5f && length > world * beach_median * 8.f)
+							drop = TRUE;
+					}
 				}
 				if (drop)
 					continue;
