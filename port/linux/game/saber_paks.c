@@ -1554,6 +1554,9 @@ static boolean mesh_read(
 	unsigned short *triangles;
 	real_vector3d *tangents;
 	long *remap;
+	/* (a chunk's spare vertex: the origin, and no texture. A triangle on it
+	is a wedge across the beach) */
+	unsigned char *empty;
 	real transform[16];
 	real normals[9];
 	real_point3d translation = { 0.f, 0.f, 0.f };
@@ -1843,7 +1846,8 @@ static boolean mesh_read(
 	triangles = malloc(sizeof(*triangles) * 3 * (size_t)triangle_count);
 	tangents = malloc(sizeof(*tangents) * (size_t)vertex_count);
 	remap = malloc(sizeof(*remap) * (size_t)vertex_count);
-	if (!vertices || !triangles || !tangents || !remap)
+	empty = malloc((size_t)vertex_count);
+	if (!vertices || !triangles || !tangents || !remap || !empty)
 	{
 		if (vertices)
 			free(vertices);
@@ -1853,8 +1857,11 @@ static boolean mesh_read(
 			free(tangents);
 		if (remap)
 			free(remap);
+		if (empty)
+			free(empty);
 		return FALSE;
 	}
+	csmemset(empty, 0, (size_t)vertex_count);
 
 	/* its vertices, in Halo's axes */
 	node_world_transform(walk, node, transform);
@@ -1866,11 +1873,14 @@ static boolean mesh_read(
 		real_vector3d normal = { 0.f, 0.f, 0.f };
 		real_point3d world;
 		real_vector3d world_normal;
+		boolean blank_corner = FALSE;
 
 		if (TEST_FLAG(flags, _mesh_compressed_bit))
 		{
 			unsigned char const *packed = bytes + data + 8 * index;
 
+			blank_corner = read_short(packed) == 0 && read_short(packed + 2) == 0 &&
+				read_short(packed + 4) == 0;
 			point.x = unit_short(read_short(packed)) * scale.x + translation.x;
 			point.y = unit_short(read_short(packed + 2)) * scale.y + translation.y;
 			point.z = unit_short(read_short(packed + 4)) * scale.z + translation.z;
@@ -1940,6 +1950,7 @@ static boolean mesh_read(
 			free(triangles);
 			free(tangents);
 			free(remap);
+			free(empty);
 			return FALSE;
 		}
 		if (uv_offset >= 0)
@@ -1948,6 +1959,10 @@ static boolean mesh_read(
 
 			vertex->texcoord.x = unit_short(xbox360 ? read_short_big(uv) : read_short(uv));
 			vertex->texcoord.y = unit_short(xbox360 ? read_short_big(uv + 2) : read_short(uv + 2));
+			/* (the beach's chunks end on a vertex at the origin with no
+			texture. A triangle there stretches the sand into a wedge) */
+			if (walk->level && blank_corner && vertex->texcoord.x == 0.f && vertex->texcoord.y == 0.f)
+				empty[index] = 1;
 			/* (a level mesh's repeat is the shader's map scale, applied as
 			the texture is sampled. Folded in here, a beach's tile of a few
 			hundred is clamped to -1..1 by the renderer and every triangle
@@ -2232,18 +2247,41 @@ static boolean mesh_read(
 				goto failed;
 			for (triangle = 0; triangle < vertex_count; triangle++)
 				remap[triangle] = NONE;
-			for (triangle = 0; triangle < 3 * part_triangles; triangle++)
+			part->triangle_count = 0;
+			for (triangle = 0; triangle < part_triangles; triangle++)
 			{
-				long vertex = triangles[3 * first + triangle];
+				long corner;
+				long vertex[3];
+				boolean drop = FALSE;
 
-				if (remap[vertex] == NONE)
+				for (corner = 0; corner < 3; corner++)
 				{
-					remap[vertex] = part->vertex_count;
-					part->vertices[part->vertex_count++] = vertices[vertex];
+					vertex[corner] = triangles[3 * first + 3 * triangle + corner];
+					if (empty[vertex[corner]])
+						drop = TRUE;
 				}
-				part->triangles[triangle] = (unsigned short)remap[vertex];
+				if (drop)
+					continue;
+				for (corner = 0; corner < 3; corner++)
+				{
+					if (remap[vertex[corner]] == NONE)
+					{
+						remap[vertex[corner]] = part->vertex_count;
+						part->vertices[part->vertex_count++] = vertices[vertex[corner]];
+					}
+					part->triangles[3 * part->triangle_count + corner] = (unsigned short)remap[vertex[corner]];
+				}
+				part->triangle_count++;
 			}
-			part->triangle_count = part_triangles;
+			if (part->triangle_count == 0)
+			{
+				free(part->vertices);
+				free(part->triangles);
+				template_->part_count--;
+				first += part_triangles;
+				count -= part_triangles;
+				continue;
+			}
 			first += part_triangles;
 			count -= part_triangles;
 		}
@@ -2252,6 +2290,7 @@ static boolean mesh_read(
 	free(triangles);
 	free(tangents);
 	free(remap);
+	free(empty);
 
 	return TRUE;
 
@@ -2260,6 +2299,7 @@ skip_mesh:
 	free(triangles);
 	free(tangents);
 	free(remap);
+	free(empty);
 
 	return TRUE;
 
@@ -2268,6 +2308,7 @@ failed:
 	free(triangles);
 	free(tangents);
 	free(remap);
+	free(empty);
 
 	return FALSE;
 }
