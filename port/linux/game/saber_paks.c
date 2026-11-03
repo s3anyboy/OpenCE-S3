@@ -2964,9 +2964,14 @@ int saber_texture_read(
 	return TRUE;
 }
 
-int saber_texture_cutout(
+/* how many texels are clear (alpha below 64) and solid (foliage: above
+128, otherwise above 192). FALSE when the texture is not one this counts */
+static int texture_alpha_counts(
 	struct saber_texture const *texture,
-	int foliage)
+	int foliage,
+	long *clear_count,
+	long *solid_count,
+	long *texel_count)
 {
 	long block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
 	long blocks = (long)(texture->width / 4) * (long)(texture->height / 4);
@@ -3034,9 +3039,46 @@ int saber_texture_cutout(
 		}
 	}
 
+	*clear_count = clear;
+	*solid_count = solid;
+	*texel_count = blocks * 16;
+
+	return TRUE;
+}
+
+int saber_texture_cutout(
+	struct saber_texture const *texture,
+	int foliage)
+{
+	long clear;
+	long solid;
+	long texels;
+
 	/* (a twentieth clear and a fifth solid, at least; foliage's a tenth
 	more than half solid, its leaves' edges soft) */
-	return clear * 20 >= blocks * 16 && solid * (foliage ? 10 : 5) >= blocks * 16;
+	if (!texture_alpha_counts(texture, foliage, &clear, &solid, &texels))
+		return FALSE;
+
+	return clear * 20 >= texels && solid * (foliage ? 10 : 5) >= texels;
+}
+
+int saber_texture_shaded_alpha(
+	struct saber_texture const *texture)
+{
+	long clear;
+	long solid;
+	long texels;
+	long middle;
+
+	/* (a silhouette's edge is the thin band between clear and solid. A
+	shade laid across the picture, the pelican bay's, has at least as
+	many texels in that band as it has solid, and cutting it out drops
+	the faces that land there) */
+	if (!texture_alpha_counts(texture, FALSE, &clear, &solid, &texels))
+		return FALSE;
+	middle = texels - clear - solid;
+
+	return middle >= solid;
 }
 
 /* a 565 colour's blue of a value 0 to 255 */
