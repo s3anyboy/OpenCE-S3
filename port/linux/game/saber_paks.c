@@ -1707,6 +1707,51 @@ static boolean mesh_read(
 				uv_offset = 8;
 			}
 		}
+		/* (a 20-byte vertex of this format keeps the texture twelve bytes
+		in and a tangent at sixteen. The tangent's u runs below zero, so a
+		crate and the plasma rifle were wrapped on it. A trunk's texture is
+		the pair at sixteen and its u stays positive) */
+		if (uv_offset == 16 && vertex_size == 20 && vertex_count > 0 &&
+			read_u32(bytes + source->vertex_data.start + 8) == 0x2000C646UL)
+		{
+			real min_u = 1.f;
+			real max_u = -1.f;
+			real min_v = 1.f;
+			real max_v = -1.f;
+			real min_u2 = 1.f;
+			long inside = 0;
+			long inside_tangent = 0;
+			long scan;
+
+			for (scan = 0; scan < vertex_count; scan++)
+			{
+				unsigned char const *uv = bytes + vertex_data_start + (unsigned long)vertex_size * (unsigned long)scan;
+				real u = unit_short(xbox360 ? read_short_big(uv + 12) : read_short(uv + 12));
+				real v = unit_short(xbox360 ? read_short_big(uv + 14) : read_short(uv + 14));
+				real u2 = unit_short(xbox360 ? read_short_big(uv + 16) : read_short(uv + 16));
+				real v2 = unit_short(xbox360 ? read_short_big(uv + 18) : read_short(uv + 18));
+
+				if (u < min_u)
+					min_u = u;
+				if (u > max_u)
+					max_u = u;
+				if (v < min_v)
+					min_v = v;
+				if (v > max_v)
+					max_v = v;
+				if (u2 < min_u2)
+					min_u2 = u2;
+				if (u >= -0.02f && u <= 1.02f && v >= -0.02f && v <= 1.02f)
+					inside++;
+				if (u2 >= -0.02f && u2 <= 1.02f && v2 >= -0.02f && v2 <= 1.02f)
+					inside_tangent++;
+			}
+			if (min_u2 < -0.15f && min_v >= -0.05f && max_v <= 1.05f &&
+				max_u - min_u > 0.02f && max_v - min_v > 0.02f && inside > inside_tangent)
+			{
+				uv_offset = 12;
+			}
+		}
 	}
 
 	/* the bones it moves with: its own node's, or each vertex's blend of the
