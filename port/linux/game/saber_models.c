@@ -1403,6 +1403,10 @@ static boolean shader_plug(
 	SET_FLAG(shader->model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, TRUE);
 	shader->model.detail_mask = 0;
 	shader->model.reflection_cube_map.index = NONE;
+	/* (the classic value lights the back of a face as the front is lit.
+	An anniversary interior's faces point inward, so the sun outside
+	lit the bay; the texture is already its own shade) */
+	shader->model.translucency = 0.f;
 
 	return TRUE;
 }
