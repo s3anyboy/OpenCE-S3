@@ -1907,10 +1907,11 @@ static boolean mesh_read(
 	}
 
 	/* (an MCC mesh with no compression parameters whose coordinates sit in
-	the half square: a warthog's hull, stored at half the range, so the
-	body samples a corner of its texture. Twice the coordinate covers the
-	texture. A mesh that already spans the square, the gun and the tires,
-	is left) */
+	the half square: a warthog's hull, a marine's capped head, stored at
+	half the range, so the face samples the hair at the corner of its
+	texture. Twice the coordinate covers the texture. A few of the head's
+	eyes reach just past a half, and a mesh that already spans the square,
+	the gun and the tires and Johnson's head, is left) */
 	if (uv_offset >= 0 && !node->has_uv_decompress && !walk->level && vertex_count > 0)
 	{
 		long inside = 0;
@@ -1930,7 +1931,7 @@ static boolean mesh_read(
 				inside++;
 		}
 		if (inside * 10 >= vertex_count * 9 && max_u > 0.35f && max_v > 0.35f &&
-			max_u <= 0.51f && max_v <= 0.51f)
+			max_u <= 0.56f && max_v <= 0.56f)
 		{
 			for (index = 0; index < vertex_count; index++)
 			{
