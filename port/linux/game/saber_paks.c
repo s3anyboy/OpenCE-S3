@@ -1142,10 +1142,15 @@ static short node_rank(
 
 		memcpy(name, walk->bytes + node->name_start, length);
 		name[length] = 0;
-		for (rank = 0; rank < (long)NUMBEROF(ranks); rank++)
+		/* (a marine's eyepiece is named for a commander, and it is not one:
+		the word would make every marine that rank's, and the eyepiece his) */
+		if (!strstr(name, "monicle"))
 		{
-			if (strstr(name, ranks[rank].word))
-				return ranks[rank].rank;
+			for (rank = 0; rank < (long)NUMBEROF(ranks); rank++)
+			{
+				if (strstr(name, ranks[rank].word))
+					return ranks[rank].rank;
+			}
 		}
 		node = node->parent_id == NONE ? NULL : node_of_id(walk, node->parent_id);
 	}

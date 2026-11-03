@@ -623,6 +623,10 @@ static long head_key_index(
 	return NONE;
 }
 
+/* defined below, with the other material tests */
+static boolean material_monicle(struct saber_template const *template_, struct saber_mesh_part const *part);
+static boolean head_without_monicle(char const *key);
+
 /* The model the template makes of the map's model: the map's, its every
 permutation drawing the template's geometry (`shader_indices`, the shader
 each part is drawn with). NULL, with *reason saying why, when it cannot be
@@ -941,6 +945,7 @@ static struct saber_model *saber_model_new(
 				if (MIN(source->lod, 4) != levels[level] ||
 					(source->rank != _saber_rank_all && source->rank != rank) ||
 					(head_count && source->variant[0]) ||
+					material_monicle(template_, source) ||
 					geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
 				{
 					continue;
@@ -999,6 +1004,10 @@ static struct saber_model *saber_model_new(
 					{
 						continue;
 					}
+					/* (the eyepiece is its helmet's, and the plain head's.
+					The capped sergeant does not wear it) */
+					if (material_monicle(template_, source) && head_without_monicle(head_keys[which]))
+						continue;
 					made->geometry_parts[geometry_part_count++] = made->parts[part_index];
 				}
 				if (body_region == NONE)
@@ -1541,6 +1550,25 @@ static boolean material_card(
 	return strstr(material, "branch") != NULL || strstr(material, "leaf") != NULL ||
 		strstr(material, "needle") != NULL || strstr(material, "frond") != NULL ||
 		strstr(material, "foliage") != NULL || strstr(material, "farplane") != NULL;
+}
+
+/* the marine's green eyepiece. It hangs from the helmet heads and the plain
+one, not from the capped sergeant (Marcus, Johnson), and not from the body */
+static boolean material_monicle(
+	struct saber_template const *template_,
+	struct saber_mesh_part const *part)
+{
+	if (part->material_index < 0 || part->material_index >= template_->material_count)
+		return FALSE;
+
+	return strstr(template_->materials[part->material_index], "monicle") != NULL;
+}
+
+/* a capped head wears no eyepiece */
+static boolean head_without_monicle(
+	char const *key)
+{
+	return strstr(key, "marcus") != NULL || strstr(key, "johnson") != NULL;
 }
 
 /* the template's parts less those of effects and of no material, and past
