@@ -1581,6 +1581,10 @@ static boolean mesh_read(
 	long index;
 
 	*reason = "a mesh is not as a template's is";
+	/* (the green eyepiece. It hangs on the helmet heads, and it was still
+	drawn on the capped sergeant, so it is left out of the model) */
+	if (node->name_length && memmem_name(bytes + node->name_start, node->name_length, "monicle"))
+		return TRUE;
 	/* (a template's meshes of another's buffers are left out, as they were
 	before the level's were read: only a level's are drawn so) */
 	if (source != node && !walk->level)
