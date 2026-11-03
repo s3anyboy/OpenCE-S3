@@ -623,6 +623,30 @@ static long head_key_index(
 	return NONE;
 }
 
+/* a first-person model (weapons\pistol\fp\fp, the hands characters\cyborg\fp\fp).
+The view draws it with no size, so Halo's level comes out the lowest, and
+the template's most detailed is wanted there */
+static boolean model_is_first_person(
+	char const *name)
+{
+	long index;
+
+	if (!name)
+		return FALSE;
+	for (index = 0; name[index]; index++)
+	{
+		if ((name[index] == '\\' || name[index] == '/') &&
+			(name[index + 1] == 'f' || name[index + 1] == 'F') &&
+			(name[index + 2] == 'p' || name[index + 2] == 'P') &&
+			(name[index + 3] == '\\' || name[index + 3] == '/' || name[index + 3] == 0))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
 /* defined below, with the other material tests */
 static boolean material_monicle(struct saber_template const *template_, struct saber_mesh_part const *part);
 static boolean head_without_monicle(char const *key);
@@ -669,11 +693,13 @@ static struct saber_model *saber_model_new(
 	long head_count = 0;
 	long body_span;
 	long which;
+	boolean first_person;
 
 	*reason = "out of memory";
 	if (!made)
 		return NULL;
 	csmemset(made, 0, sizeof(*made));
+	first_person = model_is_first_person(tag_get_name(tag_index));
 	for (level = 0; level < 5; level++)
 	{
 		for (part_index = 0; part_index < template_->part_count; part_index++)
@@ -825,10 +851,13 @@ static struct saber_model *saber_model_new(
 
 			*permutation = *TAG_BLOCK_GET_ELEMENT(&map_region->permutations, permutation_index,
 				struct model_region_permutation);
-			/* (super high the template's most detailed, each lower Halo level
-			its next, and the rest its least. The body by the first region
-			that is not the head; a head by the permutation of its name,
-			"__base" when the name is not one of the template's) */
+			/* (a close model, Halo's highest level, the template's most
+			detailed, each lower level its next, and the rest its least.
+			A first-person model is drawn with no size, so that choice is
+			its lowest, and it is the most detailed at every level. The
+			body by the first region that is not the head; a head by the
+			permutation of its name, "__base" when the name is not one of
+			the template's) */
 			which = NONE;
 			if (head_count && region_index == head_region)
 			{
@@ -840,7 +869,7 @@ static struct saber_model *saber_model_new(
 			}
 			for (detail = 0; detail < 5; detail++)
 			{
-				short slot = (short)MIN(level_count - 1, 4 - detail);
+				short slot = first_person ? 0 : (short)MIN(level_count - 1, 4 - detail);
 
 				if (head_count && region_index == head_region)
 					permutation->geometry_indices[detail] = (short)(body_span + which * body_span + slot);

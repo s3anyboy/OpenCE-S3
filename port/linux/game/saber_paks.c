@@ -959,6 +959,19 @@ static void node_read(
 				}
 			}
 		}
+		/* (a weapon's SkinCompound_1 is the whole mesh, _2 and _3 that mesh
+		with fewer triangles, the same shape. The digit is its level, _1
+		the most detailed. Drawn together they are the lowest, the one
+		that covers the others) */
+		for (index = (long)block.start; index + 14 <= (long)name_end; index++)
+		{
+			if (!memcmp(bytes + index, "SkinCompound_", 13) &&
+				bytes[index + 13] >= '1' && bytes[index + 13] <= '9')
+			{
+				node->lod = (short)(bytes[index + 13] - '1');
+				break;
+			}
+		}
 		node->parent_id = NONE;
 		node->source_id = NONE;
 		if (block.end - name_end >= 18)
