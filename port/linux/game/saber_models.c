@@ -58,7 +58,8 @@ packages, from inplace1.ipak, inplace2.ipak, inplace2o.ipak and
 common.ipak in that folder, else its 64-pixel TexturesMips64), drawn
 without alpha testing. A glass is blended on its texture's alpha. The
 shader loses its multipurpose and reflection
-maps, which are the classic model's. A shader or bitmap another model has
+maps, which are the classic model's, and the reflection's brightness and
+tint, which are added on the texture. A shader or bitmap another model has
 too is drawn so for it as well. The map's model, shader and bitmap tags
 take the made definitions in place, and their own come back as the map
 goes.
@@ -1407,6 +1408,20 @@ static boolean shader_plug(
 	An anniversary interior's faces point inward, so the sun outside
 	lit the bay; the texture is already its own shade) */
 	shader->model.translucency = 0.f;
+	/* (the classic reflection is the classic cube, which this shader no
+	longer samples. Its colour is added on the texture, and a light
+	interior panel clips to white; the package's texture carries its
+	own highlight) */
+	shader->model.perpendicular_brightness = 0.f;
+	shader->model.parallel_brightness = 0.f;
+	csmemset(&shader->model.perpendicular_tint_color, 0,
+		sizeof(shader->model.perpendicular_tint_color));
+	csmemset(&shader->model.parallel_tint_color, 0,
+		sizeof(shader->model.parallel_tint_color));
+	/* (a period of zero makes the illumination fraction an infinity, and
+	zero bounds times that is not zero) */
+	if (shader->model.self_illumination_animation_period == 0.f)
+		shader->model.self_illumination_animation_period = 1.f;
 
 	return TRUE;
 }
