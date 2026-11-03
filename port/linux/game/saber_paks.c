@@ -1994,6 +1994,36 @@ static boolean mesh_read(
 			}
 		}
 	}
+	/* (a far tree's leaves share the trunk's texture: the bark fills its
+	left half and the foliage its right. Cards unwrapped on the left, a
+	sapling's, show the bark. Half a texture across, they show the foliage.
+	The trunk, which wraps the bark, is left) */
+	if (uv_offset >= 0 && vertex_count > 0 &&
+		memmem_name(bytes + node->name_start, node->name_length, "leave"))
+	{
+		boolean farplane = FALSE;
+		long scan;
+
+		for (scan = 0; scan < submesh_total; scan++)
+		{
+			short material = submesh_material[scan];
+
+			if (material >= 0 && material < template_->material_count &&
+				strstr(template_->materials[material], "farplane"))
+			{
+				farplane = TRUE;
+				break;
+			}
+		}
+		if (farplane)
+		{
+			for (scan = 0; scan < vertex_count; scan++)
+			{
+				if (vertices[scan].texcoord.x < 0.5f)
+					vertices[scan].texcoord.x += 0.5f;
+			}
+		}
+	}
 
 	/* its triangles, turned as Halo's front faces are: clockwise about the
 	normals the template gives */
