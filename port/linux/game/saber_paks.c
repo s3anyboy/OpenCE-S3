@@ -1649,6 +1649,55 @@ static boolean mesh_read(
 		{
 			uv_offset = -1;
 		}
+		/* (a 12-byte vertex of this format holds two pairs. A leaf card's
+		first is a line, one coordinate a single value, so the card shows
+		one texel row of its texture, the bark's edge or the leaf's black,
+		across the whole quad. The card is the next pair. A pair that
+		already covers its triangles, a jackal's shield, stays) */
+		if (uv_offset == 4 && vertex_size == 12 && vertex_count > 0 &&
+			read_u32(bytes + source->vertex_data.start + 8) == 0x20004242UL)
+		{
+			real min_u = 1.f;
+			real max_u = -1.f;
+			real min_v = 1.f;
+			real max_v = -1.f;
+			real min_u2 = 1.f;
+			real max_u2 = -1.f;
+			real min_v2 = 1.f;
+			real max_v2 = -1.f;
+			long scan;
+
+			for (scan = 0; scan < vertex_count; scan++)
+			{
+				unsigned char const *uv = bytes + vertex_data_start + (unsigned long)vertex_size * (unsigned long)scan + 4;
+				real u = unit_short(xbox360 ? read_short_big(uv) : read_short(uv));
+				real v = unit_short(xbox360 ? read_short_big(uv + 2) : read_short(uv + 2));
+				real u2 = unit_short(xbox360 ? read_short_big(uv + 4) : read_short(uv + 4));
+				real v2 = unit_short(xbox360 ? read_short_big(uv + 6) : read_short(uv + 6));
+
+				if (u < min_u)
+					min_u = u;
+				if (u > max_u)
+					max_u = u;
+				if (v < min_v)
+					min_v = v;
+				if (v > max_v)
+					max_v = v;
+				if (u2 < min_u2)
+					min_u2 = u2;
+				if (u2 > max_u2)
+					max_u2 = u2;
+				if (v2 < min_v2)
+					min_v2 = v2;
+				if (v2 > max_v2)
+					max_v2 = v2;
+			}
+			if ((max_u - min_u < 0.02f || max_v - min_v < 0.02f) &&
+				max_u2 - min_u2 > 0.02f && max_v2 - min_v2 > 0.02f)
+			{
+				uv_offset = 8;
+			}
+		}
 	}
 
 	/* the bones it moves with: its own node's, or each vertex's blend of the
