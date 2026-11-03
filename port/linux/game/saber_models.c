@@ -1593,23 +1593,54 @@ static void template_effects_remove(
 		template_->part_count = kept;
 	}
 	{
-		/* (at each level, every rank's and each rank's own together) */
-		long level_parts[5][NUMBER_OF_SABER_RANKS];
+		/* (at each level, every rank's and each rank's own together.
+		Each head permutation is geometries of its own, apart from the
+		body, so it is counted apart: counted together, a marine's eight
+		heads fill one geometry and the later heads, the plain one among
+		them, are let go) */
+		char variants[1 + MAXIMUM_SABER_HEAD_PERMUTATIONS][64];
+		long level_parts[5][1 + MAXIMUM_SABER_HEAD_PERMUTATIONS][NUMBER_OF_SABER_RANKS];
+		long variant_count;
+		long variant_index;
 
+		csmemset(variants, 0, sizeof(variants));
 		csmemset(level_parts, 0, sizeof(level_parts));
+		variant_count = 1;
 		kept = 0;
 		for (index = 0; index < template_->part_count; index++)
 		{
 			struct saber_mesh_part *part = &template_->parts[index];
 			long level = MIN(part->lod, 4);
 			long rank = part->rank > 0 && part->rank < NUMBER_OF_SABER_RANKS ? part->rank : _saber_rank_all;
-			long count = level_parts[level][_saber_rank_all];
+			long count;
 			long other;
 
+			variant_index = 0;
+			if (part->variant[0])
+			{
+				for (variant_index = 1; variant_index < variant_count; variant_index++)
+				{
+					if (!strcmp(variants[variant_index], part->variant))
+						break;
+				}
+				if (variant_index == variant_count)
+				{
+					if (variant_count >= (long)NUMBEROF(variants))
+					{
+						free(part->vertices);
+						free(part->triangles);
+						continue;
+					}
+					csstrncpy(variants[variant_count], part->variant, sizeof(variants[0]) - 1);
+					variant_count++;
+				}
+			}
+			count = level_parts[level][variant_index][_saber_rank_all];
 			for (other = 1; other < NUMBER_OF_SABER_RANKS; other++)
 			{
 				if (rank == _saber_rank_all || other == rank)
-					count = MAX(count, level_parts[level][_saber_rank_all] + level_parts[level][other]);
+					count = MAX(count, level_parts[level][variant_index][_saber_rank_all] +
+						level_parts[level][variant_index][other]);
 			}
 			if (count >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
 			{
@@ -1618,7 +1649,7 @@ static void template_effects_remove(
 				continue;
 			}
 			part->rank = (short)rank;
-			level_parts[level][rank]++;
+			level_parts[level][variant_index][rank]++;
 			template_->parts[kept++] = *part;
 		}
 		template_->part_count = kept;
