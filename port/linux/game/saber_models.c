@@ -38,7 +38,10 @@ nearest of the units templates are seen in.
 
 What is drawn changes, nothing else: the map's model keeps its nodes,
 markers and regions (what the machines of a network game agree on). Its
-first region's permutations draw the template, its others nothing. A
+first region's permutations draw the template, its others nothing, except
+a region named head: that draws the one head the permutation names (a
+marine's "head_charles_helmet-10" the template's head_charles_helmet_10),
+not every head at once. A
 template's meshes of a rank (an Elite's "metal_major", a Grunt's
 "back_major"; an Elite's spec ops' and zealots' in its "_special" template)
 are drawn for that rank alone, the rank of an object by its colour (blue
@@ -123,6 +126,9 @@ texture cache, which draws it among others) */
 most materials a template draws */
 #define MAXIMUM_SABER_BITMAP_TEXTURES 32
 #define MAXIMUM_SABER_MATERIALS 64
+/* a head region's permutations drawn of their own geometry (a marine's
+faces), besides the body */
+#define MAXIMUM_SABER_HEAD_PERMUTATIONS 16
 
 /* models.c's shader types and model flags */
 #define SHADER_TYPE_MODEL 4
@@ -255,8 +261,9 @@ struct saber_model
 	struct model_region *regions;
 	struct model_region_permutation *permutations;
 	/* a geometry of each of the template's levels of detail, for each rank
-	it is drawn for (those of the rank `ranks[0]` first, ...) */
-	struct model_geometry geometries[5 * NUMBER_OF_SABER_RANKS];
+	it is drawn for (those of the rank `ranks[0]` first, ...), and the
+	same again for each head permutation after the body's */
+	struct model_geometry geometries[5 * NUMBER_OF_SABER_RANKS * (1 + MAXIMUM_SABER_HEAD_PERMUTATIONS)];
 	long geometry_count;
 	long level_count;
 	long rank_count;
@@ -571,10 +578,56 @@ static void part_centroid_node(
 	part->centroid_secondary_node_index = (short)best;
 }
 
+/* a permutation's name as a template's head is named: lower case, a
+hyphen or a space an underscore ("head_charles_helmet-10" is
+head_charles_helmet_10) */
+static void variant_normalize(
+	char const *name,
+	char *out,
+	long out_size)
+{
+	long at = 0;
+
+	if (out_size <= 0)
+		return;
+	while (name[at] && at < out_size - 1)
+	{
+		char c = name[at];
+
+		if (c >= 'A' && c <= 'Z')
+			c = (char)(c - 'A' + 'a');
+		else if (c == '-' || c == ' ')
+			c = '_';
+		out[at] = c;
+		at++;
+	}
+	out[at] = 0;
+}
+
+/* which of `keys` is `name`, or NONE */
+static long head_key_index(
+	char keys[][64],
+	long count,
+	char const *name)
+{
+	char key[64];
+	long index;
+
+	variant_normalize(name, key, (long)sizeof(key));
+	for (index = 0; index < count; index++)
+	{
+		if (!strcmp(keys[index], key))
+			return index;
+	}
+
+	return NONE;
+}
+
 /* The model the template makes of the map's model: the map's, its every
 permutation drawing the template's geometry (`shader_indices`, the shader
 each part is drawn with). NULL, with *reason saying why, when it cannot be
-made. */
+made. A region named head draws one head, the permutation's, and the body
+is drawn by another region. */
 static struct saber_model *saber_model_new(
 	long tag_index,
 	struct model const *map_model,
@@ -604,6 +657,14 @@ static struct saber_model *saber_model_new(
 	struct model_geometry_part const *clear_parts[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
 	long clear_count = 0;
 	long geometry_part_count = 0;
+	/* a region named head, the template's heads (its nodes under one named
+	head), and the region that draws the body */
+	long head_region = NONE;
+	long body_region = 0;
+	char head_keys[MAXIMUM_SABER_HEAD_PERMUTATIONS][64];
+	long head_count = 0;
+	long body_span;
+	long which;
 
 	*reason = "out of memory";
 	if (!made)
@@ -687,7 +748,53 @@ static struct saber_model *saber_model_new(
 	made->model.base_map_scale.i = 1.f;
 	made->model.base_map_scale.j = 1.f;
 
-	/* the map's regions and permutations, every one of them the template */
+	/* a region named head draws one of the template's heads (the nodes
+	under one named head). The body is the other meshes, drawn by the
+	first region that is not the head, so the faces are not stacked */
+	body_span = level_count * made->rank_count;
+	for (region_index = 0; region_index < map_model->regions.count; region_index++)
+	{
+		struct model_region const *map_region = TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index,
+			struct model_region);
+
+		if (!_stricmp(map_region->name, "head"))
+			head_region = region_index;
+	}
+	if (head_region != NONE && level_count > 0)
+	{
+		for (part_index = 0; part_index < template_->part_count; part_index++)
+		{
+			char const *key = template_->parts[part_index].variant;
+			long other;
+
+			if (!key[0])
+				continue;
+			for (other = 0; other < head_count && strcmp(head_keys[other], key) != 0; other++)
+			{
+			}
+			if (other < head_count || head_count >= MAXIMUM_SABER_HEAD_PERMUTATIONS)
+				continue;
+			memcpy(head_keys[head_count], key, sizeof(head_keys[head_count]) - 1);
+			head_keys[head_count][sizeof(head_keys[head_count]) - 1] = 0;
+			head_count++;
+		}
+		while (head_count > 0 &&
+			body_span * (1 + head_count) > (long)NUMBEROF(made->geometries))
+		{
+			head_count--;
+		}
+		body_region = NONE;
+		for (region_index = 0; region_index < map_model->regions.count; region_index++)
+		{
+			if (region_index != head_region)
+			{
+				body_region = region_index;
+				break;
+			}
+		}
+	}
+	/* the map's regions and permutations: the body by one region, a head
+	by the head region's permutation of its name */
 	for (region_index = 0; region_index < map_model->regions.count; region_index++)
 	{
 		permutation_count += TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index, struct model_region)->permutations.count;
@@ -715,12 +822,28 @@ static struct saber_model *saber_model_new(
 			*permutation = *TAG_BLOCK_GET_ELEMENT(&map_region->permutations, permutation_index,
 				struct model_region_permutation);
 			/* (super high the template's most detailed, each lower Halo level
-			its next, and the rest its least; the template whole, drawn by
-			the first region alone) */
+			its next, and the rest its least. The body by the first region
+			that is not the head; a head by the permutation of its name,
+			"__base" when the name is not one of the template's) */
+			which = NONE;
+			if (head_count && region_index == head_region)
+			{
+				which = head_key_index(head_keys, head_count, permutation->name);
+				if (which == NONE)
+					which = head_key_index(head_keys, head_count, "__base");
+				if (which == NONE)
+					which = 0;
+			}
 			for (detail = 0; detail < 5; detail++)
 			{
-				permutation->geometry_indices[detail] = region_index ? NONE :
-					(short)MIN(level_count - 1, 4 - detail);
+				short slot = (short)MIN(level_count - 1, 4 - detail);
+
+				if (head_count && region_index == head_region)
+					permutation->geometry_indices[detail] = (short)(body_span + which * body_span + slot);
+				else if (head_count ? region_index != body_region : region_index != 0)
+					permutation->geometry_indices[detail] = NONE;
+				else
+					permutation->geometry_indices[detail] = slot;
 			}
 		}
 	}
@@ -794,7 +917,8 @@ static struct saber_model *saber_model_new(
 	/* its geometries: of each rank, each level's parts of every rank and of
 	that one, and the map's transparent parts */
 	made->geometry_parts = malloc(sizeof(*made->geometry_parts) *
-		((size_t)MAXIMUM_PARTS_PER_MODEL_GEOMETRY * (size_t)level_count * (size_t)made->rank_count + 1));
+		((size_t)MAXIMUM_PARTS_PER_MODEL_GEOMETRY * (size_t)level_count * (size_t)made->rank_count *
+			(size_t)(1 + head_count) + 1));
 	*reason = "out of memory";
 	if (!made->geometry_parts)
 		goto refused;
@@ -816,6 +940,7 @@ static struct saber_model *saber_model_new(
 
 				if (MIN(source->lod, 4) != levels[level] ||
 					(source->rank != _saber_rank_all && source->rank != rank) ||
+					(head_count && source->variant[0]) ||
 					geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
 				{
 					continue;
@@ -836,7 +961,67 @@ static struct saber_model *saber_model_new(
 			geometry->parts.definition = NULL;
 		}
 	}
-	made->geometry_count = level_count * made->rank_count;
+	/* each head permutation its own geometries, after the body's: the
+	meshes under that head, and the body too when no other region draws it */
+	for (which = 0; which < head_count; which++)
+	{
+		for (rank_index = 0; rank_index < made->rank_count; rank_index++)
+		{
+			short rank = made->ranks[rank_index];
+
+			for (level = 0; level < level_count; level++)
+			{
+				long geo_index = body_span + which * body_span + rank_index * level_count + level;
+				struct model_geometry *geometry;
+				long first;
+				long index;
+
+				if (geo_index < 0 || geo_index >= (long)NUMBEROF(made->geometries))
+					continue;
+				geometry = &made->geometries[geo_index];
+				first = geometry_part_count;
+				for (part_index = 0; part_index < made->part_count; part_index++)
+				{
+					struct saber_mesh_part const *source = &template_->parts[part_index];
+
+					if (MIN(source->lod, 4) != levels[level] ||
+						(source->rank != _saber_rank_all && source->rank != rank) ||
+						geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+					{
+						continue;
+					}
+					if (source->variant[0])
+					{
+						if (strcmp(source->variant, head_keys[which]) != 0)
+							continue;
+					}
+					else if (body_region != NONE)
+					{
+						continue;
+					}
+					made->geometry_parts[geometry_part_count++] = made->parts[part_index];
+				}
+				if (body_region == NONE)
+				{
+					for (index = 0; index < clear_count &&
+						geometry_part_count - first < MAXIMUM_PARTS_PER_MODEL_GEOMETRY; index++)
+					{
+						struct model_geometry_part *part = &made->geometry_parts[geometry_part_count++];
+
+						*part = *clear_parts[index];
+						part->previous_part_index = NONE;
+						part->next_part_index = NONE;
+					}
+				}
+				geometry->parts.count = geometry_part_count - first;
+				geometry->parts.address = made->geometry_parts + first;
+				geometry->parts.definition = NULL;
+			}
+		}
+	}
+	made->geometry_count = body_span * (1 + head_count);
+	if (made->geometry_count > (long)NUMBEROF(made->geometries))
+		made->geometry_count = (long)NUMBEROF(made->geometries);
 	made->model.geometries.count = made->geometry_count;
 	made->model.geometries.address = made->geometries;
 	made->model.geometries.definition = NULL;
@@ -851,6 +1036,10 @@ static struct saber_model *saber_model_new(
 			if (made->permutations[part_index].geometry_indices[detail] != NONE)
 				made->permutations[part_index].geometry_indices[detail] += (short)(default_rank * level_count);
 		}
+	}
+	if (head_count)
+	{
+		platform_log("anniversary: %s's head is %ld permutations", tag_get_name(tag_index), head_count);
 	}
 
 	return made;
@@ -3253,7 +3442,11 @@ short saber_models_geometry_index(
 				chosen = 0;
 		}
 
-		return (short)(chosen * made->level_count + geometry_index % made->level_count);
+		/* (the body's geometries, then each head permutation's, a rank's
+		levels together) */
+		return (short)((geometry_index / (made->level_count * made->rank_count)) *
+			(made->level_count * made->rank_count) +
+			chosen * made->level_count + geometry_index % made->level_count);
 	}
 
 	return geometry_index;

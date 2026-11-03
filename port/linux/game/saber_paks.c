@@ -1153,6 +1153,60 @@ static short node_rank(
 	return _saber_rank_all;
 }
 
+/* the head permutation a mesh is (the node under one named "head": a
+marine's head_charles_helmet_10, its lods and its visor with it), or
+empty when it is the body, drawn for every permutation. The name is lower
+case, hyphens written as underscores, as the map's permutation names are
+compared */
+static void node_variant(
+	struct template_walk const *walk,
+	struct template_node const *node,
+	char *variant,
+	long variant_size)
+{
+	long depth;
+
+	variant[0] = 0;
+	if (variant_size <= 1)
+		return;
+	for (depth = 0; node && depth < MAXIMUM_NODE_DEPTH; depth++)
+	{
+		struct template_node const *parent = node->parent_id == NONE ? NULL :
+			node_of_id(walk, node->parent_id);
+		char parent_name[64];
+		unsigned long length;
+		long index;
+
+		if (!parent)
+			break;
+		length = MIN(parent->name_length, sizeof(parent_name) - 1);
+		memcpy(parent_name, walk->bytes + parent->name_start, length);
+		parent_name[length] = 0;
+		for (index = 0; parent_name[index]; index++)
+		{
+			if (parent_name[index] >= 'A' && parent_name[index] <= 'Z')
+				parent_name[index] = (char)(parent_name[index] - 'A' + 'a');
+		}
+		if (!strcmp(parent_name, "head"))
+		{
+			long at;
+			unsigned long copy = MIN(node->name_length, (unsigned long)variant_size - 1);
+
+			memcpy(variant, walk->bytes + node->name_start, copy);
+			variant[copy] = 0;
+			for (at = 0; variant[at]; at++)
+			{
+				if (variant[at] >= 'A' && variant[at] <= 'Z')
+					variant[at] = (char)(variant[at] - 'A' + 'a');
+				else if (variant[at] == '-')
+					variant[at] = '_';
+			}
+			return;
+		}
+		node = parent;
+	}
+}
+
 /* whether a name (not 0-terminated) has a word in it */
 static boolean memmem_name(
 	unsigned char const *name,
@@ -2025,6 +2079,7 @@ static boolean mesh_read(
 			part->material_index = submesh_material[index];
 			part->lod = node->lod;
 			part->rank = node_rank(walk, node);
+			node_variant(walk, node, part->variant, (long)sizeof(part->variant));
 			part->compound = (short)compound;
 			memcpy(part->anchor, anchor, sizeof(anchor));
 			part->uv_scale[0] = 1.f;

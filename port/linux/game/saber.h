@@ -66,6 +66,9 @@ struct saber_mesh_part
 	short lod;
 	/* the rank it is drawn for (_saber_rank_all: every one) */
 	short rank;
+	/* the head permutation it is (a marine's "head_charles_helmet_10"),
+	empty when it is drawn with every permutation (the body) */
+	char variant[64];
 	/* whether it is a skin compound's, and then where its first vertex's
 	bone stands (in Halo's axes, the template's units) */
 	short compound;
