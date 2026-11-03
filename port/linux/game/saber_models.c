@@ -2565,12 +2565,14 @@ struct saber_level_part
 	/* a sky mesh (clouds, the sky, stars, a planet): drawn by
 	saber_models_level_sky_render, not with the structure */
 	boolean sky;
+	/* the daytime sky: drawn before the stars, so their black shows it */
+	boolean back;
 	/* a planet or a moon: drawn after the dome, which would cover it */
 	boolean in_front;
 	/* the halo ring: drawn after the planet, which would cover it */
 	boolean over;
-	/* blended on its texture's alpha: a planet, a moon, the halo ring.
-	The card around them fades out. Cutting it on a line slices the planet */
+	/* blended on its texture's alpha: a planet. The card fades out, and
+	cutting it on a line slices the disc */
 	boolean blend;
 	/* the skydome: the sky is centred on it */
 	boolean dome;
@@ -2787,15 +2789,13 @@ static boolean saber_level_play(
 			continue;
 		}
 		sky = part->sky || saber_level_material_sky(level.materials[material]);
-		made->in_front = sky && (strstr(level.materials[material], "planet") != NULL ||
-			strncmp(level.materials[material], "basis_sky", 9) == 0);
+		made->back = sky && strncmp(level.materials[material], "basis_sky", 9) == 0;
+		made->in_front = sky && strstr(level.materials[material], "planet") != NULL;
 		made->over = sky && strstr(level.materials[material], "ring") != NULL;
 		made->dome = sky && strncmp(level.materials[material], "stars", 5) == 0;
-		/* (a planet, a moon and the ring are blended: their card is clear
-		and the picture fades at its edge. A test would cut the planet off) */
-		made->blend = sky && (strstr(level.materials[material], "planet") != NULL ||
-			strncmp(level.materials[material], "basis_sky", 9) == 0 ||
-			strstr(level.materials[material], "ring") != NULL);
+		/* (a planet is blended: its card is clear and the limb fades. A test
+		would cut the disc off. The ring is the torus itself, drawn solid) */
+		made->blend = sky && strstr(level.materials[material], "planet") != NULL;
 		if (!sky && !saber_level_material_drawn(level.materials[material]))
 		{
 			part->vertex_count = 0;
@@ -2862,8 +2862,7 @@ static boolean saber_level_play(
 				in would draw the card solid. A star field's black, and a
 				planet's clear card, are stored with no alpha that cuts them) */
 				if (sky && (strncmp(level.materials[material], "stars", 5) == 0 ||
-					strstr(level.materials[material], "planet") != NULL ||
-					strncmp(level.materials[material], "basis_sky", 9) == 0))
+					strstr(level.materials[material], "planet") != NULL))
 				{
 					saber_texture_sky_alpha(texture, strncmp(level.materials[material], "stars", 5) == 0);
 				}
@@ -2887,7 +2886,6 @@ static boolean saber_level_play(
 		made->cutout = material_card(level.materials[material]) ||
 			(sky && (strncmp(level.materials[material], "cloud", 5) == 0 ||
 				strncmp(level.materials[material], "stars", 5) == 0 ||
-				strncmp(level.materials[material], "basis_sky", 9) == 0 ||
 				strstr(level.materials[material], "planet") != NULL)) ||
 			(!sky && saber_texture_cutout(&saber_level.textures[made->texture],
 				material_foliage(level.materials[material]))) ? TRUE : FALSE;
@@ -3350,9 +3348,9 @@ void saber_models_level_sky_render(
 	if (far_distance < 16.f)
 		far_distance = 16.f;
 	scale = reach > far_distance ? far_distance / reach : 1.f;
-	/* the dome, then the clouds, then a planet or a moon, then the ring:
-	with no depth a later part covers an earlier. Farther first within a
-	group */
+	/* the daytime sky, then the stars, then the clouds, then a planet, then
+	the ring: with no depth a later part covers an earlier. Farther first
+	within a group */
 	for (placed = 1; placed < sky_count; placed++)
 	{
 		long item = order[placed];
@@ -3365,8 +3363,9 @@ void saber_models_level_sky_render(
 		offset.j = saber_level.parts[item].centroid.y - anchor.y;
 		offset.k = saber_level.parts[item].centroid.z - anchor.z;
 		item_distance = magnitude3d(&offset);
-		item_layer = saber_level.parts[item].over ? 3 :
-			(saber_level.parts[item].in_front ? 2 : (saber_level.parts[item].dome ? 0 : 1));
+		item_layer = saber_level.parts[item].over ? 4 :
+			(saber_level.parts[item].in_front ? 3 : (saber_level.parts[item].back ? 0 :
+			(saber_level.parts[item].dome ? 1 : 2)));
 		while (slot > 0)
 		{
 			long earlier = order[slot - 1];
@@ -3378,8 +3377,9 @@ void saber_models_level_sky_render(
 			offset.j = saber_level.parts[earlier].centroid.y - anchor.y;
 			offset.k = saber_level.parts[earlier].centroid.z - anchor.z;
 			earlier_distance = magnitude3d(&offset);
-			earlier_layer = saber_level.parts[earlier].over ? 3 :
-				(saber_level.parts[earlier].in_front ? 2 : (saber_level.parts[earlier].dome ? 0 : 1));
+			earlier_layer = saber_level.parts[earlier].over ? 4 :
+				(saber_level.parts[earlier].in_front ? 3 : (saber_level.parts[earlier].back ? 0 :
+				(saber_level.parts[earlier].dome ? 1 : 2)));
 			move = item_layer < earlier_layer ||
 				(item_layer == earlier_layer && earlier_distance < item_distance);
 			if (!move)
