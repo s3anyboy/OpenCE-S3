@@ -47,7 +47,8 @@ template's meshes of a rank (an Elite's "metal_major", a Grunt's
 are drawn for that rank alone, the rank of an object by its colour (blue
 minor, red major, dark spec ops, gold zealot), as Halo draws its ranks one
 model coloured. The map's model's parts drawn by transparent shaders (a
-Jackal's energy shield) are drawn with the template's. Each of
+Jackal's energy shield) are drawn with the template's, except its glass
+when the template has glass of its own. Each of
 the template's materials is drawn with one of the map's model's shaders
 that can be (model shaders with a base map: the first material the first,
 the next the next ...), whose base map becomes the package's texture of
@@ -55,7 +56,8 @@ the material (its full texture, from the level's package or
 pak_stream.s3dpak beside it, or, in the Master Chief Collection's
 packages, from inplace1.ipak, inplace2.ipak, inplace2o.ipak and
 common.ipak in that folder, else its 64-pixel TexturesMips64), drawn
-without alpha testing. The shader loses its multipurpose and reflection
+without alpha testing. A glass is blended on its texture's alpha. The
+shader loses its multipurpose and reflection
 maps, which are the classic model's. A shader or bitmap another model has
 too is drawn so for it as well. The map's model, shader and bitmap tags
 take the made definitions in place, and their own come back as the map
@@ -132,6 +134,7 @@ faces), besides the body */
 
 /* models.c's shader types and model flags */
 #define SHADER_TYPE_MODEL 4
+#define SHADER_TYPE_TRANSPARENT_GLASS 8
 #define MODEL_PARTS_HAVE_LOCAL_NODES_BIT 1
 /* rasterizer_xbox_models.c's model shader flags */
 #define SHADER_MODEL_TWO_SIDED_BIT 1
@@ -302,6 +305,8 @@ struct saber_bitmap
 	char names[MAXIMUM_SABER_BITMAP_TEXTURES][64];
 	/* whether each is cut out by its alpha (saber_texture_cutout) */
 	boolean cutouts[MAXIMUM_SABER_BITMAP_TEXTURES];
+	/* whether each is glass, blended on its alpha */
+	boolean blends[MAXIMUM_SABER_BITMAP_TEXTURES];
 	/* whether it is a multipurpose map's: each texture a colour-change mask
 	(saber_texture_read_mask), of the permutation of the texture its
 	shader's base map has there */
@@ -685,6 +690,9 @@ static struct saber_model *saber_model_new(
 	struct model_geometry_part const *clear_parts[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
 	long clear_count = 0;
 	long geometry_part_count = 0;
+	/* the template has glass of its own, so the map's glass is not drawn
+	over it */
+	boolean own_glass = FALSE;
 	/* a region named head, the template's heads (its nodes under one named
 	head), and the region that draws the body */
 	long head_region = NONE;
@@ -724,9 +732,15 @@ static struct saber_model *saber_model_new(
 	if (!made->rank_count)
 		made->ranks[made->rank_count++] = _saber_rank_all;
 	made->level_count = level_count;
+	for (part_index = 0; part_index < template_->material_count; part_index++)
+	{
+		if (strstr(template_->materials[part_index], "glass"))
+			own_glass = TRUE;
+	}
 	/* (the map's model's transparent parts, of each region's first
 	permutation's most detailed geometry; a model whose parts have local
-	nodes has none drawn so) */
+	nodes has none drawn so. Its glass is left out when the template has
+	glass of its own: the classic canopy, drawn opaque over the cockpit) */
 	if (!TEST_FLAG(map_model->flags, MODEL_PARTS_HAVE_LOCAL_NODES_BIT))
 	{
 		short seen[16];
@@ -762,9 +776,11 @@ static struct saber_model *saber_model_new(
 				long shader_tag = VALID_INDEX(part->shader_index, map_model->shaders.count) ?
 					TAG_BLOCK_GET_ELEMENT(&map_model->shaders, part->shader_index,
 						struct model_shader_reference)->shader.index : NONE;
+				short shader_type = shader_tag == NONE ? (short)SHADER_TYPE_MODEL :
+					((struct shader *)shader_definition_get(shader_tag))->base.type;
 
-				if (shader_tag != NONE &&
-					((struct shader *)shader_definition_get(shader_tag))->base.type != SHADER_TYPE_MODEL)
+				if (shader_tag != NONE && shader_type != SHADER_TYPE_MODEL &&
+					!(own_glass && shader_type == SHADER_TYPE_TRANSPARENT_GLASS))
 				{
 					clear_parts[clear_count++] = part;
 				}
@@ -1579,6 +1595,13 @@ static boolean material_card(
 	return strstr(material, "branch") != NULL || strstr(material, "leaf") != NULL ||
 		strstr(material, "needle") != NULL || strstr(material, "frond") != NULL ||
 		strstr(material, "foliage") != NULL || strstr(material, "farplane") != NULL;
+}
+
+/* a window (glass_dirty_01, vhc_pelican_glass_01): blended, not filled solid */
+static boolean material_glass(
+	char const *material)
+{
+	return strstr(material, "glass") != NULL;
 }
 
 /* the marine's green eyepiece. It hangs from the helmet heads and the plain
@@ -2484,6 +2507,7 @@ static boolean model_play(
 	long material_bitmaps[MAXIMUM_SABER_MATERIALS];
 	short material_permutations[MAXIMUM_SABER_MATERIALS];
 	boolean material_cutouts[MAXIMUM_SABER_MATERIALS];
+	boolean material_blends[MAXIMUM_SABER_MATERIALS];
 	struct saber_texture *material_textures[MAXIMUM_SABER_MATERIALS];
 	struct bitmap_data *material_bitmap_data[MAXIMUM_SABER_MATERIALS];
 	long usable_count = 0;
@@ -2623,11 +2647,14 @@ static boolean model_play(
 				break;
 		}
 		material_cutouts[place] = FALSE;
+		material_blends[place] = FALSE;
 		if (played && other < played->count)
 		{
 			material_permutations[place] = (short)other;
 			material_cutouts[place] = played->cutouts[other] ||
 				material_card(template_.materials[material]) ? TRUE : FALSE;
+			material_blends[place] = played->blends[other] ||
+				material_glass(template_.materials[material]) ? TRUE : FALSE;
 			continue;
 		}
 		existing = played ? played->count : 0;
@@ -2659,9 +2686,13 @@ static boolean model_play(
 		background, the whole quad) */
 		if (!material_cutouts[place] && material_card(template_.materials[material]))
 			material_cutouts[place] = TRUE;
+		/* (a window keeps its alpha and is blended. Filling it in draws the
+		pane solid, and the map's glass over it) */
+		if (material_glass(template_.materials[material]))
+			material_blends[place] = TRUE;
 		/* (one that is not cut out drawn whole, though its shader be alpha
 		tested for another's) */
-		if (!material_cutouts[place])
+		if (!material_cutouts[place] && !material_blends[place])
 			saber_texture_make_solid(material_textures[place]);
 	}
 	made = saber_model_new(tag_index, definition, &template_, shader_indices, 1.f, &reason);
@@ -2728,6 +2759,7 @@ static boolean model_play(
 				sizeof(played->names[slot]) - 1);
 		}
 		played->cutouts[slot] = material_cutouts[index];
+		played->blends[slot] = material_blends[index];
 		played->count = MAX(played->count, slot + 1);
 		bitmap_group_get(played->tag_index)->bitmaps.count = played->count;
 		free(material_textures[index]);
@@ -3490,6 +3522,25 @@ int saber_models_part_cutout(
 		return FALSE;
 
 	return played->cutouts[permutation] ? TRUE : FALSE;
+}
+
+int saber_models_part_blend(
+	long shader_tag,
+	short permutation)
+{
+	struct shader const *shader;
+	struct saber_bitmap const *played;
+
+	if (shader_tag == NONE || permutation < 0)
+		return FALSE;
+	shader = shader_definition_get(shader_tag);
+	if (!shader || shader->base.type != SHADER_TYPE_MODEL)
+		return FALSE;
+	played = bitmap_played_get(((struct shader_model_definition const *)shader)->model.base_map.index);
+	if (!played || permutation >= played->count || permutation >= MAXIMUM_SABER_BITMAP_TEXTURES)
+		return FALSE;
+
+	return played->blends[permutation] ? TRUE : FALSE;
 }
 
 short saber_models_geometry_index(

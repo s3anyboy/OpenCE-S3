@@ -217,5 +217,7 @@ short saber_models_geometry_index(struct model const *model, long object_index, 
 /* (models.c) whether the shader's base map at `permutation` is a package
 texture cut out by its alpha, drawn alpha tested and from both sides */
 int saber_models_part_cutout(long shader_tag, short permutation);
+/* (models.c) whether that permutation is glass, drawn blended on its alpha */
+int saber_models_part_blend(long shader_tag, short permutation);
 
 #endif

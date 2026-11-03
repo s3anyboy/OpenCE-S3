@@ -425,6 +425,40 @@ static void render_model_parts(
 										NONE);
 								}
 							}
+							else if (shader->base.type==_shader_type_model &&
+								saber_models_part_blend(
+									shader_reference->shader.index,
+									forced_shader_permutation_index ?
+										forced_shader_permutation_index :
+										shader_reference->permutation_index))
+							{
+								/* port: a package window is blended on its texture's
+								alpha, in the decal pass. The shader is one an opaque
+								material shares, so the blend is this draw's alone
+								(saber_models_part_blend) */
+								if (pass==_render_model_pass_decal)
+								{
+									struct shader_model_definition *model_shader;
+									long blend_was;
+									long sided_was;
+
+									model_shader = (struct shader_model_definition *)shader;
+									blend_was = TEST_FLAG(model_shader->flags, _shader_model_alpha_blended_decal_bit) ? 1 : 0;
+									sided_was = TEST_FLAG(model_shader->flags, _shader_model_two_sided_bit) ? 1 : 0;
+									SET_FLAG(model_shader->flags, _shader_model_alpha_blended_decal_bit, TRUE);
+									SET_FLAG(model_shader->flags, _shader_model_two_sided_bit, TRUE);
+									rasterizer_model_draw(
+										shader,
+										forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
+										&part->triangle_buffer,
+										NONE,
+										part->triangle_buffer.count,
+										&part->vertex_buffer,
+										NONE);
+									SET_FLAG(model_shader->flags, _shader_model_alpha_blended_decal_bit, blend_was);
+									SET_FLAG(model_shader->flags, _shader_model_two_sided_bit, sided_was);
+								}
+							}
 							else if (pass==_render_model_pass_solid)
 							{
 								/* port: a package leaf card is alpha tested and drawn
