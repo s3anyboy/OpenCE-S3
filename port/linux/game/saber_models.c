@@ -91,6 +91,7 @@ goes.
 #include "tag_files/tag_groups.h"
 #include "cache_file_formats.h"
 #include "saber.h"
+#include "saber_toggle.h" /* port: the Back button's switch, port/linux/game/saber_toggle.c */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -2820,12 +2821,17 @@ static void template_specials_merge(
 	saber_template_dispose(&special);
 }
 
+/* (the map's own models are drawn while Back is held, saber_toggle.c) */
+int saber_toggle_classic_models(void);
+
 /* whether a shader or bitmap is one a model drawn as it is draws with */
 static boolean tag_kept(
 	long tag_index)
 {
 	long index;
 
+	if (saber_toggle_classic_models())
+		return TRUE;
 	for (index = 0; index < saber_models_globals.kept_count; index++)
 	{
 		if (saber_models_globals.kept_tags[index] == tag_index)
@@ -3883,8 +3889,9 @@ void saber_models_tags_loaded(
 		}
 		platform_log("anniversary: %ld of the map's %ld models drawn as templates", drawn, models);
 	}
-	/* (and its structure, display.remastered_bsp) */
-	if (config_boolean("display.remastered_bsp"))
+	/* (and its structure, display.remastered_bsp, or else when Back is held
+	in the game: saber_toggle.c) */
+	if (config_boolean("display.remastered_bsp") || saber_toggle_level_wanted())
 		saber_level_play(pak);
 	saber_pak_close(pak);
 	if (saber_models_globals.stream)
@@ -4066,7 +4073,8 @@ short saber_models_geometry_index(
 int saber_models_level_drawn(
 	void)
 {
-	return saber_level.drawn;
+	/* (Back shows it, or hides it, in the game: saber_toggle.c) */
+	return saber_level.drawn && !saber_toggle_classic_models();
 }
 
 int saber_models_level_sky_drawn(
@@ -4074,7 +4082,7 @@ int saber_models_level_sky_drawn(
 {
 	long index;
 
-	if (!saber_level.drawn)
+	if (!saber_level.drawn || saber_toggle_classic_models())
 		return FALSE;
 	for (index = 0; index < saber_level.part_count; index++)
 	{
@@ -4109,7 +4117,7 @@ void saber_models_level_sky_render(
 	real far_distance;
 	real scale;
 
-	if (!saber_level.drawn)
+	if (!saber_level.drawn || saber_toggle_classic_models())
 		return;
 	sky_count = 0;
 	anchor_index = NONE;
@@ -4259,7 +4267,7 @@ void saber_models_level_render(
 	short bsp_index = global_structure_bsp_index_get();
 	long index;
 
-	if (!saber_level.drawn)
+	if (!saber_level.drawn || saber_toggle_classic_models())
 		return;
 	csmemset(&node, 0, sizeof(node));
 	node.scale = 1.f;

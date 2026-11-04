@@ -112,6 +112,7 @@ symbols in this file:
 #include "saved games/game_state.h"
 #include "rasterizer/rasterizer_console_vars.h"
 #include "rasterizer/rasterizer_model_types.h"
+#include "saber_toggle.h" /* port: the Back button's switch, port/linux/game/saber_toggle.c */
 
 /* ---------- constants */
 
@@ -278,6 +279,10 @@ static boolean reported_rendered_object_overflow = FALSE;
 
 /* ---------- public code */
 
+/* port: Back, held, shows the remastered models or the map's, whichever the
+settings do not draw (saber_toggle.c), once each frame both are drawn in */
+void saber_toggle_update(void);
+
 void render_objects_initialize(
 	void)
 {
@@ -345,6 +350,7 @@ void render_objects(
 
 	profile_enter(render_objects_section);
 
+	saber_toggle_update(); /* port: before the frame reads it */
 	rasterizer_models_begin(FALSE);
 	find_rendered_objects();
 
