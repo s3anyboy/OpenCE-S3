@@ -255,6 +255,9 @@ struct template_node
 	real scene_scale[3];
 	/* its texture coordinates were stored compressed (unit * tile + shift) */
 	boolean has_uv_decompress;
+	/* marked hidden (visibility_hidden): a pelican's engine screens, which
+	sit outside the pods when they are drawn */
+	boolean hidden;
 	real uv_shift[2];
 	real uv_tile[2];
 };
@@ -1018,6 +1021,9 @@ static void node_read(
 		/* (its texture coordinates, packed into the vertex's unit range:
 		unit * tile + shift. A mesh marked uncompressed already holds them) */
 		if (block_find(bytes, node_block->start, node_block->end, _block_properties, &block) &&
+			block_contains(bytes, &block, "visibility_hidden"))
+			node->hidden = TRUE;
+		if (block_find(bytes, node_block->start, node_block->end, _block_properties, &block) &&
 			block_contains(bytes, &block, "__export_uv_compr_params") &&
 			!block_contains(bytes, &block, "export_no_vertex_compression") &&
 			property_real(bytes, &block, "shiftS", &node->uv_shift[0]) &&
@@ -1604,9 +1610,9 @@ static boolean mesh_read(
 	long index;
 
 	*reason = "a mesh is not as a template's is";
-	/* (the green eyepiece. It hangs on the helmet heads, and it was still
-	drawn on the capped sergeant, so it is left out of the model) */
-	if (node->name_length && memmem_name(bytes + node->name_start, node->name_length, "monicle"))
+	/* (a mesh the template marks hidden. The pelican's are its engine
+	screens and a second body: drawn, the screens sit out past the pods) */
+	if (node->hidden)
 		return TRUE;
 	/* (a template's meshes of another's buffers are left out, as they were
 	before the level's were read: only a level's are drawn so) */
@@ -3985,6 +3991,269 @@ static void texture_card_alpha(
 	}
 }
 
+/* the halo ring's colour sits a few shades off one blue. Spread those
+shades (about the picture's middle colour) so the band's surface shows
+instead of one fill. Four times is enough that the light on the band
+separates from the blue, and not so much that the rim clips to white */
+static long ring_spread(
+	long color,
+	long middle)
+{
+	long spread = middle + (color - middle) * 4;
+
+	if (spread < 0)
+		return 0;
+	if (spread > 255)
+		return 255;
+
+	return spread;
+}
+
+void saber_texture_ring_contrast(
+	struct saber_texture *texture)
+{
+	long block_size;
+	long color_at;
+	long block_count;
+	long histogram[3][256];
+	long middle[3];
+	long channel;
+	long offset;
+	long count;
+
+	if (!texture->pixels || texture->width < 4 || texture->height < 4)
+		return;
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	color_at = block_size == 8 ? 0 : 8;
+	block_count = ((long)texture->width / 4) * ((long)texture->height / 4);
+	if (block_count <= 0 || block_count * block_size > texture->pixels_size)
+		return;
+	csmemset(histogram, 0, sizeof(histogram));
+	for (offset = 0; offset < block_count * block_size; offset += block_size)
+	{
+		unsigned long color = (unsigned long)texture->pixels[offset + color_at] |
+			((unsigned long)texture->pixels[offset + color_at + 1] << 8);
+
+		histogram[0][unpack565(color, 0)]++;
+		histogram[1][unpack565(color, 1)]++;
+		histogram[2][unpack565(color, 2)]++;
+	}
+	for (channel = 0; channel < 3; channel++)
+	{
+		count = 0;
+		middle[channel] = 0;
+		for (offset = 0; offset < 256; offset++)
+		{
+			count += histogram[channel][offset];
+			if (count * 2 >= block_count)
+			{
+				middle[channel] = offset;
+				break;
+			}
+		}
+	}
+	for (offset = 0; offset + block_size <= texture->pixels_size; offset += block_size)
+	{
+		unsigned char *block = texture->pixels + offset + color_at;
+		unsigned long color0 = (unsigned long)block[0] | ((unsigned long)block[1] << 8);
+		unsigned long color1 = (unsigned long)block[2] | ((unsigned long)block[3] << 8);
+		unsigned long packed0;
+		unsigned long packed1;
+		int order;
+
+		packed0 = pack565(
+			ring_spread(unpack565(color0, 0), middle[0]),
+			ring_spread(unpack565(color0, 1), middle[1]),
+			ring_spread(unpack565(color0, 2), middle[2]));
+		packed1 = pack565(
+			ring_spread(unpack565(color1, 0), middle[0]),
+			ring_spread(unpack565(color1, 1), middle[1]),
+			ring_spread(unpack565(color1, 2), middle[2]));
+		order = color0 > color1;
+		if ((packed0 > packed1) != order)
+		{
+			unsigned long swap = packed0;
+			long index;
+
+			packed0 = packed1;
+			packed1 = swap;
+			for (index = 4; index < 8; index++)
+			{
+				unsigned char bits = block[index];
+				unsigned char remapped = 0;
+				long texel;
+
+				for (texel = 0; texel < 4; texel++)
+				{
+					long which = (bits >> (2 * texel)) & 3;
+
+					which ^= 1;
+					remapped |= (unsigned char)(which << (2 * texel));
+				}
+				block[index] = remapped;
+			}
+		}
+		block[0] = (unsigned char)packed0;
+		block[1] = (unsigned char)(packed0 >> 8);
+		block[2] = (unsigned char)packed1;
+		block[3] = (unsigned char)(packed1 >> 8);
+	}
+}
+
+/* a texture's colour multiplied by numer/denom, its alpha left as it is */
+void saber_texture_darken(
+	struct saber_texture *texture,
+	long numer,
+	long denom)
+{
+	long block_size;
+	long color_at;
+	long offset;
+
+	if (!texture->pixels || numer < 0 || denom <= 0)
+		return;
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	color_at = block_size == 8 ? 0 : 8;
+	for (offset = 0; offset + block_size <= texture->pixels_size; offset += block_size)
+	{
+		unsigned char *block = texture->pixels + offset + color_at;
+		unsigned long color0 = (unsigned long)block[0] | ((unsigned long)block[1] << 8);
+		unsigned long color1 = (unsigned long)block[2] | ((unsigned long)block[3] << 8);
+		unsigned long packed0;
+		unsigned long packed1;
+		long channel0[3];
+		long channel1[3];
+		long channel;
+		int order;
+
+		for (channel = 0; channel < 3; channel++)
+		{
+			long scaled;
+
+			channel0[channel] = unpack565(color0, channel);
+			channel1[channel] = unpack565(color1, channel);
+			scaled = channel0[channel] * numer / denom;
+			channel0[channel] = scaled < 0 ? 0 : (scaled > 255 ? 255 : scaled);
+			scaled = channel1[channel] * numer / denom;
+			channel1[channel] = scaled < 0 ? 0 : (scaled > 255 ? 255 : scaled);
+		}
+		packed0 = pack565(channel0[0], channel0[1], channel0[2]);
+		packed1 = pack565(channel1[0], channel1[1], channel1[2]);
+		order = color0 > color1;
+		if ((packed0 > packed1) != order)
+		{
+			unsigned long swap = packed0;
+			long index;
+
+			packed0 = packed1;
+			packed1 = swap;
+			for (index = 4; index < 8; index++)
+			{
+				unsigned char bits = block[index];
+				unsigned char remapped = 0;
+				long texel;
+
+				for (texel = 0; texel < 4; texel++)
+				{
+					long which = (bits >> (2 * texel)) & 3;
+
+					which ^= 1;
+					remapped |= (unsigned char)(which << (2 * texel));
+				}
+				block[index] = remapped;
+			}
+		}
+		block[0] = (unsigned char)packed0;
+		block[1] = (unsigned char)(packed0 >> 8);
+		block[2] = (unsigned char)packed1;
+		block[3] = (unsigned char)(packed1 >> 8);
+	}
+}
+
+/* the marine eyepiece: a dark mask. Luminance becomes green, the field
+included, so the lens is green and the marks are brighter */
+void saber_texture_monicle(
+	struct saber_texture *texture)
+{
+	long block_size;
+	long color_at;
+	long offset;
+
+	if (!texture->pixels)
+		return;
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	color_at = block_size == 8 ? 0 : 8;
+	for (offset = 0; offset + block_size <= texture->pixels_size; offset += block_size)
+	{
+		unsigned char *block = texture->pixels + offset + color_at;
+		unsigned long color0 = (unsigned long)block[0] | ((unsigned long)block[1] << 8);
+		unsigned long color1 = (unsigned long)block[2] | ((unsigned long)block[3] << 8);
+		unsigned long packed0;
+		unsigned long packed1;
+		long channel0[3];
+		long channel1[3];
+		long which;
+		int order;
+
+		for (which = 0; which < 2; which++)
+		{
+			long *channel = which ? channel1 : channel0;
+			unsigned long color = which ? color1 : color0;
+			long lum;
+			long glow;
+
+			channel[0] = unpack565(color, 0);
+			channel[1] = unpack565(color, 1);
+			channel[2] = unpack565(color, 2);
+			lum = (channel[0] * 30 + channel[1] * 59 + channel[2] * 11) / 100;
+			if (lum < 0)
+				lum = 0;
+			if (lum > 255)
+				lum = 255;
+			glow = 90 + lum * 165 / 255;
+			channel[0] = glow / 4;
+			channel[1] = glow;
+			channel[2] = glow / 5;
+		}
+		packed0 = pack565(channel0[0], channel0[1], channel0[2]);
+		packed1 = pack565(channel1[0], channel1[1], channel1[2]);
+		order = color0 > color1;
+		if ((packed0 > packed1) != order)
+		{
+			unsigned long swap = packed0;
+			long index;
+
+			packed0 = packed1;
+			packed1 = swap;
+			for (index = 4; index < 8; index++)
+			{
+				unsigned char bits = block[index];
+				unsigned char remapped = 0;
+				long texel;
+
+				for (texel = 0; texel < 4; texel++)
+				{
+					long bit = (bits >> (2 * texel)) & 3;
+
+					bit ^= 1;
+					remapped |= (unsigned char)(bit << (2 * texel));
+				}
+				block[index] = remapped;
+			}
+		}
+		block[0] = (unsigned char)packed0;
+		block[1] = (unsigned char)(packed0 >> 8);
+		block[2] = (unsigned char)packed1;
+		block[3] = (unsigned char)(packed1 >> 8);
+	}
+}
+
+void saber_texture_punch_black(
+	struct saber_texture *texture)
+{
+	texture_punch_black(texture);
+}
+
 void saber_texture_sky_alpha(
 	struct saber_texture *texture,
 	int stars)
@@ -3993,6 +4262,81 @@ void saber_texture_sky_alpha(
 		texture_punch_black(texture);
 	else
 		texture_card_alpha(texture);
+}
+
+/* the rear meter's white plate. Luminance becomes blue; black stays black */
+void saber_texture_holo(
+	struct saber_texture *texture)
+{
+	long block_size;
+	long color_at;
+	long offset;
+
+	if (!texture->pixels)
+		return;
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	color_at = block_size == 8 ? 0 : 8;
+	for (offset = 0; offset + block_size <= texture->pixels_size; offset += block_size)
+	{
+		unsigned char *block = texture->pixels + offset + color_at;
+		unsigned long color0 = (unsigned long)block[0] | ((unsigned long)block[1] << 8);
+		unsigned long color1 = (unsigned long)block[2] | ((unsigned long)block[3] << 8);
+		unsigned long packed0;
+		unsigned long packed1;
+		long channel0[3];
+		long channel1[3];
+		long which;
+		int order;
+
+		for (which = 0; which < 2; which++)
+		{
+			long *channel = which ? channel1 : channel0;
+			unsigned long color = which ? color1 : color0;
+			long lum;
+
+			channel[0] = unpack565(color, 0);
+			channel[1] = unpack565(color, 1);
+			channel[2] = unpack565(color, 2);
+			lum = (channel[0] * 30 + channel[1] * 59 + channel[2] * 11) / 100;
+			if (lum < 0)
+				lum = 0;
+			if (lum > 255)
+				lum = 255;
+			channel[0] = lum * 128 / 255;
+			channel[1] = lum * 200 / 255;
+			channel[2] = lum;
+		}
+		packed0 = pack565(channel0[0], channel0[1], channel0[2]);
+		packed1 = pack565(channel1[0], channel1[1], channel1[2]);
+		order = color0 > color1;
+		if ((packed0 > packed1) != order)
+		{
+			unsigned long swap = packed0;
+			long index;
+
+			packed0 = packed1;
+			packed1 = swap;
+			for (index = 4; index < 8; index++)
+			{
+				unsigned char bits = block[index];
+				unsigned char remapped = 0;
+				long texel;
+
+				for (texel = 0; texel < 4; texel++)
+				{
+					long bit = (bits >> (2 * texel)) & 3;
+
+					bit ^= 1;
+					remapped |= (unsigned char)(bit << (2 * texel));
+				}
+				block[index] = remapped;
+			}
+		}
+		block[0] = (unsigned char)packed0;
+		block[1] = (unsigned char)(packed0 >> 8);
+		block[2] = (unsigned char)packed1;
+		block[3] = (unsigned char)(packed1 >> 8);
+	}
 }
 
 void saber_texture_make_solid(

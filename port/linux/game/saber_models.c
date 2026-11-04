@@ -136,6 +136,7 @@ faces), besides the body */
 /* models.c's shader types and model flags */
 #define SHADER_TYPE_MODEL 4
 #define SHADER_TYPE_TRANSPARENT_GLASS 8
+#define SHADER_TYPE_TRANSPARENT_METER 9
 #define MODEL_PARTS_HAVE_LOCAL_NODES_BIT 1
 /* rasterizer_xbox_models.c's model shader flags */
 #define SHADER_MODEL_TWO_SIDED_BIT 1
@@ -277,6 +278,13 @@ struct saber_model
 	/* the geometries' parts: each a part's, or a part of the map's model's
 	(neither theirs to let go of) */
 	struct model_geometry_part *geometry_parts;
+	/* a classic heat meter shrunk onto the template's gauge: its own
+	buffer, not the map's */
+	struct vertex_buffer meter_buffers[4];
+	struct model_geometry_part const *meter_sources[4];
+	/* where each fitted meter sits (its centre, in the model's space) */
+	real_point3d meter_centres[4];
+	long meter_buffer_count;
 	byte *vertices;
 	unsigned long vertices_size;
 	boolean vertices_contiguous;
@@ -545,6 +553,8 @@ static void saber_model_free(
 	}
 	if (made->shaders)
 		free(made->shaders);
+	for (index = 0; index < made->meter_buffer_count; index++)
+		rasterizer_vertex_buffer_delete(&made->meter_buffers[index]);
 	if (made->geometry_parts)
 		free(made->geometry_parts);
 	if (made->regions)
@@ -657,6 +667,351 @@ static boolean model_is_first_person(
 static boolean material_monicle(struct saber_template const *template_, struct saber_mesh_part const *part);
 static boolean head_without_monicle(char const *key);
 
+/* whether the part is the classic heat meter */
+static boolean part_is_meter(
+	struct model const *map_model,
+	struct model_geometry_part const *part)
+{
+	long shader_tag;
+	struct shader const *shader;
+
+	if (!map_model || !VALID_INDEX(part->shader_index, map_model->shaders.count))
+		return FALSE;
+	shader_tag = TAG_BLOCK_GET_ELEMENT(&map_model->shaders, part->shader_index,
+		struct model_shader_reference)->shader.index;
+	if (shader_tag == NONE)
+		return FALSE;
+	shader = shader_definition_get(shader_tag);
+
+	return shader && shader->base.type == SHADER_TYPE_TRANSPARENT_METER;
+}
+
+/* the template's gauge, in the model's space (its vertices already are).
+The whole of it when `metre` is NULL; else the side the metre sits on (the
+gauge is drawn on both sides of the gun). FALSE when it has none */
+static boolean gauge_box(
+	struct saber_template const *template_,
+	real_point3d const *metre,
+	real_point3d *low,
+	real_point3d *high)
+{
+	real_point3d box_low;
+	real_point3d box_high;
+	real mid_x;
+	real mid_y;
+	real mid_z;
+	real toward_x;
+	real toward_y;
+	real toward_z;
+	boolean any = FALSE;
+	boolean found = FALSE;
+	long part_index;
+	long index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+
+		if (part->material_index < 0 || part->material_index >= template_->material_count ||
+			!strstr(template_->materials[part->material_index], "gauge") || part->vertex_count <= 0)
+		{
+			continue;
+		}
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			real_point3d const *position = &part->vertices[index].position;
+
+			if (!any)
+			{
+				box_low = box_high = *position;
+				any = TRUE;
+			}
+			box_low.x = MIN(box_low.x, position->x);
+			box_low.y = MIN(box_low.y, position->y);
+			box_low.z = MIN(box_low.z, position->z);
+			box_high.x = MAX(box_high.x, position->x);
+			box_high.y = MAX(box_high.y, position->y);
+			box_high.z = MAX(box_high.z, position->z);
+		}
+	}
+	if (!any)
+		return FALSE;
+	if (!metre)
+	{
+		*low = box_low;
+		*high = box_high;
+		return TRUE;
+	}
+	mid_x = (box_low.x + box_high.x) * 0.5f;
+	mid_y = (box_low.y + box_high.y) * 0.5f;
+	mid_z = (box_low.z + box_high.z) * 0.5f;
+	toward_x = metre->x - mid_x;
+	toward_y = metre->y - mid_y;
+	toward_z = metre->z - mid_z;
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+
+		if (part->material_index < 0 || part->material_index >= template_->material_count ||
+			!strstr(template_->materials[part->material_index], "gauge") || part->vertex_count <= 0)
+		{
+			continue;
+		}
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			real_point3d const *position = &part->vertices[index].position;
+			real along = (position->x - mid_x) * toward_x + (position->y - mid_y) * toward_y +
+				(position->z - mid_z) * toward_z;
+
+			/* (the gauge on the other side of the gun) */
+			if (along < 0.f)
+				continue;
+			if (!found)
+			{
+				*low = *high = *position;
+				found = TRUE;
+			}
+			low->x = MIN(low->x, position->x);
+			low->y = MIN(low->y, position->y);
+			low->z = MIN(low->z, position->z);
+			high->x = MAX(high->x, position->x);
+			high->y = MAX(high->y, position->y);
+			high->z = MAX(high->z, position->z);
+		}
+	}
+	if (!found)
+	{
+		*low = box_low;
+		*high = box_high;
+	}
+
+	return TRUE;
+}
+
+/* a copy of the classic meter's vertices, shrunk and moved so its centre
+sits on the outer face of the gauge on its side of the gun. The map's
+buffer is not changed. `placed` is that centre */
+static boolean meter_buffer_fit(
+	struct model_geometry_part const *source,
+	struct saber_template const *template_,
+	struct vertex_buffer *fitted,
+	real_point3d *placed)
+{
+	real_point3d glow;
+	real_point3d ghigh;
+	real_point3d full_low;
+	real_point3d full_high;
+	real_point3d mlow;
+	real_point3d mhigh;
+	real_point3d metre;
+	real factor = 1.f;
+	real centre_x;
+	real centre_y;
+	real centre_z;
+	real place_x;
+	real place_y;
+	real place_z;
+	real mid_x;
+	real mid_y;
+	real mid_z;
+	real out_x;
+	real out_y;
+	real out_z;
+	real out_len;
+	real shell_half;
+	real meter_half;
+	real push;
+	real span;
+	real extent;
+	real gextent;
+	long stride;
+	long index;
+	byte *locked = NULL;
+	byte *copy = NULL;
+	struct vertex_buffer const *buffer = &source->vertex_buffer;
+	boolean fitted_ok = FALSE;
+
+	if (!buffer->hardware_format || buffer->count <= 0)
+		return FALSE;
+	if (buffer->type == _rasterizer_vertex_type_model_compressed)
+		stride = (long)sizeof(struct model_vertex_compressed);
+	else if (buffer->type == _rasterizer_vertex_type_model_uncompressed)
+		stride = (long)sizeof(struct model_vertex_uncompressed);
+	else
+		return FALSE;
+	IDirect3DVertexBuffer8_Lock((IDirect3DVertexBuffer8 *)buffer->hardware_format, 0, 0, &locked,
+		D3DLOCK_READONLY);
+	if (!locked)
+		return FALSE;
+	mlow = *(real_point3d const *)locked;
+	mhigh = mlow;
+	for (index = 0; index < buffer->count; index++)
+	{
+		real_point3d const *position = (real_point3d const *)(locked + index * stride);
+
+		mlow.x = MIN(mlow.x, position->x);
+		mlow.y = MIN(mlow.y, position->y);
+		mlow.z = MIN(mlow.z, position->z);
+		mhigh.x = MAX(mhigh.x, position->x);
+		mhigh.y = MAX(mhigh.y, position->y);
+		mhigh.z = MAX(mhigh.z, position->z);
+	}
+	metre.x = (mlow.x + mhigh.x) * 0.5f;
+	metre.y = (mlow.y + mhigh.y) * 0.5f;
+	metre.z = (mlow.z + mhigh.z) * 0.5f;
+	if (!gauge_box(template_, &metre, &glow, &ghigh))
+	{
+		IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)buffer->hardware_format);
+		return FALSE;
+	}
+	extent = mhigh.x - mlow.x;
+	gextent = ghigh.x - glow.x;
+	if (extent > 0.0001f && gextent > 0.0001f)
+		factor = MIN(factor, gextent / extent);
+	extent = mhigh.y - mlow.y;
+	gextent = ghigh.y - glow.y;
+	if (extent > 0.0001f && gextent > 0.0001f)
+		factor = MIN(factor, gextent / extent);
+	extent = mhigh.z - mlow.z;
+	gextent = ghigh.z - glow.z;
+	if (extent > 0.0001f && gextent > 0.0001f)
+		factor = MIN(factor, gextent / extent);
+	if (factor > 1.f)
+		factor = 1.f;
+	copy = malloc((size_t)stride * (size_t)buffer->count);
+	if (!copy)
+	{
+		IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)buffer->hardware_format);
+		return FALSE;
+	}
+	memcpy(copy, locked, (size_t)stride * (size_t)buffer->count);
+	IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)buffer->hardware_format);
+	locked = NULL;
+	centre_x = metre.x;
+	centre_y = metre.y;
+	centre_z = metre.z;
+	place_x = (glow.x + ghigh.x) * 0.5f;
+	place_y = (glow.y + ghigh.y) * 0.5f;
+	place_z = (glow.z + ghigh.z) * 0.5f;
+	/* the shell is drawn opaque. A meter centred in it fails the depth
+	test, and the window stays the static gauge. The fill is the classic
+	meter, so it has to sit on the outer face, just clear of the shell */
+	push = 0.f;
+	if (gauge_box(template_, NULL, &full_low, &full_high))
+	{
+		mid_x = (full_low.x + full_high.x) * 0.5f;
+		mid_y = (full_low.y + full_high.y) * 0.5f;
+		mid_z = (full_low.z + full_high.z) * 0.5f;
+		out_x = place_x - mid_x;
+		out_y = place_y - mid_y;
+		out_z = place_z - mid_z;
+		out_len = square_root(out_x * out_x + out_y * out_y + out_z * out_z);
+		if (out_len > 0.0001f)
+		{
+			out_x /= out_len;
+			out_y /= out_len;
+			out_z /= out_len;
+			span = (ghigh.x - glow.x) * out_x;
+			if (span < 0.f)
+				span = -span;
+			shell_half = span;
+			span = (ghigh.y - glow.y) * out_y;
+			if (span < 0.f)
+				span = -span;
+			shell_half += span;
+			span = (ghigh.z - glow.z) * out_z;
+			if (span < 0.f)
+				span = -span;
+			shell_half = (shell_half + span) * 0.5f;
+			span = (mhigh.x - mlow.x) * out_x;
+			if (span < 0.f)
+				span = -span;
+			meter_half = span;
+			span = (mhigh.y - mlow.y) * out_y;
+			if (span < 0.f)
+				span = -span;
+			meter_half += span;
+			span = (mhigh.z - mlow.z) * out_z;
+			if (span < 0.f)
+				span = -span;
+			meter_half = (meter_half + span) * factor * 0.5f;
+			span = ghigh.x - glow.x;
+			if (span < 0.f)
+				span = -span;
+			push = span;
+			span = ghigh.y - glow.y;
+			if (span < 0.f)
+				span = -span;
+			if (span > push)
+				push = span;
+			span = ghigh.z - glow.z;
+			if (span < 0.f)
+				span = -span;
+			if (span > push)
+				push = span;
+			push = shell_half + meter_half + push * 0.02f;
+			place_x += out_x * push;
+			place_y += out_y * push;
+			place_z += out_z * push;
+		}
+	}
+	for (index = 0; index < buffer->count; index++)
+	{
+		real_point3d *position = (real_point3d *)(copy + index * stride);
+
+		position->x = place_x + (position->x - centre_x) * factor;
+		position->y = place_y + (position->y - centre_y) * factor;
+		position->z = place_z + (position->z - centre_z) * factor;
+	}
+	placed->x = place_x;
+	placed->y = place_y;
+	placed->z = place_z;
+	fitted_ok = rasterizer_vertex_buffer_new(fitted, buffer->type, buffer->count, copy,
+		stride * buffer->count) ? TRUE : FALSE;
+	free(copy);
+	if (fitted_ok)
+		platform_log("anniversary: the heat meter fitted to the gauge, %.2f of its size, %.3f clear of the shell",
+			factor, push);
+
+	return fitted_ok;
+}
+
+/* the classic meter, when the template has a gauge, drawn from a buffer
+shrunk to that gauge */
+static void meter_part_place(
+	struct saber_model *made,
+	struct model const *map_model,
+	struct saber_template const *template_,
+	struct model_geometry_part const *source,
+	struct model_geometry_part *part)
+{
+	long which;
+	struct vertex_buffer fitted;
+	real_point3d placed;
+
+	if (!part_is_meter(map_model, source))
+		return;
+	for (which = 0; which < made->meter_buffer_count; which++)
+	{
+		if (made->meter_sources[which] == source)
+			break;
+	}
+	if (which == made->meter_buffer_count)
+	{
+		if (made->meter_buffer_count >= (long)NUMBEROF(made->meter_buffers) ||
+			!meter_buffer_fit(source, template_, &fitted, &placed))
+		{
+			return;
+		}
+		made->meter_buffers[which] = fitted;
+		made->meter_sources[which] = source;
+		made->meter_centres[which] = placed;
+		made->meter_buffer_count++;
+	}
+	part->vertex_buffer = made->meter_buffers[which];
+	part->centroid = made->meter_centres[which];
+}
+
 /* The model the template makes of the map's model: the map's, its every
 permutation drawing the template's geometry (`shader_indices`, the shader
 each part is drawn with). NULL, with *reason saying why, when it cannot be
@@ -692,8 +1047,14 @@ static struct saber_model *saber_model_new(
 	long clear_count = 0;
 	long geometry_part_count = 0;
 	/* the template has glass of its own, so the map's glass is not drawn
-	over it */
+	over it. A gauge of its own, so the classic heat meter is shrunk to
+	that gauge: drawn at the classic gun's size, it spills past the side.
+	A monicle of its own, so the classic visor (marine_hud) is not drawn
+	over the face: its scroll is the green flicker, and on the anniversary
+	head it runs across the face */
 	boolean own_glass = FALSE;
+	boolean own_meter = FALSE;
+	boolean own_monicle = FALSE;
 	/* a region named head, the template's heads (its nodes under one named
 	head), and the region that draws the body */
 	long head_region = NONE;
@@ -737,11 +1098,17 @@ static struct saber_model *saber_model_new(
 	{
 		if (strstr(template_->materials[part_index], "glass"))
 			own_glass = TRUE;
+		if (strstr(template_->materials[part_index], "gauge"))
+			own_meter = TRUE;
+		if (strstr(template_->materials[part_index], "monicle"))
+			own_monicle = TRUE;
 	}
 	/* (the map's model's transparent parts, of each region's first
 	permutation's most detailed geometry; a model whose parts have local
 	nodes has none drawn so. Its glass is left out when the template has
-	glass of its own: the classic canopy, drawn opaque over the cockpit) */
+	glass of its own: the classic canopy, drawn opaque over the cockpit.
+	Its visor is left out when the template has a monicle: the classic
+	green flicker, drawn across the anniversary face) */
 	if (!TEST_FLAG(map_model->flags, MODEL_PARTS_HAVE_LOCAL_NODES_BIT))
 	{
 		short seen[16];
@@ -779,9 +1146,11 @@ static struct saber_model *saber_model_new(
 						struct model_shader_reference)->shader.index : NONE;
 				short shader_type = shader_tag == NONE ? (short)SHADER_TYPE_MODEL :
 					((struct shader *)shader_definition_get(shader_tag))->base.type;
+				char const *shader_name = shader_tag == NONE ? NULL : tag_get_name(shader_tag);
 
 				if (shader_tag != NONE && shader_type != SHADER_TYPE_MODEL &&
-					!(own_glass && shader_type == SHADER_TYPE_TRANSPARENT_GLASS))
+					!(own_glass && shader_type == SHADER_TYPE_TRANSPARENT_GLASS) &&
+					!(own_monicle && shader_name && strstr(shader_name, "hud")))
 				{
 					clear_parts[clear_count++] = part;
 				}
@@ -1006,6 +1375,8 @@ static struct saber_model *saber_model_new(
 				*part = *clear_parts[index];
 				part->previous_part_index = NONE;
 				part->next_part_index = NONE;
+				if (own_meter)
+					meter_part_place(made, map_model, template_, clear_parts[index], part);
 			}
 			geometry->parts.count = geometry_part_count - first;
 			geometry->parts.address = made->geometry_parts + first;
@@ -1066,6 +1437,8 @@ static struct saber_model *saber_model_new(
 						*part = *clear_parts[index];
 						part->previous_part_index = NONE;
 						part->next_part_index = NONE;
+						if (own_meter)
+							meter_part_place(made, map_model, template_, clear_parts[index], part);
 					}
 				}
 				geometry->parts.count = geometry_part_count - first;
@@ -1422,6 +1795,9 @@ static boolean shader_plug(
 	zero bounds times that is not zero) */
 	if (shader->model.self_illumination_animation_period == 0.f)
 		shader->model.self_illumination_animation_period = 1.f;
+	/* (the classic scroll is the visor's. A material that shares the
+	shader, the face, scrolls with it) */
+	csmemset(&shader->model.texture_animation, 0, sizeof(shader->model.texture_animation));
 
 	return TRUE;
 }
@@ -1621,6 +1997,13 @@ static boolean material_glass(
 	char const *material)
 {
 	return strstr(material, "glass") != NULL;
+}
+
+/* the arc between a plasma rifle's barrels: the bolt on a black plate */
+static boolean material_lightning(
+	char const *material)
+{
+	return strstr(material, "lightning") != NULL;
 }
 
 /* a material whose alpha is its shape: a decal, dirt, a grate. A shaded
@@ -2541,6 +2924,9 @@ static boolean model_play(
 	long usable_count = 0;
 	long material_count = 0;
 	long shader_count = 0;
+	/* the eyepiece's shader, which no other material uses, so its scroll
+	does not move the face */
+	long monicle_shader_tag = NONE;
 	real scale;
 	boolean skinned = FALSE;
 	long matched_bones = 0;
@@ -2607,6 +2993,10 @@ static boolean model_play(
 				if (shader_tag == NONE)
 					continue;
 				shader = (struct shader_model_definition const *)shader_definition_get(shader_tag);
+				/* (a visor is a transparent shader: left as it is, so its
+				scroll is not cleared with a model shader's) */
+				if (((struct shader const *)shader)->base.type != SHADER_TYPE_MODEL)
+					continue;
 				/* (nor one a model drawn as it is draws with, nor its base map) */
 				if (shader->model.base_map.index == NONE || tag_kept(shader_tag) || tag_kept(shader->model.base_map.index))
 					continue;
@@ -2656,8 +3046,17 @@ static boolean model_play(
 		place = material_count++;
 		material_places[material] = (short)place;
 		shader_indices[index] = (short)(definition->shaders.count + place);
+		/* (the eyepiece takes the last shader for itself. Another material
+		that would have taken it takes one of the rest, so the scroll is
+		the lens's alone) */
 		material_shaders[place] = usable[place % usable_count];
+		if (usable_count > 1 && strstr(template_.materials[material], "monicle"))
+			material_shaders[place] = usable[usable_count - 1];
+		else if (usable_count > 1 && material_shaders[place] == usable[usable_count - 1])
+			material_shaders[place] = usable[place % (usable_count - 1)];
 		shader_tag = model_shader_tag(definition, material_shaders[place]);
+		if (usable_count > 1 && strstr(template_.materials[material], "monicle"))
+			monicle_shader_tag = shader_tag;
 		bitmap_tag = ((struct shader_model_definition *)shader_definition_get(shader_tag))->model.base_map.index;
 		material_bitmaps[place] = bitmap_tag;
 		for (other = 0; other < shader_count && shader_tags[other] != shader_tag; other++)
@@ -2682,7 +3081,8 @@ static boolean model_play(
 			material_cutouts[place] = played->cutouts[other] ||
 				material_card(template_.materials[material]) ? TRUE : FALSE;
 			material_blends[place] = played->blends[other] ||
-				material_glass(template_.materials[material]) ? TRUE : FALSE;
+				material_glass(template_.materials[material]) ||
+				material_lightning(template_.materials[material]) ? TRUE : FALSE;
 			continue;
 		}
 		existing = played ? played->count : 0;
@@ -2707,6 +3107,19 @@ static boolean model_play(
 			material_textures[place] = NULL;
 			goto refused;
 		}
+		/* (the bay's plating is near white on the ceiling and the floor, and
+		both clip. Two fifths brings it down to the hull's grey) */
+		if (strstr(template_.materials[material], "pelican") &&
+			strstr(template_.materials[material], "plating"))
+			saber_texture_darken(material_textures[place], 2, 5);
+		/* (the eyepiece's mask is nearly black. Green, the lens is the
+		display and the marks on it are the brighter part) */
+		if (strstr(template_.materials[material], "monicle"))
+			saber_texture_monicle(material_textures[place]);
+		/* (the rear meters are white. Blue, as the gauge beside them; the
+		black of the plate stays the window) */
+		if (strstr(template_.materials[material], "holo"))
+			saber_texture_holo(material_textures[place]);
 		material_cutouts[place] = saber_texture_cutout(material_textures[place],
 			material_foliage(template_.materials[material])) ? TRUE : FALSE;
 		/* (a leaf card stays cut out by its alpha even when too little of it
@@ -2727,9 +3140,14 @@ static boolean model_play(
 			material_cutouts[place] = FALSE;
 		}
 		/* (a window keeps its alpha and is blended. Filling it in draws the
-		pane solid, and the map's glass over it) */
-		if (material_glass(template_.materials[material]))
+		pane solid, and the map's glass over it. The arc is a bolt on black
+		with no alpha: the black is punched and the bolt is blended, so the
+		plate between the barrels does not draw) */
+		if (material_glass(template_.materials[material]) ||
+			material_lightning(template_.materials[material]))
 			material_blends[place] = TRUE;
+		if (material_lightning(template_.materials[material]))
+			saber_texture_punch_black(material_textures[place]);
 		/* (one that is not cut out drawn whole, though its shader be alpha
 		tested for another's) */
 		if (!material_cutouts[place] && !material_blends[place])
@@ -2809,6 +3227,17 @@ static boolean model_play(
 	}
 	for (index = 0; index < shader_count; index++)
 		shader_plug(shader_tags[index]);
+	/* (the lens scrolls. slide is periodic function 6. This shader is the
+	eyepiece's alone, so the face does not scroll with it) */
+	if (monicle_shader_tag != NONE)
+	{
+		struct shader_model_definition *shader =
+			(struct shader_model_definition *)shader_definition_get(monicle_shader_tag);
+
+		shader->model.texture_animation.v_function = 6;
+		shader->model.texture_animation.v_period = 2.f;
+		shader->model.texture_animation.v_scale = 1.f;
+	}
 	/* (a shader of a texture cut out by its alpha, leaves', is alpha
 	tested again, and drawn from both sides as Saber3D draws leaves) */
 	for (index = 0; index < material_count; index++)
@@ -3143,8 +3572,9 @@ static boolean saber_level_play(
 		made->over = sky && strstr(level.materials[material], "ring") != NULL;
 		made->dome = sky && strncmp(level.materials[material], "stars", 5) == 0;
 		/* (a planet is blended: its card is clear and the limb fades. A test
-		would cut the disc off. The ring is the torus itself, drawn solid) */
-		made->blend = sky && strstr(level.materials[material], "planet") != NULL;
+		would cut the disc off. The ring's card is clear around the band) */
+		made->blend = sky && (strstr(level.materials[material], "planet") != NULL ||
+			strstr(level.materials[material], "ring") != NULL);
 		if (!sky && !saber_level_material_drawn(level.materials[material]))
 		{
 			part->vertex_count = 0;
@@ -3210,6 +3640,8 @@ static boolean saber_level_play(
 				/* (a sky's alpha is its shape: a cloud's soft edge. Filling it
 				in would draw the card solid. A star field's black, and a
 				planet's clear card, are stored with no alpha that cuts them) */
+				if (sky && strstr(level.materials[material], "ring") != NULL)
+					saber_texture_ring_contrast(texture);
 				if (sky && (strncmp(level.materials[material], "stars", 5) == 0 ||
 					strstr(level.materials[material], "planet") != NULL))
 				{

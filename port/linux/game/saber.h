@@ -189,6 +189,23 @@ and the grey a block blends around each star, are punched out. A planet's
 or a moon's card keeps its picture: the clear texels stay clear and the
 limb is lifted so it fades instead of being cut off */
 void saber_texture_sky_alpha(struct saber_texture *texture, int stars);
+/* the halo ring's picture is stored a few shades off a flat blue, so the
+band draws as one colour. The shades are spread so the surface shows */
+void saber_texture_ring_contrast(struct saber_texture *texture);
+/* multiply a texture's colour by numer/denom. The pelican's plating is
+near white, so the bay's ceiling and floor clip; brought down toward the
+hull's grey */
+void saber_texture_darken(struct saber_texture *texture, long numer, long denom);
+/* the marine eyepiece is a dark mask with a few light marks. Drawn as it
+is, the lens is black. The marks, and the field under them, are made green */
+void saber_texture_monicle(struct saber_texture *texture);
+/* a picture of a bolt on black, with no alpha of its own (the plasma
+rifle's arc). The black, and the grey a block blends around it, is punched
+out so the plate does not draw */
+void saber_texture_punch_black(struct saber_texture *texture);
+/* the rear meters are a white plate (wpn_plasma_rifle_holo_01). Luminance
+becomes blue, and the black of the plate stays black */
+void saber_texture_holo(struct saber_texture *texture);
 
 /* ---------- prototypes/SABER_MODELS.C */
 
