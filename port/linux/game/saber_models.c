@@ -90,6 +90,7 @@ goes.
 #include "shaders/shader_texture_animation.h"
 #include "tag_files/tag_groups.h"
 #include "cache_file_formats.h"
+#include "custom_edition_cache.h" /* port: the map's bitmaps' channel orders after Back, port/linux/game/custom_edition_bitmaps.c */
 #include "saber.h"
 #include "saber_toggle.h" /* port: the Back button's switch, port/linux/game/saber_toggle.c */
 
@@ -109,6 +110,7 @@ void halo_custom_edition_texels_channels(void const *texels, unsigned char chann
 char *tag_get_name(long tag_index);
 void *cache_files_tag_instances(long *count);
 void cache_files_set_tag_instances(void *instances, long count);
+void texture_cache_flush(void);
 
 /* ---------- constants */
 
@@ -1962,6 +1964,9 @@ static void material_mask_play(
 		set->tag_index = mask_tag;
 		set->masks = TRUE;
 		set->map_group = *group;
+		/* (the map's own group given back with the map's models: a set made
+		over map's models only, as the map loads) */
+		set->classic_group = *group;
 		group->sequences.count = 0;
 		group->bitmaps.count = 0;
 		group->bitmaps.address = set->bitmaps;
@@ -1989,13 +1994,13 @@ matches what is drawn) */
 		{
 			if (plugged->tag_index != shader_tag)
 				continue;
+			/* (both the package's copy and the tag: the copy is taken again from
+			the tag after everything the models change, and Back can have put the
+			map's models back before either) */
 			plugged->played.model.multipurpose_map.index = mask_tag;
 			plugged->played.model.change_color_source = played->map_shader.model.change_color_source;
-			if (!saber_toggle_classic_models())
-			{
-				shader->model.multipurpose_map.index = mask_tag;
-				shader->model.change_color_source = played->map_shader.model.change_color_source;
-			}
+			shader->model.multipurpose_map.index = mask_tag;
+			shader->model.change_color_source = played->map_shader.model.change_color_source;
 			break;
 		}
 	}
@@ -3768,6 +3773,14 @@ static boolean saber_level_play(
 	saber_level.group.bitmaps.count = saber_level.texture_count;
 	saber_level.group.bitmaps.address = saber_level.bitmaps;
 	saber_level.group.bitmaps.definition = NULL;
+	/* (the structure is drawn with the map's first model shader, changed
+	colours and all, so its textures are found where the map's would be: they
+	are the package's, and laid out as this build reads them) */
+	for (index = 0; index < saber_level.texture_count; index++)
+	{
+		if (custom_edition_bitmap_channel_order(saber_level.bitmap_tag, index) != _custom_edition_channels_xbox)
+			custom_edition_bitmap_order_set(saber_level.bitmap_tag, index, _custom_edition_channels_xbox);
+	}
 
 	/* its shaders: the map's first model shader's, its base map the bitmap */
 	{
@@ -3810,6 +3823,12 @@ static boolean saber_level_play(
 		model->change_color_source = 0;
 		model->detail_mask = 0;
 		model->self_illumination_color_source = 0;
+		/* (the map's shader was lit by the cube map's reflections, which the
+	package's textures carry themselves) */
+		csmemset(&model->perpendicular_tint_color, 0, sizeof(model->perpendicular_tint_color));
+		model->perpendicular_brightness = 0.f;
+		model->parallel_brightness = 0.f;
+		csmemset(&model->parallel_tint_color, 0, sizeof(model->parallel_tint_color));
 		csmemset(&model->self_illumination_animation_color_lower_bound, 0,
 			sizeof(model->self_illumination_animation_color_lower_bound));
 		csmemset(&model->self_illumination_animation_color_upper_bound, 0,
@@ -4048,6 +4067,11 @@ long saber_models_anniversary_set(
 				*group = bitmap->classic_group;
 		}
 	}
+	/* (and the textures of the map's own, not the package's that a texture in
+	the cache still holds: they are read again, as the map's bitmaps are, and
+their channels listed again as the map's) */
+	texture_cache_flush();
+	custom_edition_reordered_bitmaps_find_again();
 
 	return models;
 }
@@ -4201,6 +4225,8 @@ short saber_models_geometry_index(
 		long rank_index;
 		long chosen = NONE;
 
+		/* (the map's own model's shaders are its own, and its geometries the
+		templates' copies do not change) */
 		if (made->rank_count <= 1 || model->geometries.address != made->geometries ||
 			geometry_index < 0 || geometry_index >= made->geometry_count)
 		{
@@ -4499,7 +4525,10 @@ int saber_bitmaps_contain(
 		return TRUE;
 	for (played = saber_models_globals.bitmaps; played; played = played->next)
 	{
-		if (bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
+		/* (only while the group holds the package's textures: the map's own
+		array can lie where the package's did) */
+		if (bitmap_group_get(played->tag_index)->bitmaps.address == played->bitmaps &&
+			bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
 			return TRUE;
 	}
 
@@ -4525,7 +4554,11 @@ int saber_bitmaps_read(
 	}
 	for (played = saber_models_globals.bitmaps; played; played = played->next)
 	{
-		if (bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
+		/* (only while the group holds the package's textures: the map's own
+		array can lie where the package's did, and then the map's own bitmap
+		would be given the package's, and not its own) */
+		if (bitmap_group_get(played->tag_index)->bitmaps.address == played->bitmaps &&
+			bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
 		{
 			struct saber_texture const *texture = &played->textures[bitmap - played->bitmaps];
 

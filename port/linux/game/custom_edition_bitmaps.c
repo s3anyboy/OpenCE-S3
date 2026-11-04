@@ -813,6 +813,25 @@ boolean custom_edition_loaded_reordered_bitmaps_find(
 	return reordered_bitmaps_find(&view);
 }
 
+boolean custom_edition_reordered_bitmaps_find_again(
+	void)
+{
+	struct custom_edition_bitmaps_globals *globals = &custom_edition_bitmaps_globals;
+	struct tag_view view;
+
+	/* (found again in the tag cache the map was loaded from: the models played
+	over its bitmaps have been given back, so their channels are the map's) */
+	view.loaded_bytes = 0;
+	view.tag_cache = custom_edition_cache_tag_cache(&view.loaded_bytes);
+	if (!view.tag_cache)
+	{
+		return TRUE;
+	}
+	globals->reordered_bitmap_count = 0;
+
+	return reordered_bitmaps_find(&view);
+}
+
 short custom_edition_bitmap_channel_order(
 	long handle,
 	long bitmap_index)
@@ -821,6 +840,28 @@ short custom_edition_bitmap_channel_order(
 
 	return index != NONE ? custom_edition_bitmaps_globals.reordered_bitmaps[index].channel_order :
 		_custom_edition_channels_xbox;
+}
+
+void custom_edition_bitmap_order_set(
+	long handle,
+	long bitmap_index,
+	short channel_order)
+{
+	long index;
+
+	if (channel_order >= NUMBER_OF_CUSTOM_EDITION_CHANNEL_ORDERS)
+	{
+		channel_order = _custom_edition_channels_xbox;
+	}
+	index = reordered_bitmap_index(handle, bitmap_index);
+	if (index != NONE)
+	{
+		custom_edition_bitmaps_globals.reordered_bitmaps[index].channel_order = (byte)channel_order;
+		return;
+	}
+	reordered_bitmap_mark(handle, bitmap_index, channel_order);
+
+	return;
 }
 
 void custom_edition_bitmaps_dispose(

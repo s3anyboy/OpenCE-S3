@@ -1271,6 +1271,21 @@ boolean custom_edition_cache_tags_loaded(
 	return custom_edition_cache_globals.tags_loaded;
 }
 
+/* the tag cache the map's tags are in (`loaded_bytes` of it in use), for the
+bitmaps' channels to be found in them again (port/linux/game/custom_edition_bitmaps.c) */
+byte *custom_edition_cache_tag_cache(
+	unsigned long *loaded_bytes)
+{
+	if (!custom_edition_cache_globals.tags_loaded)
+	{
+		*loaded_bytes = 0;
+		return NULL;
+	}
+	*loaded_bytes = custom_edition_cache_globals.loaded_bytes;
+
+	return custom_edition_cache_globals.tag_cache;
+}
+
 boolean custom_edition_cache_relies_on(
 	short behaviour)
 {

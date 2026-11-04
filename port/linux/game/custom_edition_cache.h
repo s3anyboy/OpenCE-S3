@@ -184,6 +184,10 @@ struct custom_edition_string_list *custom_edition_locale_strings(
 	char const *name);
 boolean custom_edition_cache_tags_loaded(
 	void);
+/* the tag cache the map's tags are in (`loaded_bytes` of it in use), or NULL
+when no Custom Edition map's tags are */
+byte *custom_edition_cache_tag_cache(
+	unsigned long *loaded_bytes);
 /* Whether the structure bsp reference (of the loaded map's scenario) names
 bytes of the map that load to the top of its tag cache, above its tags:
 logged when not. */
@@ -231,11 +235,23 @@ the validator has checked: for the bitmaps of mods (mod_bitmaps.c), Halo
 PC's on any map. FALSE after logging why it cannot. */
 boolean custom_edition_loaded_reordered_bitmaps_find(
 	void);
+/* As custom_edition_loaded_reordered_bitmaps_find, in the tag cache the map's
+tags were loaded from: for the map's bitmaps once the models played over them
+have been given back (saber_models_anniversary_set). */
+boolean custom_edition_reordered_bitmaps_find_again(
+	void);
 /* The order (enum custom_edition_channel_order) Halo PC keeps the channels
 of bitmap `bitmap_index` of the tag `handle` names in, of those found. */
 short custom_edition_bitmap_channel_order(
 	long handle,
 	long bitmap_index);
+/* Lists bitmap `bitmap_index` of the tag `handle` names as drawn in
+`channel_order` (enum custom_edition_channel_order), or as it is, where it
+is one already listed. */
+void custom_edition_bitmap_order_set(
+	long handle,
+	long bitmap_index,
+	short channel_order);
 /* Whether the texture cache can draw `bitmap` from pixels laid out as a
 Halo PC tag lays them out (rasterizer_xbox_bitmap_rebuild_hardware_format
 makes them the hardware's): the game's bitmap_verify, a format with a
