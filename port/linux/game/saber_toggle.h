@@ -2,8 +2,8 @@
 SABER_TOGGLE.H
 
 The Back button switching the remastered models on and off in the game
-(saber_toggle.c): Halo: Combat Evolved Anniversary's models, and its level
-geometry, over the map's while Back is held.
+(saber_toggle.c): each press draws the map's own models, or Halo: Combat
+Evolved Anniversary's again.
 */
 
 #ifndef __SABER_TOGGLE_H
@@ -11,15 +11,16 @@ geometry, over the map's while Back is held.
 
 /* ---------- prototypes/SABER_TOGGLE.C */
 
-/* called each frame of a game (port/linux/src/xinput_sdl.c): while the first
-player holds the controller's Back, the package's models stay on, if they are
-off; let go of, they go back off */
+/* (mods.c, as a map's tags load) the map is drawn as its settings say */
+void saber_toggle_initialize(void);
+/* called each frame of a game (render_objects.c, as it draws): each press of
+the first player's Back switches the models */
 void saber_toggle_update(void);
-/* (models.c, render_model_parts) whether the model drawn is not a template's:
-while Back is held the map's own models are drawn in the templates' place */
+/* (saber_models.c, saber_models_tags_loaded) whether the package's models are
+made as a map loads: display.anniversary_models */
+int saber_toggle_models_wanted(void);
+/* (saber_models.c, render_model_parts) whether the map's own models are drawn
+in the templates' place: Back, pressed, switches them */
 int saber_toggle_classic_models(void);
-/* (saber_models.c, saber_models_level_drawn) whether the level is drawn as
-the package's while Back is held, though display.remastered_bsp is off */
-int saber_toggle_level_wanted(void);
 
 #endif

@@ -279,8 +279,8 @@ static boolean reported_rendered_object_overflow = FALSE;
 
 /* ---------- public code */
 
-/* port: Back, held, shows the remastered models or the map's, whichever the
-settings do not draw (saber_toggle.c), once each frame both are drawn in */
+/* port: each press of Back draws the map's models, or the remastered ones
+again (saber_toggle.c), once each frame the objects are drawn in */
 void saber_toggle_update(void);
 
 void render_objects_initialize(

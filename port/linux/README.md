@@ -1669,13 +1669,15 @@ classic model's. halo.log says which models
 are drawn and how many of the map's.
 
 Video Setup's FOV AND VIEWMODELS screen turns it on and off (ANNIVERSARY
-MODELS); the change is taken up as the next map loads. In the game, the
-Back button (F1, or the scoreboard's key) switches what is drawn each time it
-is pressed: the map is drawn the other way to the settings, the package's
-models and level geometry or the map's own, until Back is pressed again.
-The package is read as the map loads when either setting asks for it, so the
-switch changes only what is drawn. A controller's Back still shows the
-scoreboard while held.
+MODELS); the change is taken up as the next map loads. In the game, each
+press of the Back button (F1, or the scoreboard's key) switches the models:
+from the package's models to the map's own, or back again, until the map
+changes. The package's models, its shaders and its textures are made as the
+map loads (the switch only says which are drawn), so a press costs nothing
+and the map's own models come back exactly as the map had them. Only what is
+drawn changes, and only the models: the level's structure stays as
+`display.remastered_bsp` draws it. A controller's Back still shows the
+scoreboard while it is held.
 
 With `display.remastered_bsp` (Video Setup's FOV AND VIEWMODELS screen,
 REMASTERED BSP, below ANNIVERSARY MODELS), the level itself is drawn as the package's level geometry (its

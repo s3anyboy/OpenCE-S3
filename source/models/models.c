@@ -269,10 +269,6 @@ static struct profile_section render_model_section = { "render_model", NONE, TRU
 
 /* ---------- private code */
 
-/* port: whether the map's own models are drawn in the remastered ones' place
-(port/linux/game/saber_toggle.c) */
-int saber_toggle_classic_models(void);
-
 static void render_model_parts(
 	struct model const *model,
 	char const *region_permutation_indices,
@@ -326,10 +322,8 @@ static void render_model_parts(
 				(port/linux/game/model_detail.c): stock, the model's */
 				geometry_index = model_detail_geometry_index(model, permutation, geometry_detail_level_index, detail_rules);
 				/* port: an Anniversary model's geometry of the object's rank
-				(port/linux/game/saber_models.c), unless Back draws the model's
-				own */
-				if (!saber_toggle_classic_models())
-					geometry_index = saber_models_geometry_index(model, object_index, geometry_index);
+				(port/linux/game/saber_models.c) */
+				geometry_index = saber_models_geometry_index(model, object_index, geometry_index);
 				if (geometry_index!=NONE && !VALID_INDEX(geometry_index, model->geometries.count))
 				{
 					model_data_error(model, "geometry");
@@ -469,39 +463,46 @@ static void render_model_parts(
 							{
 								/* port: a package leaf card is alpha tested and drawn
 								from both sides, though its shader is one an opaque
-								material shares (saber_models_part_cutout) */
-								if (shader->base.type==_shader_type_model &&
-									saber_models_part_cutout(
-										shader_reference->shader.index,
-										forced_shader_permutation_index ?
-											forced_shader_permutation_index :
-											shader_reference->permutation_index))
+								material shares (saber_models_part_cutout). The flags are
+								this draw's: the shader is another model's too */
 								{
-									struct shader_model_definition *model_shader;
+									struct shader_model_definition *model_shader =
+										(struct shader_model_definition *)shader;
+									long tested_was = TEST_FLAG(model_shader->flags, _shader_model_not_alpha_tested_bit) ? 1 : 0;
+									long sided_was = TEST_FLAG(model_shader->flags, _shader_model_two_sided_bit) ? 1 : 0;
 
-									model_shader = (struct shader_model_definition *)shader;
-									SET_FLAG(model_shader->flags, _shader_model_not_alpha_tested_bit, FALSE);
-									SET_FLAG(model_shader->flags, _shader_model_two_sided_bit, TRUE);
-								}
-								if (TEST_FLAG(flags, _render_model_shadow_bit))
-								{
-									rasterizer_environment_shadow_model_draw(
-										shader,
-										forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
-										&part->triangle_buffer,
-										&part->vertex_buffer);
-								}
-								else
-								{
-									rasterizer_model_draw(
-										shader,
-										forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
-										&part->triangle_buffer,
-										NONE,
-										part->triangle_buffer.count,
-										&part->vertex_buffer,
-										NONE);
-									rasterizer_debug_model_vertices(object_index, skinning, part);
+									if (shader->base.type==_shader_type_model &&
+										saber_models_part_cutout(
+											shader_reference->shader.index,
+											forced_shader_permutation_index ?
+												forced_shader_permutation_index :
+												shader_reference->permutation_index))
+									{
+										SET_FLAG(model_shader->flags, _shader_model_not_alpha_tested_bit, FALSE);
+										SET_FLAG(model_shader->flags, _shader_model_two_sided_bit, TRUE);
+									}
+									if (TEST_FLAG(flags, _render_model_shadow_bit))
+									{
+										rasterizer_environment_shadow_model_draw(
+											shader,
+											forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
+											&part->triangle_buffer,
+											&part->vertex_buffer);
+									}
+									else
+									{
+										rasterizer_model_draw(
+											shader,
+											forced_shader_permutation_index ? forced_shader_permutation_index : shader_reference->permutation_index,
+											&part->triangle_buffer,
+											NONE,
+											part->triangle_buffer.count,
+											&part->vertex_buffer,
+											NONE);
+										rasterizer_debug_model_vertices(object_index, skinning, part);
+									}
+									SET_FLAG(model_shader->flags, _shader_model_not_alpha_tested_bit, tested_was);
+									SET_FLAG(model_shader->flags, _shader_model_two_sided_bit, sided_was);
 								}
 							}
 						}

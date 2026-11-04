@@ -292,12 +292,19 @@ struct saber_model
 };
 
 /* a shader of the map drawn with a texture of the package: its own
-definition, given back as the map goes */
+definition, given back as the map goes, and while Back draws the map's own
+models (saber_toggle.c) */
 struct saber_shader
 {
 	struct saber_shader *next;
 	long tag_index;
 	struct shader_model_definition map_shader;
+	/* the map's shader as the package's models draw it: with the flags its
+	parts are drawn by (saber_models_part_cutout, saber_models_part_blend).
+	The package's templates and the map's own models can share a shader, so
+the flags are this copy's, which the tags hold while the templates are
+	drawn, and not the map's own, which the map's models keep */
+	struct shader_model_definition played;
 };
 
 /* a bitmap of the map that is textures of the package: each a bitmap of
@@ -309,6 +316,10 @@ struct saber_bitmap
 	struct saber_bitmap *next;
 	long tag_index;
 	struct bitmap_group map_group;
+	/* the map's own group while the package's textures are not drawn: Back's
+	switch gives it back and takes it again (saber_toggle.c) */
+	struct bitmap_group classic_group;
+	boolean shown;
 	long count;
 	struct bitmap_data bitmaps[MAXIMUM_SABER_BITMAP_TEXTURES];
 	struct saber_texture textures[MAXIMUM_SABER_BITMAP_TEXTURES];
@@ -1162,6 +1173,7 @@ static struct saber_model *saber_model_new(
 	made->map_model = *map_model;
 	made->model = *map_model;
 	made->model.flags &= ~FLAG(MODEL_PARTS_HAVE_LOCAL_NODES_BIT);
+	/* (the package's texture coordinates are its own, drawn as they are) */
 	made->model.base_map_scale.i = 1.f;
 	made->model.base_map_scale.j = 1.f;
 
@@ -1376,8 +1388,16 @@ static struct saber_model *saber_model_new(
 				*part = *clear_parts[index];
 				part->previous_part_index = NONE;
 				part->next_part_index = NONE;
+				/* (a fitted meter's buffer is this model's, and its centroid
+				placed: Back draws the map's part with the map's own, whose
+				buffer is given back with the model, saber_toggle.c) */
 				if (own_meter)
 					meter_part_place(made, map_model, template_, clear_parts[index], part);
+				else
+				{
+					part->vertex_buffer = clear_parts[index]->vertex_buffer;
+					part->centroid = clear_parts[index]->centroid;
+				}
 			}
 			geometry->parts.count = geometry_part_count - first;
 			geometry->parts.address = made->geometry_parts + first;
@@ -1742,14 +1762,20 @@ static boolean shader_self_illuminated(
 		upper->red > 0.f || upper->green > 0.f || upper->blue > 0.f;
 }
 
-/* Has the map's model shader drawn as its base map alone (the classic
+	/* Has the map's model shader drawn as its base map alone (the classic
 model's other maps gone, its base map's scale none), FALSE when there is no
-memory for it. */
+memory for it. Back's switch puts the map's own back (saber_toggle.c).
+A shader played over before is not plugged again: its package copy is the
+one first made, and Back gives that one back. */
 static boolean shader_plug(
 	long shader_tag)
 {
 	struct shader_model_definition *shader = (struct shader_model_definition *)shader_definition_get(shader_tag);
-	struct saber_shader *played = malloc(sizeof(*played));
+	struct saber_shader *played;
+
+	if (shader_played(shader_tag))
+		return TRUE;
+	played = malloc(sizeof(*played));
 
 	if (!played)
 		return FALSE;
@@ -1799,6 +1825,9 @@ static boolean shader_plug(
 	/* (the classic scroll is the visor's. A material that shares the
 	shader, the face, scrolls with it) */
 	csmemset(&shader->model.texture_animation, 0, sizeof(shader->model.texture_animation));
+	/* (what the package's models draw it by, for Back's switch to give
+	back as they are drawn again) */
+	played->played = *shader;
 
 	return TRUE;
 }
@@ -1949,8 +1978,27 @@ static void material_mask_play(
 	if (found)
 		platform_log("anniversary: %s's colour change masked by its %s, %dx%d", texture_name, "mask", mask.width,
 			mask.height);
-	shader->model.multipurpose_map.index = mask_tag;
-	shader->model.change_color_source = played->map_shader.model.change_color_source;
+	/* (the package's shader takes the mask, and only it: the map's models share
+	the tag, and Back gives them their own shader back, saber_toggle.c. The
+tag is written only while the templates are drawn, so that what it holds
+matches what is drawn) */
+	{
+		struct saber_shader *plugged;
+
+		for (plugged = saber_models_globals.shaders; played && plugged; plugged = plugged->next)
+		{
+			if (plugged->tag_index != shader_tag)
+				continue;
+			plugged->played.model.multipurpose_map.index = mask_tag;
+			plugged->played.model.change_color_source = played->map_shader.model.change_color_source;
+			if (!saber_toggle_classic_models())
+			{
+				shader->model.multipurpose_map.index = mask_tag;
+				shader->model.change_color_source = played->map_shader.model.change_color_source;
+			}
+			break;
+		}
+	}
 }
 
 /* whether a part's material is an effect's (a muzzle flash, a light's
@@ -2821,17 +2869,12 @@ static void template_specials_merge(
 	saber_template_dispose(&special);
 }
 
-/* (the map's own models are drawn while Back is held, saber_toggle.c) */
-int saber_toggle_classic_models(void);
-
 /* whether a shader or bitmap is one a model drawn as it is draws with */
 static boolean tag_kept(
 	long tag_index)
 {
 	long index;
 
-	if (saber_toggle_classic_models())
-		return TRUE;
 	for (index = 0; index < saber_models_globals.kept_count; index++)
 	{
 		if (saber_models_globals.kept_tags[index] == tag_index)
@@ -3202,6 +3245,9 @@ static boolean model_play(
 			csmemset(played, 0, sizeof(*played));
 			played->tag_index = material_bitmaps[index];
 			played->map_group = *group;
+			played->classic_group = *group;
+			played->shown = TRUE;
+			played->count = 0;
 			group->sequences.count = 0;
 			group->bitmaps.address = played->bitmaps;
 			group->bitmaps.definition = NULL;
@@ -3245,17 +3291,29 @@ static boolean model_play(
 		shader->model.texture_animation.v_scale = 1.f;
 	}
 	/* (a shader of a texture cut out by its alpha, leaves', is alpha
-	tested again, and drawn from both sides as Saber3D draws leaves) */
+	tested again, and drawn from both sides as Saber3D draws leaves. Only in
+	the package's copy, never on the tag: the map's models share it, and the
+	map's own model must still be drawn one-sided with Back's switch) */
 	for (index = 0; index < material_count; index++)
 	{
 		struct shader_model_definition *shader;
+		struct saber_shader *plugged;
 
 		if (!material_cutouts[index])
 			continue;
 		shader = (struct shader_model_definition *)shader_definition_get(
 			model_shader_tag(definition, material_shaders[index]));
-		SET_FLAG(shader->model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
-		SET_FLAG(shader->model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+		for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
+		{
+			struct shader_model_definition *plugged_tag = (struct shader_model_definition *)shader_definition_get(plugged->tag_index);
+
+			if (plugged_tag == shader || plugged->tag_index == model_shader_tag(definition, material_shaders[index]))
+			{
+				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
+				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+				break;
+			}
+		}
 	}
 	/* (each material's colour change, where its classic shader had one) */
 	for (index = 0; index < material_count; index++)
@@ -3276,6 +3334,17 @@ static boolean model_play(
 		}
 	}
 	*definition = made->model;
+	/* (the package's copy of each shader taken now, after everything this model
+	affects has changed it: its flags, its mask, its change colour. A shader
+	two models share is changed by the second too, so a copy taken as it was
+	plugged would not be what the models draw with, and Back's switch would
+	give back the wrong one, saber_toggle.c) */
+	{
+		struct saber_shader *plugged;
+
+		for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
+			plugged->played = *(struct shader_model_definition *)shader_definition_get(plugged->tag_index);
+	}
 	made->next = saber_models_globals.models;
 	saber_models_globals.models = made;
 	if (made->rank_count > 1)
@@ -3829,8 +3898,7 @@ void saber_models_tags_loaded(
 	/* (what was made for a map whose tags went without its being let go of
 	is not written over this one's) */
 	saber_models_tags_unloaded(FALSE);
-	if (!map_name || !*map_name ||
-		(!config_boolean("display.anniversary_models") && !config_boolean("display.remastered_bsp")))
+	if (!map_name || !*map_name || (!saber_toggle_models_wanted() && !config_boolean("display.remastered_bsp")))
 	{
 		return;
 	}
@@ -3870,7 +3938,7 @@ void saber_models_tags_loaded(
 	}
 	/* (every model of the map's: its objects', not its structure's, which
 	is no model) */
-	if (config_boolean("display.anniversary_models"))
+	if (saber_toggle_models_wanted())
 	{
 		struct tag_iterator iterator;
 		char const *name = strrchr(map_name, '\\');
@@ -3889,10 +3957,20 @@ void saber_models_tags_loaded(
 		}
 		platform_log("anniversary: %ld of the map's %ld models drawn as templates", drawn, models);
 	}
-	/* (and its structure, display.remastered_bsp, or else when Back is held
-	in the game: saber_toggle.c) */
-	if (config_boolean("display.remastered_bsp") || saber_toggle_level_wanted())
+	/* (and its structure, display.remastered_bsp; Back switches the models
+	alone, saber_toggle.c) */
+	if (config_boolean("display.remastered_bsp"))
 		saber_level_play(pak);
+	/* (the package's copy of each shader taken once everything that draws with
+	it has had its say: a shader two models share is changed by both, so the
+	copy is what the last of them left it as, saber_toggle.c. Taken after the
+	level, which takes a shader for itself) */
+	{
+		struct saber_shader *plugged;
+
+		for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
+			plugged->played = *(struct shader_model_definition *)shader_definition_get(plugged->tag_index);
+	}
 	saber_pak_close(pak);
 	if (saber_models_globals.stream)
 		saber_pak_close(saber_models_globals.stream);
@@ -3906,6 +3984,84 @@ void saber_models_tags_loaded(
 	}
 	saber_models_globals.ipak_count = 0;
 	saber_models_globals.ipaks_tried = FALSE;
+}
+
+/* (Back, pressed: saber_toggle.c) the map's models drawn as the package's, or
+as the map's own, by writing the tags: each model's geometries, regions and
+shaders the model made for it, or the map's. Everything that draws a model
+reads the tag, so none of them asks which is drawn. */
+long saber_models_anniversary_set(
+	int shown)
+{
+	struct saber_model *made;
+	long models = 0;
+
+	for (made = saber_models_globals.models; made; made = made->next)
+	{
+		struct model *definition = model_definition_get(made->tag_index);
+
+		if (shown)
+			*definition = made->model;
+		else
+		{
+			*definition = made->map_model;
+			/* (the map's own texture scale, which the template's overrides) */
+			definition->base_map_scale.i = made->map_model.base_map_scale.i != 0.f ?
+				made->map_model.base_map_scale.i : 1.f;
+			definition->base_map_scale.j = made->map_model.base_map_scale.j != 0.f ?
+				made->map_model.base_map_scale.j : 1.f;
+		}
+		models++;
+	}
+	/* (and their shaders: the map's own, with the map's models; as the
+	package's models draw them, with the templates) */
+	{
+		struct saber_shader *shader;
+
+		/* (the package's copy while the templates are drawn, the map's own
+		while its models are: `map_shader` is what the shader drew with
+		before a template took it, `played` what the templates drew with) */
+		for (shader = saber_models_globals.shaders; shader; shader = shader->next)
+			*(struct shader_model_definition *)shader_definition_get(shader->tag_index) = shown ? shader->played : shader->map_shader;
+	}
+	/* (and the bitmaps they draw with: the package's textures, or the map's
+	own) */
+	{
+		struct saber_bitmap *bitmap;
+
+		for (bitmap = saber_models_globals.bitmaps; bitmap; bitmap = bitmap->next)
+		{
+			struct bitmap_group *group = bitmap_group_get(bitmap->tag_index);
+
+			/* (written every time, as the models and shaders are: a flag that
+			says which is in place cannot be trusted to be in step with it) */
+			bitmap->shown = shown ? TRUE : FALSE;
+			if (shown)
+			{
+				*group = bitmap->map_group;
+				group->sequences.count = 0;
+				group->bitmaps.count = bitmap->count;
+				group->bitmaps.address = bitmap->bitmaps;
+				group->bitmaps.definition = NULL;
+			}
+			else
+				*group = bitmap->classic_group;
+		}
+	}
+
+	return models;
+}
+
+long saber_models_geometry_count(
+	void)
+{
+	struct saber_model const *made;
+	long geometries = 0;
+
+	for (made = saber_models_globals.models; made; made = made->next)
+		geometries += model_definition_get(made->tag_index)->geometries.count;
+
+	return geometries;
 }
 
 void saber_models_tags_unloaded(
@@ -3993,6 +4149,10 @@ int saber_models_part_cutout(
 
 	if (shader_tag == NONE || permutation < 0)
 		return FALSE;
+	/* (the map's own models draw every part as they always did: no package
+	cutout, nor blend, is theirs, saber_toggle.c) */
+	if (saber_toggle_classic_models())
+		return FALSE;
 	shader = shader_definition_get(shader_tag);
 	if (!shader || shader->base.type != SHADER_TYPE_MODEL)
 		return FALSE;
@@ -4011,6 +4171,10 @@ int saber_models_part_blend(
 	struct saber_bitmap const *played;
 
 	if (shader_tag == NONE || permutation < 0)
+		return FALSE;
+	/* (the map's own models draw every part as they always did: no package
+	cutout, nor blend, is theirs, saber_toggle.c) */
+	if (saber_toggle_classic_models())
 		return FALSE;
 	shader = shader_definition_get(shader_tag);
 	if (!shader || shader->base.type != SHADER_TYPE_MODEL)
@@ -4073,8 +4237,7 @@ short saber_models_geometry_index(
 int saber_models_level_drawn(
 	void)
 {
-	/* (Back shows it, or hides it, in the game: saber_toggle.c) */
-	return saber_level.drawn && !saber_toggle_classic_models();
+	return saber_level.drawn;
 }
 
 int saber_models_level_sky_drawn(
@@ -4082,7 +4245,7 @@ int saber_models_level_sky_drawn(
 {
 	long index;
 
-	if (!saber_level.drawn || saber_toggle_classic_models())
+	if (!saber_level.drawn)
 		return FALSE;
 	for (index = 0; index < saber_level.part_count; index++)
 	{
@@ -4117,7 +4280,7 @@ void saber_models_level_sky_render(
 	real far_distance;
 	real scale;
 
-	if (!saber_level.drawn || saber_toggle_classic_models())
+	if (!saber_level.drawn)
 		return;
 	sky_count = 0;
 	anchor_index = NONE;
@@ -4267,7 +4430,7 @@ void saber_models_level_render(
 	short bsp_index = global_structure_bsp_index_get();
 	long index;
 
-	if (!saber_level.drawn || saber_toggle_classic_models())
+	if (!saber_level.drawn)
 		return;
 	csmemset(&node, 0, sizeof(node));
 	node.scale = 1.f;

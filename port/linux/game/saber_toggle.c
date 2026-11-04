@@ -2,14 +2,18 @@
 SABER_TOGGLE.C
 
 The Back button switching the remastered models on and off in the game
-(saber_toggle.h). Held, it shows Halo: Combat Evolved Anniversary's graphics
-where display.anniversary_models and display.remastered_bsp turned them off,
-or the map's own where they turned them on, as Anniversary's Back does; let
-go of, the map is drawn as the settings say again. The package's models are
-made as the map loads when either setting asks for them, so the switch only
-says which are drawn.
+(saber_toggle.h). Each press of it draws the map's own models, instead of
+Halo: Combat Evolved Anniversary's, or them again. The models' tags are
+written as the press says: each template's geometries are written into the
+map's model and taken out again (saber.h's saber_models_anniversary_set), so
+that everything that draws the model reads either the package's geometry or
+the map's own, its shaders, regions and nodes as the map's. The level's
+structure and the settings are as they are (display.remastered_bsp still
+draws the remastered geometry). The package's models are made as the map
+loads when display.anniversary_models asks for them, so the switch only says
+which are drawn.
 
-Read by whichever thread draws (in a browser, the worker the game runs in).
+The press is read as the game draws (render_objects.c).
 */
 
 /* ---------- headers */
@@ -22,16 +26,15 @@ Read by whichever thread draws (in a browser, the worker the game runs in).
 
 #include <xtl.h>
 
+/* ---------- the models (port/linux/game/saber_models.c) */
+
+long saber_models_anniversary_set(int shown);
+long saber_models_geometry_count(void);
+
 /* ---------- the platform layer's (port/linux/src/port_config.c) */
 
 int config_boolean(const char *name);
 void platform_log(const char *format, ...);
-
-/* ---------- the models and the level (saber_toggle.h, which says what
-saber_models.c and models.c ask) */
-
-int saber_toggle_classic_models(void);
-int saber_toggle_level_wanted(void);
 
 /* ---------- globals */
 
@@ -39,16 +42,14 @@ static struct
 {
 	/* Back was held when the game was last looked at */
 	boolean held;
-	/* the map is drawn the other way to its settings while it is */
-	boolean other;
-	/* the settings draw it remastered already */
-	boolean remastered;
+	/* the map's own models are drawn, instead of the package's */
+	boolean classic;
 } saber_toggle;
 
 /* ---------- private code */
 
 /* whether Back is held: the first controller's (the keyboard's F1 presses
-it, port/linux/src/xinput_sdl.c), or the keyboard's scoreboard key (Tab) */
+it and Back, port/linux/src/xinput_sdl.c), or the keyboard's scoreboard key */
 static boolean saber_toggle_held(
 	void)
 {
@@ -62,33 +63,43 @@ static boolean saber_toggle_held(
 
 /* ---------- public code */
 
+void saber_toggle_initialize(
+	void)
+{
+	csmemset(&saber_toggle, 0, sizeof(saber_toggle));
+}
+
 void saber_toggle_update(
 	void)
 {
 	boolean held = saber_toggle_held();
 
-	saber_toggle.remastered = (config_boolean("display.anniversary_models") ||
-		config_boolean("display.remastered_bsp")) ? TRUE : FALSE;
-	/* (each press of Back is a toggle, so that the key held while a chat's
-	fingerprint is typed gives the frame's models back when it is let go
-	of; a setting changed in between is taken up first) */
-	if (held != saber_toggle.held)
+	/* (a press: Back, let go of, is pressed again) */
+	if (!held || saber_toggle.held)
 	{
-		saber_toggle.other = saber_toggle.other ? FALSE : TRUE;
 		saber_toggle.held = held;
-		platform_log("anniversary: Back %s: the map is drawn %s", held ? "held" : "let go of",
-			saber_toggle.other != saber_toggle.remastered ? "the other way" : "as its settings say");
+		return;
 	}
+	saber_toggle.held = held;
+	saber_toggle.classic = saber_toggle.classic ? FALSE : TRUE;
+	{
+		/* (the tags written over, before the next frame reads them) */
+		long models = saber_models_anniversary_set(saber_toggle.classic ? FALSE : TRUE);
+		long geometries = saber_models_geometry_count();
+
+		platform_log("anniversary: Back pressed: the models are drawn as %s: %ld models of the map's %ld geometries",
+			saber_toggle.classic ? "the map's" : "templates", models, geometries);
+	}
+}
+
+int saber_toggle_models_wanted(
+	void)
+{
+	return config_boolean("display.anniversary_models");
 }
 
 int saber_toggle_classic_models(
 	void)
 {
-	return saber_toggle.other != saber_toggle.remastered ? TRUE : FALSE;
-}
-
-int saber_toggle_level_wanted(
-	void)
-{
-	return saber_toggle.other != saber_toggle.remastered ? TRUE : FALSE;
+	return saber_toggle.classic;
 }

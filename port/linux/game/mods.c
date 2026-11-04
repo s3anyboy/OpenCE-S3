@@ -33,6 +33,7 @@ back until mods_enable true, or until the map changes.
 #include "main/console.h"
 #include "mods.h"
 #include "saber.h"
+#include "saber_toggle.h" /* port: Back's switch of the models, port/linux/game/saber_toggle.c */
 
 #include <stdlib.h>
 #include <string.h>
@@ -258,7 +259,8 @@ void mods_tags_loaded(
 		mods_update(FALSE, TRUE);
 	}
 	/* (and Halo: Combat Evolved Anniversary's models, whose tags the mods'
-	are not) */
+	are not; each map as the settings say, not as Back left the last one) */
+	saber_toggle_initialize();
 	saber_models_tags_loaded(map_name);
 
 	return;
