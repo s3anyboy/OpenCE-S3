@@ -4362,6 +4362,46 @@ void saber_texture_make_solid(
 	}
 }
 
+/* A window's alpha is how much of it covers what is behind it. The
+Pelican's cockpit glass is plotted dark and near opaque; its alpha keeps a
+fifth of itself, so the bay shows through it as the map's own glass does.
+(The alpha is per texel: a DXT3 stores it whole, a DXT5's is its first two
+bytes and the indices after them) */
+void saber_texture_glass(
+	struct saber_texture *texture)
+{
+	long offset;
+
+	if (!texture->pixels)
+		return;
+	if (texture->format == _bitmap_format_dxt3)
+	{
+		for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+		{
+			long index;
+
+			for (index = 0; index < 8; index++)
+			{
+				texture->pixels[offset + index] = (unsigned char)(texture->pixels[offset + index] / 5);
+			}
+		}
+	}
+	else if (texture->format == _bitmap_format_dxt5)
+	{
+		for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+		{
+			unsigned char *block = texture->pixels + offset;
+			long alpha0 = block[0];
+			long alpha1 = block[1];
+
+			/* (each alpha its fifth: the two ends, and the interpolated ones
+			are the same interpolations of them) */
+			block[0] = (unsigned char)(alpha0 / 5);
+			block[1] = (unsigned char)(alpha1 / 5);
+		}
+	}
+}
+
 void saber_texture_dispose(
 	struct saber_texture *texture)
 {

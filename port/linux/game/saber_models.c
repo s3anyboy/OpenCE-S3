@@ -75,6 +75,9 @@ goes.
 #include "math/real_math.h"
 #include "models/model_definitions.h"
 #include "objects/objects.h"
+#include "objects/widgets/antenna.h" /* port: an object's antennas, port/linux/game/saber_models.c */
+#include "objects/widgets/widgets.h" /* port: an object's widgets, port/linux/game/saber_models.c */
+#include "objects/widgets/widget_types.h" /* port: the widget types, port/linux/game/saber_models.c */
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_geometry.h"
 #include "rasterizer/rasterizer_model_types.h"
@@ -362,6 +365,73 @@ static struct
 } saber_models_globals;
 
 static boolean tag_kept(long tag_index);
+static boolean map_glass_replaced(long shader_tag);
+
+/* whether the model `tag_index` names is drawn as an Anniversary template */
+static boolean saber_model_made(
+	long tag_index)
+{
+	struct saber_model const *made;
+
+	for (made = saber_models_globals.models; made; made = made->next)
+	{
+		if (made->tag_index == tag_index)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* (widgets.c, widgets_render) Whether a widget is drawn, or is one the
+package's model draws itself, which is then not drawn. A Warthog's second
+antenna is: its map's model has two, hung from the marker 'antenna' both,
+and the package's model has one of its own. Back gives them both back, as
+they always were */
+boolean saber_models_widget_drawn(
+	long object_index,
+	long antenna_index)
+{
+	struct antenna_datum const *antenna;
+	struct object_datum *object = object_try_and_get(object_index);
+	struct object_definition const *definition;
+	char const *model_name;
+	long seen = 0;
+	long widget_index;
+
+	/* (a widget whose making failed, or whose pool was full, has no antenna: it
+	is not drawn, and never looked up) */
+	if (antenna_index == NONE)
+		return FALSE;
+	antenna = antenna_get(antenna_index);
+	if (!antenna || !object || object->object.type != _object_type_vehicle)
+		return TRUE;
+	/* (only while the templates are drawn: Back's map's models have theirs) */
+	if (saber_toggle_classic_models())
+		return TRUE;
+	definition = object_definition_get(object->definition_index);
+	if (!definition || definition->object.model.index == NONE ||
+		!saber_model_made(definition->object.model.index))
+	{
+		return TRUE;
+	}
+	model_name = tag_get_name(definition->object.model.index);
+	if (!model_name || !strstr(model_name, "warthog"))
+		return TRUE;
+
+	/* (the definition lists one antenna, applied twice: the second of the
+	object's is the one left out. The list is walked, so that it is counted,
+	not guessed at) */
+	for (widget_index = object->object.first_widget_index; widget_index != NONE; )
+	{
+		struct widget_datum const *widget = widget_get(widget_index);
+
+		if (widget->type == _widget_type_antenna && ++seen && widget->type_datum_index == antenna_index)
+			break;
+		widget_index = widget->next_widget_index;
+	}
+
+	return seen <= 1;
+}
 
 /* ---------- private code */
 
@@ -1060,13 +1130,11 @@ static struct saber_model *saber_model_new(
 	struct model_geometry_part const *clear_parts[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
 	long clear_count = 0;
 	long geometry_part_count = 0;
-	/* the template has glass of its own, so the map's glass is not drawn
-	over it. A gauge of its own, so the classic heat meter is shrunk to
+	/* A gauge of the template's own, so the classic heat meter is shrunk to
 	that gauge: drawn at the classic gun's size, it spills past the side.
 	A monicle of its own, so the classic visor (marine_hud) is not drawn
 	over the face: its scroll is the green flicker, and on the anniversary
 	head it runs across the face */
-	boolean own_glass = FALSE;
 	boolean own_meter = FALSE;
 	boolean own_monicle = FALSE;
 	/* a region named head, the template's heads (its nodes under one named
@@ -1110,8 +1178,6 @@ static struct saber_model *saber_model_new(
 	made->level_count = level_count;
 	for (part_index = 0; part_index < template_->material_count; part_index++)
 	{
-		if (strstr(template_->materials[part_index], "glass"))
-			own_glass = TRUE;
 		if (strstr(template_->materials[part_index], "gauge"))
 			own_meter = TRUE;
 		if (strstr(template_->materials[part_index], "monicle"))
@@ -1119,10 +1185,14 @@ static struct saber_model *saber_model_new(
 	}
 	/* (the map's model's transparent parts, of each region's first
 	permutation's most detailed geometry; a model whose parts have local
-	nodes has none drawn so. Its glass is left out when the template has
-	glass of its own: the classic canopy, drawn opaque over the cockpit.
-	Its visor is left out when the template has a monicle: the classic
-	green flicker, drawn across the anniversary face) */
+	nodes has none drawn so. Its glass is drawn as it always was, before the
+	package's glass, except a Pelican's canopy: the package's has the frame
+	and the panes both, and the map's pane over them draws the classic glass
+	across the anniversary cockpit. A Warthog's windscreen must stay the
+	map's: the package's material for glass is not the pane's mesh there,
+	and leaving the map's out draws no window at all. Its visor is left out
+	when the template has a monicle: the classic green flicker, drawn across
+	the anniversary face) */
 	if (!TEST_FLAG(map_model->flags, MODEL_PARTS_HAVE_LOCAL_NODES_BIT))
 	{
 		short seen[16];
@@ -1163,8 +1233,8 @@ static struct saber_model *saber_model_new(
 				char const *shader_name = shader_tag == NONE ? NULL : tag_get_name(shader_tag);
 
 				if (shader_tag != NONE && shader_type != SHADER_TYPE_MODEL &&
-					!(own_glass && shader_type == SHADER_TYPE_TRANSPARENT_GLASS) &&
-					!(own_monicle && shader_name && strstr(shader_name, "hud")))
+					!(own_monicle && shader_name && strstr(shader_name, "hud")) &&
+					!(shader_type == SHADER_TYPE_TRANSPARENT_GLASS && map_glass_replaced(shader_tag)))
 				{
 					clear_parts[clear_count++] = part;
 				}
@@ -1517,6 +1587,19 @@ static long model_shader_tag(
 	shader = shader_definition_get(reference->shader.index);
 
 	return shader && shader->base.type == SHADER_TYPE_MODEL ? reference->shader.index : NONE;
+}
+
+/* whether the map's shader `shader_tag` is the glass a Pelican's cockpit is
+drawn with: `vehicles\pelican\shaders\pelican_glass`, which the package's
+model draws for itself. Its panes are not a model shader's, so there is no
+bitmap to tell them by. The map's other panes are drawn as they always were
+(a Warthog's windscreen is `warthog windshield`) */
+static boolean map_glass_replaced(
+	long shader_tag)
+{
+	char const *name = shader_tag == NONE ? NULL : tag_get_name(shader_tag);
+
+	return name && strstr(name, "pelican") != NULL;
 }
 
 /* the stream's package, pak_stream.s3dpak, beside the level's, or NULL */
@@ -3200,6 +3283,12 @@ static boolean model_play(
 		if (material_glass(template_.materials[material]) ||
 			material_lightning(template_.materials[material]))
 			material_blends[place] = TRUE;
+		/* (the Pelican's cockpit glass is plotted dark and opaque: its alpha
+		keeps a fifth of itself, so the bay shows through it. A Warthog's
+		windscreen is plotted as a window already, and keeps its alpha) */
+		if (strstr(template_.materials[material], "pelican") &&
+			material_glass(template_.materials[material]))
+			saber_texture_glass(material_textures[place]);
 		if (material_lightning(template_.materials[material]))
 			saber_texture_punch_black(material_textures[place]);
 		/* (one that is not cut out drawn whole, though its shader be alpha
@@ -3315,6 +3404,32 @@ static boolean model_play(
 			if (plugged_tag == shader || plugged->tag_index == model_shader_tag(definition, material_shaders[index]))
 			{
 				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
+				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+				break;
+			}
+		}
+	}
+	/* (a window is drawn from both sides: a template's glass may be wound the
+	other way, a part turned over by its skeleton, and a pane seen from
+	inside, a Warthog's windscreen, would not draw at all. Only in the
+	package's copy, never on the tag: the map's own models share it) */
+	for (index = 0; index < material_count; index++)
+	{
+		struct saber_shader *plugged;
+		short material;
+
+		for (material = 0; material < 256 && material_places[material] != index; material++)
+		{
+		}
+		if (material >= template_.material_count ||
+			!material_glass(template_.materials[material]))
+		{
+			continue;
+		}
+		for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
+		{
+			if (plugged->tag_index == model_shader_tag(definition, material_shaders[index]))
+			{
 				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
 				break;
 			}

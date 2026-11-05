@@ -206,6 +206,10 @@ void saber_texture_punch_black(struct saber_texture *texture);
 /* the rear meters are a white plate (wpn_plasma_rifle_holo_01). Luminance
 becomes blue, and the black of the plate stays black */
 void saber_texture_holo(struct saber_texture *texture);
+/* a window's alpha is how much of it covers what is behind it. A Pelican's
+cockpit glass is plotted dark and opaque; its alpha keeps a fifth of itself,
+so the bay shows through it as the map's own glass does */
+void saber_texture_glass(struct saber_texture *texture);
 
 /* ---------- prototypes/SABER_MODELS.C */
 
