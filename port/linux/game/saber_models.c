@@ -1057,8 +1057,13 @@ static struct saber_model *saber_model_new(
 	long made_index;
 	long rank_index;
 	long default_rank = 0;
-	/* the map's model's parts drawn by transparent shaders */
+	/* the map's model's parts drawn by transparent shaders, and the region
+	each came from (a part of a region of more than one permutation is
+	drawn only of the region's first permutation's geometry: the permutation
+	otherwise chosen does not draw the same, a shield generator's shield
+	gone when its region is permuted to ~damaged) */
 	struct model_geometry_part const *clear_parts[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
+	long clear_regions[MAXIMUM_PARTS_PER_MODEL_GEOMETRY];
 	long clear_count = 0;
 	long geometry_part_count = 0;
 	/* A gauge of the template's own, so the classic heat meter is shrunk to
@@ -1072,6 +1077,14 @@ static struct saber_model *saber_model_new(
 	head), and the region that draws the body */
 	long head_region = NONE;
 	long body_region = 0;
+	/* a region of more than one permutation whose clear parts its permutations
+	other than the first must not draw (a shield generator's shield, gone
+	when the region is permuted to ~damaged): each permutation draws the
+	geometry without the region's clear parts. NONE for none */
+	long hideable_region = NONE;
+	/* the geometry of each level and rank without the hideable region's
+	clear parts (after the heads'), NONE for none */
+	long plain_base = NONE;
 	char head_keys[MAXIMUM_SABER_HEAD_PERMUTATIONS][64];
 	long head_count = 0;
 	long body_span;
@@ -1167,8 +1180,30 @@ static struct saber_model *saber_model_new(
 					!(own_monicle && shader_name && strstr(shader_name, "hud")) &&
 					!(shader_type == SHADER_TYPE_TRANSPARENT_GLASS && map_glass_replaced(shader_tag)))
 				{
+					clear_regions[clear_count] = region_index;
 					clear_parts[clear_count++] = part;
 				}
+			}
+		}
+	}
+	/* a region of more than one permutation whose clear parts its other
+	permutations must not draw: the first such of those the clear parts came
+	from (a shield generator's shield is drawn of its first permutation's
+	geometry with the template's, so its ~damaged permutation must draw a
+	geometry without it) */
+	for (region_index = 0; region_index < map_model->regions.count && hideable_region == NONE;
+		region_index++)
+	{
+		long index;
+
+		for (index = 0; index < clear_count; index++)
+		{
+			if (clear_regions[index] == region_index)
+			{
+				if (TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index,
+					struct model_region)->permutations.count > 1)
+				hideable_region = region_index;
+				break;
 			}
 		}
 	}
@@ -1225,6 +1260,10 @@ static struct saber_model *saber_model_new(
 			}
 		}
 	}
+	/* the plain geometries follow the heads', of each rank and level (the
+	room for them is checked before they are built, below) */
+	if (hideable_region != NONE)
+		plain_base = body_span * (1 + head_count);
 	/* the map's regions and permutations: the body by one region, a head
 	by the head region's permutation of its name */
 	for (region_index = 0; region_index < map_model->regions.count; region_index++)
@@ -1277,6 +1316,12 @@ static struct saber_model *saber_model_new(
 					permutation->geometry_indices[detail] = (short)(body_span + which * body_span + slot);
 				else if (head_count ? region_index != body_region : region_index != 0)
 					permutation->geometry_indices[detail] = NONE;
+				else if (plain_base != NONE && region_index == hideable_region && permutation_index > 0)
+					/* (a permutation other than the first (a shield generator's
+					~damaged) draws the geometry without the region's clear
+					parts, that the shield goes when the region is permuted;
+					the rank's block of it, as the body's is) */
+					permutation->geometry_indices[detail] = (short)(plain_base + slot);
 				else
 					permutation->geometry_indices[detail] = slot;
 			}
@@ -1350,10 +1395,11 @@ static struct saber_model *saber_model_new(
 		strips += strip_count;
 	}
 	/* its geometries: of each rank, each level's parts of every rank and of
-	that one, and the map's transparent parts */
+	that one, the map's transparent parts, and a plain one of each rank and
+	level without a region's parts (a shield generator's shield) */
 	made->geometry_parts = malloc(sizeof(*made->geometry_parts) *
 		((size_t)MAXIMUM_PARTS_PER_MODEL_GEOMETRY * (size_t)level_count * (size_t)made->rank_count *
-			(size_t)(1 + head_count) + 1));
+			(size_t)(1 + head_count + (hideable_region != NONE ? 1 : 0)) + 1));
 	*reason = "out of memory";
 	if (!made->geometry_parts)
 		goto refused;
@@ -1474,6 +1520,63 @@ static struct saber_model *saber_model_new(
 	made->geometry_count = body_span * (1 + head_count);
 	if (made->geometry_count > (long)NUMBEROF(made->geometries))
 		made->geometry_count = (long)NUMBEROF(made->geometries);
+	/* the plain geometries are not built where there is no room for them:
+	the body's geometries then keep the region's clear parts, and every
+	permutation of the region draws them (as the port drew them before) */
+	if (plain_base != NONE && plain_base + level_count * made->rank_count > (long)NUMBEROF(made->geometries))
+		plain_base = NONE;
+	if (plain_base != NONE)
+	{
+		/* the geometries without the region's parts: its permutations other
+		than the first's (a shield generator's ~damaged) */
+		for (rank_index = 0; rank_index < made->rank_count; rank_index++)
+		{
+			for (level = 0; level < level_count; level++)
+			{
+				struct model_geometry *geometry = &made->geometries[plain_base + rank_index * level_count + level];
+				long first = geometry_part_count;
+				long index;
+
+				for (part_index = 0; part_index < made->part_count; part_index++)
+				{
+					struct saber_mesh_part const *source = &template_->parts[part_index];
+
+					if (MIN(source->lod, 4) != levels[level] ||
+						(source->rank != _saber_rank_all && source->rank != made->ranks[rank_index]) ||
+						(head_count && source->variant[0]) ||
+						material_monicle(template_, source) ||
+						geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
+					{
+						continue;
+					}
+					made->geometry_parts[geometry_part_count++] = made->parts[part_index];
+				}
+				for (index = 0; index < clear_count && geometry_part_count - first < MAXIMUM_PARTS_PER_MODEL_GEOMETRY;
+					index++)
+				{
+					struct model_geometry_part *part;
+
+					if (clear_regions[index] == hideable_region)
+						continue;
+					part = &made->geometry_parts[geometry_part_count++];
+					*part = *clear_parts[index];
+					part->previous_part_index = NONE;
+					part->next_part_index = NONE;
+					if (own_meter)
+						meter_part_place(made, map_model, template_, clear_parts[index], part);
+					else
+					{
+						part->vertex_buffer = clear_parts[index]->vertex_buffer;
+						part->centroid = clear_parts[index]->centroid;
+					}
+				}
+				geometry->parts.count = geometry_part_count - first;
+				geometry->parts.address = made->geometry_parts + first;
+				geometry->parts.definition = NULL;
+			}
+		}
+		made->geometry_count = plain_base + level_count * made->rank_count;
+	}
 	made->model.geometries.count = made->geometry_count;
 	made->model.geometries.address = made->geometries;
 	made->model.geometries.definition = NULL;
@@ -2026,9 +2129,12 @@ would draw solid: such parts are left out */
 static boolean material_effect(
 	char const *material)
 {
-	/* (and an energy shield's: a Jackal's, whose own the map's model draws) */
+	/* (and an energy shield's: a Jackal's, whose own the map's model draws;
+	a field generator's, whose the map's model draws and hides by permuting
+	its region when the shield breaks) */
 	return !strncmp(material, "sfx_", 4) || !strncmp(material, "lig_", 4) || !strncmp(material, "fx_", 3) ||
-		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8);
+		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8) ||
+		strstr(material, "shield") != NULL;
 }
 
 /* whether a material is a plant's leaves or branches, by its name
