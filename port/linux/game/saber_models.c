@@ -75,9 +75,6 @@ goes.
 #include "math/real_math.h"
 #include "models/model_definitions.h"
 #include "objects/objects.h"
-#include "objects/widgets/antenna.h" /* port: an object's antennas, port/linux/game/saber_models.c */
-#include "objects/widgets/widgets.h" /* port: an object's widgets, port/linux/game/saber_models.c */
-#include "objects/widgets/widget_types.h" /* port: the widget types, port/linux/game/saber_models.c */
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_geometry.h"
 #include "rasterizer/rasterizer_model_types.h"
@@ -366,72 +363,6 @@ static struct
 
 static boolean tag_kept(long tag_index);
 static boolean map_glass_replaced(long shader_tag);
-
-/* whether the model `tag_index` names is drawn as an Anniversary template */
-static boolean saber_model_made(
-	long tag_index)
-{
-	struct saber_model const *made;
-
-	for (made = saber_models_globals.models; made; made = made->next)
-	{
-		if (made->tag_index == tag_index)
-			return TRUE;
-	}
-
-	return FALSE;
-}
-
-/* (widgets.c, widgets_render) Whether a widget is drawn, or is one the
-package's model draws itself, which is then not drawn. A Warthog's second
-antenna is: its map's model has two, hung from the marker 'antenna' both,
-and the package's model has one of its own. Back gives them both back, as
-they always were */
-boolean saber_models_widget_drawn(
-	long object_index,
-	long antenna_index)
-{
-	struct antenna_datum const *antenna;
-	struct object_datum *object = object_try_and_get(object_index);
-	struct object_definition const *definition;
-	char const *model_name;
-	long seen = 0;
-	long widget_index;
-
-	/* (a widget whose making failed, or whose pool was full, has no antenna: it
-	is not drawn, and never looked up) */
-	if (antenna_index == NONE)
-		return FALSE;
-	antenna = antenna_get(antenna_index);
-	if (!antenna || !object || object->object.type != _object_type_vehicle)
-		return TRUE;
-	/* (only while the templates are drawn: Back's map's models have theirs) */
-	if (saber_toggle_classic_models())
-		return TRUE;
-	definition = object_definition_get(object->definition_index);
-	if (!definition || definition->object.model.index == NONE ||
-		!saber_model_made(definition->object.model.index))
-	{
-		return TRUE;
-	}
-	model_name = tag_get_name(definition->object.model.index);
-	if (!model_name || !strstr(model_name, "warthog"))
-		return TRUE;
-
-	/* (the definition lists one antenna, applied twice: the second of the
-	object's is the one left out. The list is walked, so that it is counted,
-	not guessed at) */
-	for (widget_index = object->object.first_widget_index; widget_index != NONE; )
-	{
-		struct widget_datum const *widget = widget_get(widget_index);
-
-		if (widget->type == _widget_type_antenna && ++seen && widget->type_datum_index == antenna_index)
-			break;
-		widget_index = widget->next_widget_index;
-	}
-
-	return seen <= 1;
-}
 
 /* ---------- private code */
 
