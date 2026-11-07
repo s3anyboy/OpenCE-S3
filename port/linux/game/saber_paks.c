@@ -147,6 +147,7 @@ enum
 	_block_triangle_range = 0x0501,
 	_block_submesh_materials = 0x0B01,
 	_block_material_index = 0x0E01,
+	_block_layer_properties = 0xBA01,
 	_block_bone_index = 0xFA00,
 	_block_blend = 0x1601,
 	_block_blend_indices = 0x3301,
@@ -160,6 +161,11 @@ enum
 };
 
 #define MAXIMUM_NODES 16384
+/* the grain of the terrain's sand, as its packing (tileS 349) gives it:
+copies of its texture a unit of the level's, and the span a beach patch's
+coordinates of where it lies are of, repeated back out by the shader */
+#define SABER_TERRAIN_GRAIN 0.125f
+#define SABER_TERRAIN_SPAN 4096.f
 #define MAXIMUM_NODE_DEPTH 64
 #define MAXIMUM_SUBMESHES 256
 
@@ -830,6 +836,95 @@ static boolean block_contains(
 	return FALSE;
 }
 
+/* the quoted value of `key` in a layer's properties (0xBA01: `key = "value"`
+lines), or FALSE */
+static boolean layer_property(
+	unsigned char const *bytes,
+	struct block const *block,
+	char const *key,
+	char *value,
+	unsigned long value_size)
+{
+	unsigned long length = (unsigned long)strlen(key);
+	unsigned long index;
+
+	for (index = block->start; index + length < block->end; index++)
+	{
+		unsigned long at;
+		unsigned long written = 0;
+
+		if (memcmp(bytes + index, key, length) || (index > block->start && bytes[index - 1] != '\n' &&
+			bytes[index - 1] != '\t' && bytes[index - 1] != ' '))
+		{
+			continue;
+		}
+		for (at = index + length; at < block->end && bytes[at] != '"' && bytes[at] != '\n'; at++)
+		{
+		}
+		if (at >= block->end || bytes[at] != '"')
+			continue;
+		for (at++; at < block->end && bytes[at] != '"' && written + 1 < value_size; at++)
+			value[written++] = (char)bytes[at];
+		value[written] = 0;
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* A level submesh's layers over its base (its 0x0B01: after an i32, each
+layer a 0x0E01 material and then its 0xBA01 properties; a layer named "lm"
+is drawn over the base, weighted by its colorComp channel of its vertices'
+colour, alpha if it names none; "blend = mult" multiplies) */
+static void submesh_layers_read(
+	unsigned char const *bytes,
+	struct block const *materials,
+	short *count,
+	short *layer_materials,
+	short *layer_channels,
+	short *layer_multiply)
+{
+	unsigned long position = materials->start + 4;
+	struct block block;
+	long material = NONE;
+
+	*count = 0;
+	while (position < materials->end && block_at(bytes, position, materials->end, &block))
+	{
+		if (block.type == _block_material_index && block.end - block.start >= 4)
+		{
+			material = (long)read_u32(bytes + block.start);
+		}
+		else if (block.type == _block_layer_properties)
+		{
+			char value[16];
+
+			if (layer_property(bytes, &block, "name", value, sizeof(value)) && !strcmp(value, "lm") &&
+				material >= 0 && material < 0x7fff && *count < SABER_MAXIMUM_LAYERS)
+			{
+				short channel = _saber_layer_channel_alpha;
+
+				if (layer_property(bytes, &block, "colorComp", value, sizeof(value)))
+				{
+					if (value[0] == 'r')
+						channel = _saber_layer_channel_red;
+					else if (value[0] == 'g')
+						channel = _saber_layer_channel_green;
+					else if (value[0] == 'b')
+						channel = _saber_layer_channel_blue;
+				}
+				layer_materials[*count] = (short)material;
+				layer_channels[*count] = channel;
+				layer_multiply[*count] = (short)(layer_property(bytes, &block, "blend", value, sizeof(value)) &&
+					!strcmp(value, "mult"));
+				(*count)++;
+			}
+			material = NONE;
+		}
+		position = block.end;
+	}
+}
+
 /* the number on the line after `key` in `block`, or FALSE */
 static boolean property_real(
 	unsigned char const *bytes,
@@ -1476,9 +1571,11 @@ static real unit_short(
 
 /* where a vertex's texture coordinates are in its data, by the data's
 size (Reclaimer's), or -1. `format` is the four bytes before the stride.
-One level layout keeps them elsewhere than a template of that size: the
-cliff's 44-byte vertices (0x2003dfde) at 16 rather than 28. Read from
-28, the cliff is one texel. The beach's 20-byte vertices (0x200043c2)
+The cliff's 44-byte vertices (0x2003dfde) keep them at 28 as any 44-byte
+vertex does: read there, without the terrain's tile (tileS 349) they are
+one texel, and with it they repeat as the rest of the terrain does; the
+pair at 16 is no coordinate, and repeated by that tile it was noise
+smeared over the cliffs. The beach's 20-byte vertices (0x200043c2)
 stay at 16, the ordinary place for that size: the pair at 12 is a line,
 its v one value, and the sand was that one row of its texture. A
 template's own 20-byte vertices are 0x2000c646 and stay at 16 too. */
@@ -1486,8 +1583,7 @@ static long texcoord_offset(
 	long size,
 	unsigned long format)
 {
-	if (size == 44 && format == 0x2003dfdeUL)
-		return 16;
+	(void)format;
 	switch (size)
 	{
 	case 8:
@@ -1589,6 +1685,13 @@ static boolean mesh_read(
 	long submesh_first[MAXIMUM_SUBMESHES];
 	long submesh_count[MAXIMUM_SUBMESHES];
 	short submesh_material[MAXIMUM_SUBMESHES];
+	/* (each submesh's layers over its base: their materials, channels and
+	blends; and each vertex's colour, which weighs them) */
+	short submesh_layer_count[MAXIMUM_SUBMESHES];
+	short submesh_layer_materials[MAXIMUM_SUBMESHES][SABER_MAXIMUM_LAYERS];
+	short submesh_layer_channels[MAXIMUM_SUBMESHES][SABER_MAXIMUM_LAYERS];
+	short submesh_layer_multiply[MAXIMUM_SUBMESHES][SABER_MAXIMUM_LAYERS];
+	unsigned char (*colors)[4] = NULL;
 	long submesh_total = 0;
 	/* (a beach patch names no tile, so its coordinates cover the patch
 	once and the sand is one smudge. This is the repeat that gives it the
@@ -1836,6 +1939,7 @@ static boolean mesh_read(
 					submesh_first[submesh_total] = (long)read_u32(bytes + block.start);
 					submesh_count[submesh_total] = (long)read_u32(bytes + block.start + 4);
 					submesh_material[submesh_total] = 0;
+					submesh_layer_count[submesh_total] = 0;
 					submesh_total++;
 				}
 				else if (block.type == _block_submesh_materials && submesh_total > 0 && block.end - block.start >= 4)
@@ -1847,6 +1951,12 @@ static boolean mesh_read(
 					{
 						submesh_material[submesh_total - 1] = (short)(long)read_u32(bytes + material.start);
 					}
+					/* (a level's: its layers, each a material and its
+					properties after it, "lm" over the base) */
+					if (walk->level)
+						submesh_layers_read(bytes, &block, &submesh_layer_count[submesh_total - 1],
+							submesh_layer_materials[submesh_total - 1], submesh_layer_channels[submesh_total - 1],
+							submesh_layer_multiply[submesh_total - 1]);
 				}
 				position = block.end;
 			}
@@ -1857,6 +1967,7 @@ static boolean mesh_read(
 		submesh_first[0] = 0;
 		submesh_count[0] = triangle_count;
 		submesh_material[0] = 0;
+		submesh_layer_count[0] = 0;
 		submesh_total = 1;
 	}
 	else if (source != node)
@@ -1875,6 +1986,29 @@ static boolean mesh_read(
 	tangents = malloc(sizeof(*tangents) * (size_t)vertex_count);
 	remap = malloc(sizeof(*remap) * (size_t)vertex_count);
 	empty = malloc((size_t)vertex_count);
+	/* (a level terrain's vertices' colour: n four-byte groups, then the
+	colour (alpha, red, green, blue), then the rest, n = (size - 12) / 8) */
+	if (walk->level && uv_offset >= 0 &&
+		(vertex_size == 20 || vertex_size == 28 || vertex_size == 36 || vertex_size == 44))
+	{
+		for (index = 0; index < submesh_total; index++)
+		{
+			if (submesh_layer_count[index] > 0)
+				break;
+		}
+		if (index < submesh_total)
+		{
+			colors = malloc(sizeof(*colors) * (size_t)vertex_count);
+			if (colors)
+			{
+				long color_offset = 4 * ((vertex_size - 12) / 8);
+
+				for (index = 0; index < vertex_count; index++)
+					memcpy(colors[index], bytes + vertex_data_start + (unsigned long)vertex_size * (unsigned long)index +
+						(unsigned long)color_offset, 4);
+			}
+		}
+	}
 	if (!vertices || !triangles || !tangents || !remap || !empty)
 	{
 		if (vertices)
@@ -1887,6 +2021,8 @@ static boolean mesh_read(
 			free(remap);
 		if (empty)
 			free(empty);
+		if (colors)
+			free(colors);
 		return FALSE;
 	}
 	csmemset(empty, 0, (size_t)vertex_count);
@@ -1979,6 +2115,8 @@ static boolean mesh_read(
 			free(tangents);
 			free(remap);
 			free(empty);
+			if (colors)
+				free(colors);
 			return FALSE;
 		}
 		if (uv_offset >= 0)
@@ -2388,10 +2526,57 @@ static boolean mesh_read(
 	/* (a beach patch names no tile, unlike the rest of the terrain. Its
 	coordinates cover the patch once, so one copy of the sand is smeared
 	across it, and each patch by a different amount, which is the torn
-	edge between them. The repeat is whatever gives the patch the terrain's
-	grain, about three world units a copy. A patch that already tiles is
-	left to its tile) */
-	if (walk->level && !node->has_uv_decompress && uv_offset >= 0 && triangle_count > 8 &&
+	edge between them; a small patch's, or one whose coordinates are all
+	one, is a flat smudge, and one whose coordinates run one way alone is
+	streaks. A patch is given coordinates of where it lies instead, seen
+	along the axis it most faces (from above for the beach, from the side
+	for a cliff's face), at the grain the terrain's packing gives its sand
+	(SABER_TERRAIN_GRAIN copies a unit), so the patches meet without a
+	seam; their coordinates of SABER_TERRAIN_SPAN, repeated back out by the
+	shader's map scale) */
+	if (walk->level && !node->has_uv_decompress && uv_offset >= 0 && triangle_count > 0 &&
+		memmem_name(bytes + node->name_start, node->name_length, "terrain"))
+	{
+		real level_area = 0.f;
+		real facing[3] = { 0.f, 0.f, 0.f };
+
+		for (index = 0; index < triangle_count; index++)
+		{
+			struct model_vertex_uncompressed const *a = &vertices[triangles[3 * index]];
+			struct model_vertex_uncompressed const *b = &vertices[triangles[3 * index + 1]];
+			struct model_vertex_uncompressed const *c = &vertices[triangles[3 * index + 2]];
+			real_vector3d ab;
+			real_vector3d ac;
+			real_vector3d across;
+			real area;
+
+			vector_from_points3d(&a->position, &b->position, &ab);
+			vector_from_points3d(&a->position, &c->position, &ac);
+			cross_product3d(&ab, &ac, &across);
+			area = square_root(across.i * across.i + across.j * across.j + across.k * across.k);
+			if (!real_finite(area))
+				continue;
+			level_area += area;
+			facing[0] += across.i < 0.f ? -across.i : across.i;
+			facing[1] += across.j < 0.f ? -across.j : across.j;
+			facing[2] += across.k < 0.f ? -across.k : across.k;
+		}
+		if (level_area > 0.f)
+		{
+			/* (the axis it faces most: its coordinates are the other two) */
+			long axis = facing[2] >= facing[0] && facing[2] >= facing[1] ? 2 : (facing[0] >= facing[1] ? 0 : 1);
+
+			for (index = 0; index < vertex_count; index++)
+			{
+				real_point3d const *at = &vertices[index].position;
+
+				vertices[index].texcoord.x = (axis == 0 ? at->y : at->x) / SABER_TERRAIN_SPAN;
+				vertices[index].texcoord.y = (axis == 2 ? at->y : at->z) / SABER_TERRAIN_SPAN;
+			}
+			beach_repeat = SABER_TERRAIN_SPAN * SABER_TERRAIN_GRAIN;
+		}
+	}
+	if (walk->level && !node->has_uv_decompress && uv_offset >= 0 && triangle_count > 0 && beach_repeat == 0.f &&
 		memmem_name(bytes + node->name_start, node->name_length, "terrain"))
 	{
 		real *ratios = malloc(sizeof(*ratios) * 3 * (size_t)triangle_count);
@@ -2420,13 +2605,13 @@ static boolean mesh_read(
 						ratios[ratio_count++] = length / world;
 				}
 			}
-			if (ratio_count > 6)
+			if (ratio_count > 0)
 			{
 				qsort(ratios, (size_t)ratio_count, sizeof(*ratios), compare_reals);
 				beach_median = ratios[ratio_count / 2];
 				if (beach_median > 0.0002f && beach_median < 0.2f)
 				{
-					beach_repeat = 0.3f / beach_median;
+					beach_repeat = SABER_TERRAIN_GRAIN / beach_median;
 					if (beach_repeat > 96.f)
 						beach_repeat = 96.f;
 				}
@@ -2435,116 +2620,170 @@ static boolean mesh_read(
 		}
 	}
 
-	/* each submesh's parts, of their vertices alone */
+	/* each submesh's parts, of their vertices alone. A level terrain's are
+	parted by the layer each triangle shows whole, the topmost one its every
+	corner weighs fully (pass 1 for the first layer; 0, none: the base): it
+	is drawn of that layer's material, and only the layers above it are
+	blended over it */
 	*reason = "out of memory";
 	for (index = 0; index < submesh_total; index++)
 	{
-		long first = submesh_first[index];
-		long count = submesh_count[index];
+		long passes = colors && submesh_layer_count[index] > 0 ? submesh_layer_count[index] + 1 : 1;
+		long pass;
 
-		if (first < 0 || count <= 0 || first > triangle_count || count > triangle_count - first)
-			continue;
-		while (count > 0)
+		for (pass = 0; pass < passes; pass++)
 		{
-			long part_triangles = MIN(count, MAXIMUM_PART_TRIANGLES);
-			struct saber_mesh_part *parts = realloc(template_->parts,
-				sizeof(*template_->parts) * ((size_t)template_->part_count + 1));
-			struct saber_mesh_part *part;
-			long triangle;
+			long first = submesh_first[index];
+			long count = submesh_count[index];
 
-			if (!parts)
-				goto failed;
-			template_->parts = parts;
-			part = &parts[template_->part_count];
-			csmemset(part, 0, sizeof(*part));
-			part->material_index = submesh_material[index];
-			part->lod = node->lod;
-			part->rank = node_rank(walk, node);
-			node_variant(walk, node, part->variant, (long)sizeof(part->variant));
-			part->compound = (short)compound;
-			memcpy(part->anchor, anchor, sizeof(anchor));
-			part->uv_scale[0] = 1.f;
-			part->uv_scale[1] = 1.f;
-			if (walk->level && node->has_uv_decompress)
+			if (first < 0 || count <= 0 || first > triangle_count || count > triangle_count - first)
+				continue;
+			while (count > 0)
 			{
-				if (node->uv_tile[0] != 0.f)
-					part->uv_scale[0] = node->uv_tile[0];
-				if (node->uv_tile[1] != 0.f)
-					part->uv_scale[1] = node->uv_tile[1];
-				part->uv_offset[0] = node->uv_shift[0];
-				part->uv_offset[1] = node->uv_shift[1];
-			}
-			else if (beach_repeat != 0.f)
-			{
-				part->uv_scale[0] = beach_repeat;
-				part->uv_scale[1] = beach_repeat;
-			}
-			part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
-			part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
-			template_->part_count++;
-			if (!part->vertices || !part->triangles)
-				goto failed;
-			for (triangle = 0; triangle < vertex_count; triangle++)
-				remap[triangle] = NONE;
-			part->triangle_count = 0;
-			for (triangle = 0; triangle < part_triangles; triangle++)
-			{
-				long corner;
-				long vertex[3];
-				boolean drop = FALSE;
+				long part_triangles = MIN(count, MAXIMUM_PART_TRIANGLES);
+				struct saber_mesh_part *parts = realloc(template_->parts,
+					sizeof(*template_->parts) * ((size_t)template_->part_count + 1));
+				struct saber_mesh_part *part;
+				long triangle;
 
-				for (corner = 0; corner < 3; corner++)
+				if (!parts)
+					goto failed;
+				template_->parts = parts;
+				part = &parts[template_->part_count];
+				csmemset(part, 0, sizeof(*part));
+				part->material_index = pass ? submesh_layer_materials[index][pass - 1] : submesh_material[index];
+				part->lod = node->lod;
+				part->rank = node_rank(walk, node);
+				node_variant(walk, node, part->variant, (long)sizeof(part->variant));
+				part->compound = (short)compound;
+				memcpy(part->anchor, anchor, sizeof(anchor));
+				part->uv_scale[0] = 1.f;
+				part->uv_scale[1] = 1.f;
+				if (walk->level && node->has_uv_decompress)
 				{
-					vertex[corner] = triangles[3 * first + 3 * triangle + corner];
-					if (empty[vertex[corner]])
-						drop = TRUE;
+					if (node->uv_tile[0] != 0.f)
+						part->uv_scale[0] = node->uv_tile[0];
+					if (node->uv_tile[1] != 0.f)
+						part->uv_scale[1] = node->uv_tile[1];
+					part->uv_offset[0] = node->uv_shift[0];
+					part->uv_offset[1] = node->uv_shift[1];
 				}
-				/* (an edge many times the patch's usual texture density runs
-				off its chart and draws the sand as a striped wedge) */
-				if (!drop && beach_median > 0.f)
+				else if (beach_repeat != 0.f)
 				{
-					long edge;
-
-					for (edge = 0; edge < 3; edge++)
+					part->uv_scale[0] = beach_repeat;
+					part->uv_scale[1] = beach_repeat;
+				}
+				part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
+				part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
+				template_->part_count++;
+				if (!part->vertices || !part->triangles)
+					goto failed;
+				if (colors && submesh_layer_count[index] > pass)
+				{
+					part->layer_weights = malloc(sizeof(*part->layer_weights) * 3 * (size_t)part_triangles);
+					if (part->layer_weights)
 					{
-						struct model_vertex_uncompressed const *from = &vertices[vertex[edge]];
-						struct model_vertex_uncompressed const *to = &vertices[vertex[(edge + 1) % 3]];
-						real dx = to->position.x - from->position.x;
-						real dy = to->position.y - from->position.y;
-						real dz = to->position.z - from->position.z;
-						real du = to->texcoord.x - from->texcoord.x;
-						real dv = to->texcoord.y - from->texcoord.y;
-						real world = square_root(dx * dx + dy * dy + dz * dz);
-						real length = square_root(du * du + dv * dv);
+						long layer;
 
-						if (world > 0.5f && length > world * beach_median * 8.f)
+						/* (the layers above the one it shows) */
+						for (layer = pass; layer < submesh_layer_count[index]; layer++)
+						{
+							part->layer_materials[part->layer_count] = submesh_layer_materials[index][layer];
+							part->layer_channels[part->layer_count] = submesh_layer_channels[index][layer];
+							part->layer_multiply[part->layer_count] = submesh_layer_multiply[index][layer];
+							part->layer_count++;
+						}
+					}
+				}
+				for (triangle = 0; triangle < vertex_count; triangle++)
+					remap[triangle] = NONE;
+				part->triangle_count = 0;
+				for (triangle = 0; triangle < part_triangles; triangle++)
+				{
+					long corner;
+					long vertex[3];
+					boolean drop = FALSE;
+
+					for (corner = 0; corner < 3; corner++)
+					{
+						vertex[corner] = triangles[3 * first + 3 * triangle + corner];
+						if (empty[vertex[corner]])
 							drop = TRUE;
 					}
-				}
-				if (drop)
-					continue;
-				for (corner = 0; corner < 3; corner++)
-				{
-					if (remap[vertex[corner]] == NONE)
+					/* (a terrain's triangle in the part of the layer it shows) */
+					if (passes > 1)
 					{
-						remap[vertex[corner]] = part->vertex_count;
-						part->vertices[part->vertex_count++] = vertices[vertex[corner]];
+						long shown = 0;
+						long layer;
+
+						for (layer = 0; layer < submesh_layer_count[index]; layer++)
+						{
+							short channel = submesh_layer_channels[index][layer];
+
+							/* (and only a layer of a material the template has: of
+							another, the triangle would not be drawn at all) */
+							if (!submesh_layer_multiply[index][layer] &&
+								submesh_layer_materials[index][layer] < template_->material_count &&
+								colors[vertex[0]][channel] == 255 &&
+								colors[vertex[1]][channel] == 255 && colors[vertex[2]][channel] == 255)
+							{
+								shown = layer + 1;
+							}
+						}
+						if (shown != pass)
+							continue;
 					}
-					part->triangles[3 * part->triangle_count + corner] = (unsigned short)remap[vertex[corner]];
+					/* (an edge many times the patch's usual texture density runs
+					off its chart and draws the sand as a striped wedge) */
+					if (!drop && beach_median > 0.f)
+					{
+						long edge;
+
+						for (edge = 0; edge < 3; edge++)
+						{
+							struct model_vertex_uncompressed const *from = &vertices[vertex[edge]];
+							struct model_vertex_uncompressed const *to = &vertices[vertex[(edge + 1) % 3]];
+							real dx = to->position.x - from->position.x;
+							real dy = to->position.y - from->position.y;
+							real dz = to->position.z - from->position.z;
+							real du = to->texcoord.x - from->texcoord.x;
+							real dv = to->texcoord.y - from->texcoord.y;
+							real world = square_root(dx * dx + dy * dy + dz * dz);
+							real length = square_root(du * du + dv * dv);
+
+							if (world > 0.5f && length > world * beach_median * 8.f)
+								drop = TRUE;
+						}
+					}
+					if (drop)
+						continue;
+					for (corner = 0; corner < 3; corner++)
+					{
+						if (remap[vertex[corner]] == NONE)
+						{
+							remap[vertex[corner]] = part->vertex_count;
+							if (part->layer_weights)
+								memcpy(part->layer_weights[part->vertex_count], colors[vertex[corner]], 4);
+							part->vertices[part->vertex_count++] = vertices[vertex[corner]];
+						}
+						part->triangles[3 * part->triangle_count + corner] = (unsigned short)remap[vertex[corner]];
+					}
+					part->triangle_count++;
 				}
-				part->triangle_count++;
-			}
-			if (part->triangle_count == 0)
-			{
-				free(part->vertices);
-				free(part->triangles);
-				template_->part_count--;
+				if (part->triangle_count == 0)
+				{
+					free(part->vertices);
+					free(part->triangles);
+					if (part->layer_weights)
+						free(part->layer_weights);
+					template_->part_count--;
+					first += part_triangles;
+					count -= part_triangles;
+					continue;
+				}
 				first += part_triangles;
 				count -= part_triangles;
-				continue;
 			}
-			first += part_triangles;
-			count -= part_triangles;
 		}
 	}
 	free(vertices);
@@ -2552,6 +2791,8 @@ static boolean mesh_read(
 	free(tangents);
 	free(remap);
 	free(empty);
+	if (colors)
+		free(colors);
 
 	return TRUE;
 
@@ -2561,6 +2802,8 @@ skip_mesh:
 	free(tangents);
 	free(remap);
 	free(empty);
+	if (colors)
+		free(colors);
 
 	return TRUE;
 
@@ -2570,6 +2813,8 @@ failed:
 	free(tangents);
 	free(remap);
 	free(empty);
+	if (colors)
+		free(colors);
 
 	return FALSE;
 }
@@ -3144,6 +3389,8 @@ void saber_template_dispose(
 			free(template_->parts[index].vertices);
 		if (template_->parts[index].triangles)
 			free(template_->parts[index].triangles);
+		if (template_->parts[index].layer_weights)
+			free(template_->parts[index].layer_weights);
 	}
 	if (template_->parts)
 		free(template_->parts);
@@ -3346,6 +3593,117 @@ static int texture_alpha_counts(
 	return TRUE;
 }
 
+static void texture_texel(struct saber_texture const *texture, long x, long y, long *red, long *green,
+	long *blue);
+
+static long block_texel_alpha(unsigned char const *block, long format, long texel);
+
+/* how much of each level of a DXT3 or DXT5 texture is clear (alpha under
+32), in hundredths, into `levels`; how many levels */
+long saber_texture_alpha_levels(
+	struct saber_texture const *texture,
+	long *levels,
+	long level_count)
+{
+	long level;
+	unsigned long offset = 0;
+
+	if (!texture || !texture->pixels ||
+		(texture->format != _bitmap_format_dxt3 && texture->format != _bitmap_format_dxt5))
+	{
+		return 0;
+	}
+	for (level = 0; level < level_count && level <= texture->mipmap_count; level++)
+	{
+		long width = MAX(4, texture->width >> level);
+		long height = MAX(4, texture->height >> level);
+		long blocks = (width / 4) * (height / 4);
+		long block;
+		long clear = 0;
+
+		if (offset + (unsigned long)blocks * 16 > (unsigned long)texture->pixels_size)
+			break;
+		for (block = 0; block < blocks; block++)
+		{
+			long texel;
+
+			for (texel = 0; texel < 16; texel++)
+				clear += block_texel_alpha(texture->pixels + offset + block * 16, texture->format, texel) < 32;
+		}
+		levels[level] = clear * 100 / (blocks * 16);
+		offset += (unsigned long)blocks * 16;
+	}
+
+	return level;
+}
+
+/* whether a texture is one colour all over where it is not clear, its
+picture in its alpha alone, much of it clear: a glyph (the plasma
+grenade's, green). Drawn whole it is a square of its colour; blended on
+its alpha, the glyph. DXT3 and DXT5 only */
+int saber_texture_alpha_glyph(
+	struct saber_texture const *texture)
+{
+	long low[3] = { 255, 255, 255 };
+	long high[3] = { 0, 0, 0 };
+	long step_x;
+	long step_y;
+	long x;
+	long y;
+	long channel;
+	long clear = 0;
+	long seen = 0;
+	long shown = 0;
+
+	/* (a glyph is small, the grenade's 64 square: a face's or a sword's
+	alpha is its shine, and its colour, where it shines, may be one) */
+	if (!texture || !texture->pixels || texture->width < 4 || texture->height < 4 ||
+		texture->width > 64 || texture->height > 64 ||
+		(texture->format != _bitmap_format_dxt3 && texture->format != _bitmap_format_dxt5))
+	{
+		return FALSE;
+	}
+	step_x = MAX(1, texture->width / 64);
+	step_y = MAX(1, texture->height / 64);
+	for (y = 0; y < texture->height; y += step_y)
+	{
+		for (x = 0; x < texture->width; x += step_x)
+		{
+			long offset = ((y / 4) * (texture->width / 4) + x / 4) * 16;
+			long alpha;
+			long colour[3];
+
+			if (offset + 16 > texture->pixels_size)
+				continue;
+			alpha = block_texel_alpha(texture->pixels + offset, texture->format, (y % 4) * 4 + x % 4);
+			seen++;
+			if (alpha < 32)
+			{
+				clear++;
+				continue;
+			}
+			if (alpha < 128)
+				continue;
+			shown++;
+			texture_texel(texture, x, y, &colour[0], &colour[1], &colour[2]);
+			for (channel = 0; channel < 3; channel++)
+			{
+				low[channel] = MIN(low[channel], colour[channel]);
+				high[channel] = MAX(high[channel], colour[channel]);
+			}
+		}
+	}
+	if (!seen || !shown || clear * 10 < seen * 3)
+		return FALSE;
+	for (channel = 0; channel < 3; channel++)
+	{
+		if (high[channel] - low[channel] > 48)
+			return FALSE;
+	}
+
+	return MAX(high[0], MAX(high[1], high[2])) > 32;
+}
+
 int saber_texture_cutout(
 	struct saber_texture const *texture,
 	int foliage)
@@ -3437,6 +3795,125 @@ static void texture_texel(
 	*green = channels[index][1];
 	*blue = channels[index][2];
 }
+
+/* how bright a grey of a character's texture is a plate of its armour, of
+255, which colour change takes (saber_texture_read_mask) */
+#define SABER_PLATE_BRIGHTNESS 96
+
+/* whether a texel is of a character's armour baked in colour (an Elite
+minor's blue): blue most, and coloured */
+static boolean texel_baked(
+	long red,
+	long green,
+	long blue)
+{
+	long most = MAX(red, MAX(green, blue));
+	long least = MIN(red, MIN(green, blue));
+
+	return blue == most && blue > 40 && (most - least) * 5 > most * 2 && blue < 230;
+}
+
+/* whether masks read now take the armour baked in colour too: the texture
+is turned grey there after (saber_texture_band_grey), so another rank's
+colour, a major's red, changes it as it does the grey plates */
+static boolean mask_takes_baked = FALSE;
+
+void saber_texture_mask_baked(
+	int baked)
+{
+	mask_takes_baked = baked ? TRUE : FALSE;
+}
+
+/* whether masks read now, whole ones too (a texture's own `_mpmask`), take
+the texture's bright grey plates: a ranked character's, an Elite major's
+silver trim, its rank's colour as the rest of its armour */
+static boolean mask_takes_plates = FALSE;
+
+/* how much of the mask read last changes colour, in hundredths */
+static long mask_last_coverage = 0;
+
+long saber_texture_mask_coverage(
+	void)
+{
+	return mask_last_coverage;
+}
+
+void saber_texture_mask_plates(
+	int plates)
+{
+	mask_takes_plates = plates ? TRUE : FALSE;
+}
+
+/* The colour change that turns a character's grey plates the colour its
+armour is baked (an Elite minor's plates the blue of its helmet and
+shoulders): of each channel, the baked armour's mean over the plates' mean,
+at most 1. The baked armour its texels blue most and coloured, the plates
+its grey ones as bright as SABER_PLATE_BRIGHTNESS; *weight how many of the
+first there are. FALSE if the texture has too few of either */
+int saber_texture_band_color(
+	struct saber_texture const *base,
+	real color[3],
+	long *weight)
+{
+	long step_x;
+	long step_y;
+	long x;
+	long y;
+	double plates[3] = { 0.0, 0.0, 0.0 };
+	double baked[3] = { 0.0, 0.0, 0.0 };
+	long plate_count = 0;
+	long baked_count = 0;
+	long samples = 0;
+	long channel;
+
+	*weight = 0;
+	if (!base || !base->pixels || base->width < 4 || base->height < 4)
+		return FALSE;
+	step_x = MAX(1, base->width / 256);
+	step_y = MAX(1, base->height / 256);
+	for (y = 0; y < base->height; y += step_y)
+	{
+		for (x = 0; x < base->width; x += step_x)
+		{
+			long red;
+			long green;
+			long blue;
+			long most;
+			long least;
+
+			texture_texel(base, x, y, &red, &green, &blue);
+			most = MAX(red, MAX(green, blue));
+			least = MIN(red, MIN(green, blue));
+			samples++;
+			if (most >= SABER_PLATE_BRIGHTNESS && (most - least) * 5 <= most)
+			{
+				plates[0] += red;
+				plates[1] += green;
+				plates[2] += blue;
+				plate_count++;
+			}
+			else if (texel_baked(red, green, blue))
+			{
+				baked[0] += red;
+				baked[1] += green;
+				baked[2] += blue;
+				baked_count++;
+			}
+		}
+	}
+	if (plate_count * 100 < samples || baked_count * 100 < samples)
+		return FALSE;
+	for (channel = 0; channel < 3; channel++)
+	{
+		real ratio = (real)((baked[channel] / baked_count) / MAX(plates[channel] / plate_count, 1.0));
+
+		color[channel] = ratio > 1.f ? 1.f : ratio;
+	}
+	*weight = baked_count;
+
+	return TRUE;
+}
+
 
 int saber_texture_read_mask(
 	struct saber_texture *texture,
@@ -3539,6 +4016,56 @@ int saber_texture_read_mask(
 			}
 		}
 	}
+	else if (format == 36)
+	{
+		/* (DXT5, a block of 16 bytes, its colour's blue the mask: an Elite
+		major's ch_elite_officer_01_br; the Xbox 360's 16-bit words
+		byte-swapped) */
+		if ((unsigned long)(blocks_wide * blocks_high * 16) > size - data)
+		{
+			free(mask);
+			return FALSE;
+		}
+		for (y = 0; y < blocks_high; y++)
+		{
+			for (x = 0; x < blocks_wide; x++)
+			{
+				unsigned char block[16];
+				unsigned long color0;
+				unsigned long color1;
+				unsigned long indices;
+				long blues[4];
+				long texel;
+
+				memcpy(block, bytes + data + 16 * (y * blocks_wide + x), 16);
+				if (big_endian)
+				{
+					long index;
+
+					for (index = 0; index < 16; index += 2)
+					{
+						unsigned char swap = block[index];
+
+						block[index] = block[index + 1];
+						block[index + 1] = swap;
+					}
+				}
+				color0 = (unsigned long)block[8] | ((unsigned long)block[9] << 8);
+				color1 = (unsigned long)block[10] | ((unsigned long)block[11] << 8);
+				indices = (unsigned long)block[12] | ((unsigned long)block[13] << 8) |
+					((unsigned long)block[14] << 16) | ((unsigned long)block[15] << 24);
+				blues[0] = (long)(color0 & 31) * 255 / 31;
+				blues[1] = (long)(color1 & 31) * 255 / 31;
+				blues[2] = (2 * blues[0] + blues[1]) / 3;
+				blues[3] = (blues[0] + 2 * blues[1]) / 3;
+				for (texel = 0; texel < 16; texel++)
+				{
+					mask[(4 * y + texel / 4) * width + 4 * x + texel % 4] =
+						(unsigned char)blues[(indices >> (2 * texel)) & 3];
+				}
+			}
+		}
+	}
 	else if (format == 0 || format == 22 || format == 90)
 	{
 		/* (four bytes a texel, its first channel: B of the PC's BGRA, of
@@ -3560,8 +4087,8 @@ int saber_texture_read_mask(
 	}
 
 	/* (a banded mask: its background, its most common value, none; else
-	whole) */
-	if (banded)
+	whole, and a ranked character's whole one with its plates too) */
+	if (banded || (mask_takes_plates && base))
 	{
 		long counts[256];
 		long background = 0;
@@ -3579,11 +4106,14 @@ int saber_texture_read_mask(
 		{
 			long apart = (long)mask[texel] - background;
 
-			mask[texel] = (unsigned char)(apart > 8 || apart < -8 ? 255 : 0);
+			if (banded)
+				mask[texel] = (unsigned char)(apart > 8 || apart < -8 ? 255 : 0);
 			/* (but not where the texture is coloured already: an Elite's
 			armour baked blue, which colour change would darken; its grey
-			plates take it) */
-			if (mask[texel] && base && base->width > 0 && base->height > 0)
+			plates take it, and the band marks only some of them: the legs'
+			and arms' bolted plates, grey and as bright, are left in its
+			background. Those take it too; the undersuit, darker, does not) */
+			if (base && base->width > 0 && base->height > 0)
 			{
 				long red;
 				long green;
@@ -3591,16 +4121,107 @@ int saber_texture_read_mask(
 				long most;
 				long least;
 
-				texture_texel(base, (texel % width) * base->width / width, (texel / width) * base->height / height,
-					&red, &green, &blue);
+				/* (the base's colour over the mask texel's footprint, not one
+				texel of it: one texel of a finer, noisy texture would speckle the
+				mask) */
+				{
+					long across = MAX(1, MIN(4, base->width / width));
+					long down = MAX(1, MIN(4, base->height / height));
+					long left = (texel % width) * base->width / width;
+					long top = (texel / width) * base->height / height;
+					long sample_x;
+					long sample_y;
+
+					red = green = blue = 0;
+					for (sample_y = 0; sample_y < down; sample_y++)
+					{
+						for (sample_x = 0; sample_x < across; sample_x++)
+						{
+							long sample_red;
+							long sample_green;
+							long sample_blue;
+
+							texture_texel(base, left + sample_x * (base->width / width) / across,
+								top + sample_y * (base->height / height) / down,
+								&sample_red, &sample_green, &sample_blue);
+							red += sample_red;
+							green += sample_green;
+							blue += sample_blue;
+						}
+					}
+					red /= across * down;
+					green /= across * down;
+					blue /= across * down;
+				}
 				most = MAX(red, MAX(green, blue));
 				least = MIN(red, MIN(green, blue));
 				if (most > 24 && (most - least) * 5 > most)
-					mask[texel] = 0;
+				{
+					if (banded)
+						mask[texel] = (unsigned char)(mask_takes_baked && texel_baked(red, green, blue) ? 255 : 0);
+				}
+				else if (most >= SABER_PLATE_BRIGHTNESS)
+					mask[texel] = 255;
 			}
 		}
 	}
+	/* (a banded mask smoothed: each texel by the most of those about it (a
+	5x5 of a 512-texel mask, 3x3 of a smaller one), so the noise of the
+	texture's grey left in or out of it is gone, then softened at its edges
+	over 3x3) */
+	if (banded)
+	{
+		unsigned char *smoothed = malloc((size_t)width * (size_t)height);
 
+		if (smoothed)
+		{
+			long pass;
+
+			for (pass = 0; pass < 2; pass++)
+			{
+				long reach = pass ? 1 : MAX(1, MIN(4, width / 256));
+
+				for (y = 0; y < height; y++)
+				{
+					for (x = 0; x < width; x++)
+					{
+						long total = 0;
+						long count = 0;
+						long dy;
+						long dx;
+
+						for (dy = -reach; dy <= reach; dy++)
+						{
+							for (dx = -reach; dx <= reach; dx++)
+							{
+								long sx = x + dx;
+								long sy = y + dy;
+
+								if (sx < 0 || sy < 0 || sx >= width || sy >= height)
+									continue;
+								total += mask[sy * width + sx];
+								count++;
+							}
+						}
+						smoothed[y * width + x] = (unsigned char)(pass ? total / count :
+							(total * 2 >= count * 255 ? 255 : 0));
+					}
+				}
+				memcpy(mask, smoothed, (size_t)width * (size_t)height);
+			}
+			free(smoothed);
+		}
+	}
+
+	/* (how much of it changes colour, for the log) */
+	{
+		long texel;
+		double total = 0.0;
+
+		for (texel = 0; texel < width * height; texel++)
+			total += mask[texel];
+		mask_last_coverage = (long)(total * 100.0 / (255.0 * (double)(width * height)) + 0.5);
+	}
 	/* the mask as DXT1, in blue */
 	texture->pixels = malloc((size_t)blocks_wide * (size_t)blocks_high * 8);
 	if (!texture->pixels)
@@ -3740,11 +4361,21 @@ static long block_texel_alpha(
 1, and index 3 clear). The black is the sky behind the stars, and it is
 stored with no alpha. A block blends a star into that black, so the grey
 around a star is the same sky and is punched with it */
+static void texture_brightness_alpha(struct saber_texture *texture, boolean brightest_channel);
+
 static void texture_punch_black(
 	struct saber_texture *texture)
 {
 	long offset;
 
+	/* (a DXT3's or DXT5's black is punched by its alpha: its brightness, so
+	the bolt blends as it glows and the black around it is gone, the
+	plasma rifle's arc from an ipak) */
+	if (texture->pixels && (texture->format == _bitmap_format_dxt3 || texture->format == _bitmap_format_dxt5))
+	{
+		texture_brightness_alpha(texture, TRUE);
+		return;
+	}
 	if (!texture->pixels || texture->format != _bitmap_format_dxt1)
 		return;
 	for (offset = 0; offset + 8 <= texture->pixels_size; offset += 8)
@@ -4101,6 +4732,220 @@ void saber_texture_ring_contrast(
 }
 
 /* a texture's colour multiplied by numer/denom, its alpha left as it is */
+/* every colour of a DXT texture black, its alpha kept: each block's ends
+black, the first a step above the second so a DXT1's block keeps its four
+colours and no texel turns clear */
+void saber_texture_blacken(
+	struct saber_texture *texture)
+{
+	long block_size;
+	long color_at;
+	long offset;
+
+	if (!texture->pixels)
+		return;
+	if (texture->format != _bitmap_format_dxt1 && texture->format != _bitmap_format_dxt3 &&
+		texture->format != _bitmap_format_dxt5)
+	{
+		return;
+	}
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	color_at = block_size == 8 ? 0 : 8;
+	for (offset = 0; offset + block_size <= texture->pixels_size; offset += block_size)
+	{
+		unsigned char *block = texture->pixels + offset + color_at;
+
+		block[0] = 1;
+		block[1] = 0;
+		block[2] = 0;
+		block[3] = 0;
+	}
+}
+
+/* a character's armour baked in colour (texel_baked) turned the grey that
+`band` (saber_texture_band_color) changes back to it: each block's ends
+that are of it, by the mean of their channels over the band's. Drawn with
+the band as its change colour, the least rank's, it is as it was; with
+another rank's, that rank's */
+static void texture_recolour(
+	struct saber_texture *texture,
+	real const band[3],
+	boolean tint);
+
+void saber_texture_band_grey(
+	struct saber_texture *texture,
+	real const band[3])
+{
+	texture_recolour(texture, band, FALSE);
+}
+
+/* a rank's own texture's grey trim turned the colour its armour is baked
+(an Elite major's silver strips, of ch_elite_officer_01, his red): each
+block's grey ends, by their brightness, in the hue of the texture's most
+coloured texels. FALSE if it has too few of those */
+int saber_texture_tint_greys(
+	struct saber_texture *texture)
+{
+	double sum[3] = { 0.0, 0.0, 0.0 };
+	long count = 0;
+	long samples = 0;
+	long step_x;
+	long step_y;
+	long x;
+	long y;
+	real hue[3];
+	double most;
+
+	if (!texture || !texture->pixels || texture->width < 4 || texture->height < 4 ||
+		(texture->format != _bitmap_format_dxt1 && texture->format != _bitmap_format_dxt3 &&
+			texture->format != _bitmap_format_dxt5))
+	{
+		return FALSE;
+	}
+	step_x = MAX(1, texture->width / 128);
+	step_y = MAX(1, texture->height / 128);
+	for (y = 0; y < texture->height; y += step_y)
+	{
+		for (x = 0; x < texture->width; x += step_x)
+		{
+			long red;
+			long green;
+			long blue;
+			long high;
+			long low;
+
+			texture_texel(texture, x, y, &red, &green, &blue);
+			high = MAX(red, MAX(green, blue));
+			low = MIN(red, MIN(green, blue));
+			samples++;
+			if (high > 24 && (high - low) * 5 > high * 2)
+			{
+				sum[0] += red;
+				sum[1] += green;
+				sum[2] += blue;
+				count++;
+			}
+		}
+	}
+	if (count * 10 < samples)
+		return FALSE;
+	most = MAX(sum[0], MAX(sum[1], sum[2]));
+	if (most <= 0.0)
+		return FALSE;
+	hue[0] = (real)(sum[0] / most);
+	hue[1] = (real)(sum[1] / most);
+	hue[2] = (real)(sum[2] / most);
+	texture_recolour(texture, hue, TRUE);
+
+	return TRUE;
+}
+
+static void texture_recolour(
+	struct saber_texture *texture,
+	real const band[3],
+	boolean tint)
+{
+	long block_size;
+	long color_at;
+	long offset;
+
+	if (!texture || !texture->pixels || (!tint && (band[0] <= 0.01f || band[1] <= 0.01f || band[2] <= 0.01f)))
+		return;
+	if (texture->format != _bitmap_format_dxt1 && texture->format != _bitmap_format_dxt3 &&
+		texture->format != _bitmap_format_dxt5)
+	{
+		return;
+	}
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	color_at = block_size == 8 ? 0 : 8;
+	for (offset = 0; offset + block_size <= texture->pixels_size; offset += block_size)
+	{
+		unsigned char *block = texture->pixels + offset + color_at;
+		unsigned long colors[2];
+		unsigned long packed[2];
+		boolean changed = FALSE;
+		long end;
+
+		colors[0] = (unsigned long)block[0] | ((unsigned long)block[1] << 8);
+		colors[1] = (unsigned long)block[2] | ((unsigned long)block[3] << 8);
+		for (end = 0; end < 2; end++)
+		{
+			long red = unpack565(colors[end], 0);
+			long green = unpack565(colors[end], 1);
+			long blue = unpack565(colors[end], 2);
+			real grey;
+			long level;
+
+			packed[end] = colors[end];
+			if (tint)
+			{
+				long high = MAX(red, MAX(green, blue));
+				long low = MIN(red, MIN(green, blue));
+				long shade;
+
+				/* (grey, and not the black between the plates) */
+				if (high < 40 || (high - low) * 5 > high * 2)
+					continue;
+				shade = (red + green + blue) / 3;
+				packed[end] = pack565((long)(shade * band[0] + 0.5f), (long)(shade * band[1] + 0.5f),
+					(long)(shade * band[2] + 0.5f));
+				changed = TRUE;
+				continue;
+			}
+			if (!texel_baked(red, green, blue))
+				continue;
+			grey = ((real)red / band[0] + (real)green / band[1] + (real)blue / band[2]) / 3.f;
+			level = (long)(grey + 0.5f);
+			level = level > 255 ? 255 : level;
+			packed[end] = pack565(level, level, level);
+			changed = TRUE;
+		}
+		if (!changed)
+			continue;
+		/* (the ends' order is the block's mode, DXT1's four colours or three
+		and clear: kept, the indices swapped with the ends) */
+		{
+			boolean four = colors[0] > colors[1] || block_size == 16;
+
+			if (four && packed[0] == packed[1])
+			{
+				if (packed[1] > 0)
+					packed[1]--;
+				else
+					packed[0]++;
+			}
+			if (block_size == 8 && (packed[0] > packed[1]) != (colors[0] > colors[1]) && packed[0] != packed[1])
+			{
+				unsigned long swap = packed[0];
+				long index;
+
+				packed[0] = packed[1];
+				packed[1] = swap;
+				for (index = 4; index < 8; index++)
+				{
+					unsigned char bits = block[index];
+					unsigned char remapped = 0;
+					long texel;
+
+					for (texel = 0; texel < 4; texel++)
+					{
+						long which = (bits >> (2 * texel)) & 3;
+
+						if (four || which < 2)
+							which ^= 1;
+						remapped |= (unsigned char)(which << (2 * texel));
+					}
+					block[index] = remapped;
+				}
+			}
+		}
+		block[0] = (unsigned char)packed[0];
+		block[1] = (unsigned char)(packed[0] >> 8);
+		block[2] = (unsigned char)packed[1];
+		block[3] = (unsigned char)(packed[1] >> 8);
+	}
+}
+
 void saber_texture_darken(
 	struct saber_texture *texture,
 	long numer,
@@ -4358,6 +5203,141 @@ void saber_texture_make_solid(
 			texture->pixels[offset] = 0xFF;
 			texture->pixels[offset + 1] = 0xFF;
 			memset(texture->pixels + offset + 2, 0, 6);
+		}
+	}
+}
+
+/* the brightness of each of a DXT block's sixteen texels, of 255: its
+colour is its last 8 bytes, two 565 ends and two bits a texel (a DXT3's and
+a DXT5's always of four colours) */
+static void dxt_block_brightness(
+	unsigned char const *block,
+	long brightness[16],
+	boolean brightest_channel)
+{
+	unsigned long ends[2];
+	long palette[4];
+	unsigned long indices = (unsigned long)block[12] | ((unsigned long)block[13] << 8) |
+		((unsigned long)block[14] << 16) | ((unsigned long)block[15] << 24);
+	long end;
+	long texel;
+
+	ends[0] = (unsigned long)block[8] | ((unsigned long)block[9] << 8);
+	ends[1] = (unsigned long)block[10] | ((unsigned long)block[11] << 8);
+	for (end = 0; end < 2; end++)
+	{
+		long red = (long)((ends[end] >> 11) & 31) * 255 / 31;
+		long green = (long)((ends[end] >> 5) & 63) * 255 / 63;
+		long blue = (long)(ends[end] & 31) * 255 / 31;
+
+		palette[end] = brightest_channel ? MAX(red, MAX(green, blue)) : (red * 77 + green * 150 + blue * 29) >> 8;
+	}
+	palette[2] = (2 * palette[0] + palette[1]) / 3;
+	palette[3] = (palette[0] + 2 * palette[1]) / 3;
+	for (texel = 0; texel < 16; texel++)
+		brightness[texel] = palette[(indices >> (2 * texel)) & 3];
+}
+
+/* A terrain layer gives way to what is under it by its height: its high
+places (the rock's ridges, the sand's crests) stay over where it weighs
+little, and the low between them show what is under it first
+(saber_models_level_render). Its height is its brightness, stretched over
+the texture's own range (the alpha the package gives it is a gloss) */
+void saber_texture_height_alpha(
+	struct saber_texture *texture)
+{
+	texture_brightness_alpha(texture, FALSE);
+}
+
+/* a DXT3's or DXT5's alpha its brightness, stretched over the texture's
+range: of its colour's luminance (a terrain layer's height), or of its
+brightest channel (a bolt's glow, blue as bright as white) */
+static void texture_brightness_alpha(
+	struct saber_texture *texture,
+	boolean brightest_channel)
+{
+	long offset;
+	long lowest = 255;
+	long highest = 0;
+	long range;
+
+	if (!texture->pixels ||
+		(texture->format != _bitmap_format_dxt3 && texture->format != _bitmap_format_dxt5))
+	{
+		return;
+	}
+	for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+	{
+		long brightness[16];
+		long texel;
+
+		dxt_block_brightness(texture->pixels + offset, brightness, brightest_channel);
+		for (texel = 0; texel < 16; texel++)
+		{
+			lowest = MIN(lowest, brightness[texel]);
+			highest = MAX(highest, brightness[texel]);
+		}
+	}
+	range = highest - lowest;
+	for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+	{
+		unsigned char *block = texture->pixels + offset;
+		long brightness[16];
+		long heights[16];
+		long texel;
+
+		dxt_block_brightness(block, brightness, brightest_channel);
+		for (texel = 0; texel < 16; texel++)
+			heights[texel] = range > 0 ? (brightness[texel] - lowest) * 255 / range : 128;
+		if (texture->format == _bitmap_format_dxt3)
+		{
+			/* (four bits a texel) */
+			for (texel = 0; texel < 16; texel += 2)
+			{
+				block[texel / 2] = (unsigned char)(((heights[texel] * 15 + 127) / 255) |
+					(((heights[texel + 1] * 15 + 127) / 255) << 4));
+			}
+		}
+		else
+		{
+			/* (its two ends the block's highest and lowest, and three bits a
+			texel: 0 the first end, 1 the second, 2 to 7 the six between them
+			from the first) */
+			long high = 0;
+			long low = 255;
+			unsigned long bits[2] = { 0, 0 };
+
+			for (texel = 0; texel < 16; texel++)
+			{
+				high = MAX(high, heights[texel]);
+				low = MIN(low, heights[texel]);
+			}
+			if (high == low)
+			{
+				high = low < 255 ? low + 1 : 255;
+				low = high - 1;
+			}
+			for (texel = 0; texel < 16; texel++)
+			{
+				/* (its step from the high end, of seven) */
+				long step = ((high - heights[texel]) * 7 + (high - low) / 2) / (high - low);
+				unsigned long code = step == 0 ? 0 : (step == 7 ? 1 : (unsigned long)step + 1);
+				long bit = 3 * texel;
+
+				/* (eight texels a three bytes: none spans the two) */
+				if (bit < 24)
+					bits[0] |= code << bit;
+				else
+					bits[1] |= code << (bit - 24);
+			}
+			block[0] = (unsigned char)high;
+			block[1] = (unsigned char)low;
+			block[2] = (unsigned char)(bits[0] & 0xFF);
+			block[3] = (unsigned char)((bits[0] >> 8) & 0xFF);
+			block[4] = (unsigned char)((bits[0] >> 16) & 0xFF);
+			block[5] = (unsigned char)(bits[1] & 0xFF);
+			block[6] = (unsigned char)((bits[1] >> 8) & 0xFF);
+			block[7] = (unsigned char)((bits[1] >> 16) & 0xFF);
 		}
 	}
 }

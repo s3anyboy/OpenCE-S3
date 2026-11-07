@@ -113,6 +113,7 @@ symbols in this file:
 #include "rasterizer/rasterizer_console_vars.h"
 #include "rasterizer/rasterizer_model_types.h"
 #include "saber_toggle.h" /* port: the Back button's switch, port/linux/game/saber_toggle.c */
+#include "saber.h" /* port: port/linux/game/saber_models.c */
 
 /* ---------- constants */
 
@@ -652,14 +653,18 @@ static void render_object_list(
 						level_of_detail_pixels,
 						node_matrices,
 						object->object.region_permutations,
-						object->object.outgoing_change_colors,
+						/* port: an Elite minor drawn as an Anniversary template, its
+						plates the blue of its helmet (port/linux/game/saber_models.c) */
+						saber_models_change_colors(definition->object.model.index, object_index,
+							object->object.outgoing_change_colors),
 						shown_functions,
 						data->lighting,
 						&object->object.bounding_sphere_center,
 						object->object.bounding_sphere_radius,
 						&model_effect,
 						object_index,
-						object->object.forced_shader_permutation_index,
+						saber_models_shader_permutation(definition->object.model.index,
+							object->object.forced_shader_permutation_index),
 						data->no_planar_fog ? FLAG(_render_model_no_planar_fog_bit) : 0);
 
 					if (debug_objects)
@@ -681,7 +686,8 @@ static void render_object_list(
 						object->object.bounding_sphere_radius,
 						NULL,
 						object_index,
-						object->object.forced_shader_permutation_index,
+						saber_models_shader_permutation(definition->object.model.index,
+							object->object.forced_shader_permutation_index),
 						FLAG(_render_model_shadow_bit));
 				}
 			}

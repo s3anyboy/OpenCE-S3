@@ -81,6 +81,7 @@ goes.
 #include "rasterizer/rasterizer_swizzle.h"
 #include "rasterizer/rasterizer_models.h"
 #include "rasterizer/rasterizer.h"
+#include "rasterizer/rasterizer_console_vars.h"
 #include "render/render.h"
 #include "render/render_cameras_internal.h"
 #include "objects/object_lights_rendering.h"
@@ -97,7 +98,10 @@ goes.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <xtl.h>
+#include "rasterizer/xbox/rasterizer_xbox.h"
+#include "rasterizer/xbox/rasterizer_xbox_pixel_shader.h"
 
 /* the platform layer's (port_config.c, xbox_files.c, xbox_textures.c) */
 int config_boolean(const char *name);
@@ -264,6 +268,12 @@ struct saber_model
 	struct model_shader_reference *shaders;
 	struct saber_model *next;
 	long tag_index;
+	/* the change colour that turns its grey plates the colour its armour is
+	baked (saber_texture_band_color), drawn as its least rank's primary
+	colour (an Elite minor's), and how many baked texels it was taken of;
+	none, 0 */
+	real_rgb_color band_color;
+	long band_weight;
 	struct model map_model;
 	struct model model;
 	struct model_region *regions;
@@ -283,10 +293,15 @@ struct saber_model
 	struct model_geometry_part *geometry_parts;
 	/* a classic heat meter shrunk onto the template's gauge: its own
 	buffer, not the map's */
-	struct vertex_buffer meter_buffers[4];
-	struct model_geometry_part const *meter_sources[4];
+	struct vertex_buffer meter_buffers[8];
+	struct model_geometry_part const *meter_sources[8];
 	/* where each fitted meter sits (its centre, in the model's space) */
-	real_point3d meter_centres[4];
+	real_point3d meter_centres[8];
+	/* the classic ammo counter's shift onto the template's counter (the
+	assault rifle's), once found, and whether it was looked for */
+	real_vector3d counter_shift;
+	boolean counter_found;
+	boolean counter_looked;
 	long meter_buffer_count;
 	byte *vertices;
 	unsigned long vertices_size;
@@ -323,6 +338,10 @@ struct saber_bitmap
 	struct bitmap_group classic_group;
 	boolean shown;
 	long count;
+	/* the map's own bitmaps it keeps first, as they are, for the map's other
+	shaders that draw this bitmap (the Master Chief's lights, of his armour's
+	`cyborg`): the package's textures follow them. 0 for none */
+	long classic_count;
 	struct bitmap_data bitmaps[MAXIMUM_SABER_BITMAP_TEXTURES];
 	struct saber_texture textures[MAXIMUM_SABER_BITMAP_TEXTURES];
 	char names[MAXIMUM_SABER_BITMAP_TEXTURES][64];
@@ -359,10 +378,17 @@ static struct
 	shader, a tree's too) */
 	long *kept_tags;
 	long kept_count;
+	/* the shaders a scrolling material (the plasma rifle's arc) was given:
+	the same model's first-person and third-person copies share their
+	shaders, so the other's arc takes it too, and its other materials (the
+	heat gauge) do not */
+	long scroll_shaders[8];
+	long scroll_shader_count;
 } saber_models_globals;
 
 static boolean tag_kept(long tag_index);
 static boolean map_glass_replaced(long shader_tag);
+static boolean map_clear_replaced(long shader_tag);
 
 /* ---------- private code */
 
@@ -506,9 +532,12 @@ static real template_scale(
 }
 
 /* the strip of a part's triangles: each after the last, joined by
-triangles of no area, starting on an even index so it keeps its turn */
+triangles of no area, starting on an even index so it keeps its turn.
+Those `skip` marks (when there is one) are left out; none left, one
+triangle of no area */
 static long part_strip(
 	struct saber_mesh_part const *part,
+	unsigned char const *skip,
 	word *strip)
 {
 	long count = 0;
@@ -517,6 +546,9 @@ static long part_strip(
 	for (index = 0; index < part->triangle_count; index++)
 	{
 		word a = part->triangles[3 * index];
+
+		if (skip && skip[index])
+			continue;
 
 		if (count)
 		{
@@ -529,6 +561,12 @@ static long part_strip(
 		strip[count++] = a;
 		strip[count++] = part->triangles[3 * index + 1];
 		strip[count++] = part->triangles[3 * index + 2];
+	}
+	if (!count && part->triangle_count > 0)
+	{
+		strip[count++] = part->triangles[0];
+		strip[count++] = part->triangles[0];
+		strip[count++] = part->triangles[0];
 	}
 
 	return count;
@@ -681,6 +719,8 @@ static boolean model_is_first_person(
 /* defined below, with the other material tests */
 static boolean material_monicle(struct saber_template const *template_, struct saber_mesh_part const *part);
 static boolean head_without_monicle(char const *key);
+static boolean material_scrolls(char const *material);
+static boolean material_lightning(char const *material);
 
 /* whether the part is the classic heat meter */
 static boolean part_is_meter(
@@ -699,6 +739,138 @@ static boolean part_is_meter(
 	shader = shader_definition_get(shader_tag);
 
 	return shader && shader->base.type == SHADER_TYPE_TRANSPARENT_METER;
+}
+
+/* whether the template's rear meters (`holo`) stand in for a gauge: the
+plasma pistol's, which has no gauge of its own. Its classic meter is laid
+where they are, and they are not drawn */
+static boolean template_gauge_stand_in(
+	struct saber_template const *template_)
+{
+	boolean pistol = FALSE;
+	long index;
+
+	for (index = 0; index < template_->material_count; index++)
+	{
+		if (strstr(template_->materials[index], "gauge"))
+			return FALSE;
+		if (strstr(template_->materials[index], "plasmapistol"))
+			pistol = TRUE;
+	}
+
+	return pistol;
+}
+
+/* whether a template's part stands in for its gauge, not drawn: the
+plasma pistol's rear meters (`holo`). Its own heat ring, of the parts of
+`plasmapistol_02`, is left out of their strips (part_strip) */
+static boolean part_stands_in(
+	struct saber_template const *template_,
+	struct saber_mesh_part const *part)
+{
+	return part->material_index >= 0 && part->material_index < template_->material_count &&
+		strstr(template_->materials[part->material_index], "holo") != NULL && template_gauge_stand_in(template_);
+}
+
+/* whether a template's part is its gauge, or stands in for it: the plasma
+pistol's own heat ring (`plasmapistol_02`), the classic meter laid where
+it is, the ring itself not drawn */
+static boolean part_gauge(
+	struct saber_template const *template_,
+	struct saber_mesh_part const *part)
+{
+	if (part->material_index < 0 || part->material_index >= template_->material_count)
+		return FALSE;
+	return strstr(template_->materials[part->material_index], "gauge") != NULL ||
+		(template_gauge_stand_in(template_) &&
+			strstr(template_->materials[part->material_index], "plasmapistol_02") != NULL);
+}
+
+/* the height of the template's gauge's face along the axis `normal`, the
+outermost of its triangles over `point` (`outward` the face's side, 1 or
+-1). FALSE if none is over it */
+static boolean gauge_surface(
+	struct saber_template const *template_,
+	long normal,
+	real outward,
+	real const point[3],
+	real *height)
+{
+	long first = (normal + 1) % 3;
+	long second = (normal + 2) % 3;
+	boolean found = FALSE;
+	long part_index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+		long triangle;
+
+		if (part->lod != 0 || !part_gauge(template_, part))
+		{
+			continue;
+		}
+		for (triangle = 0; triangle < part->triangle_count; triangle++)
+		{
+			real corners[3][3];
+			real area;
+			real weights[3];
+			real value;
+			long corner;
+
+			for (corner = 0; corner < 3; corner++)
+			{
+				unsigned short vertex = part->triangles[3 * triangle + corner];
+				real_point3d const *position;
+
+				if (vertex >= part->vertex_count)
+					break;
+				position = &part->vertices[vertex].position;
+				corners[corner][0] = position->x;
+				corners[corner][1] = position->y;
+				corners[corner][2] = position->z;
+			}
+			if (corner < 3)
+				continue;
+			area = (corners[1][first] - corners[0][first]) * (corners[2][second] - corners[0][second]) -
+				(corners[2][first] - corners[0][first]) * (corners[1][second] - corners[0][second]);
+			if (area > -1e-12f && area < 1e-12f)
+				continue;
+			weights[1] = ((point[first] - corners[0][first]) * (corners[2][second] - corners[0][second]) -
+				(corners[2][first] - corners[0][first]) * (point[second] - corners[0][second])) / area;
+			weights[2] = ((corners[1][first] - corners[0][first]) * (point[second] - corners[0][second]) -
+				(point[first] - corners[0][first]) * (corners[1][second] - corners[0][second])) / area;
+			weights[0] = 1.f - weights[1] - weights[2];
+			if (weights[0] < -0.001f || weights[1] < -0.001f || weights[2] < -0.001f)
+				continue;
+			value = weights[0] * corners[0][normal] + weights[1] * corners[1][normal] + weights[2] * corners[2][normal];
+			if (!found || value * outward > *height * outward)
+				*height = value;
+			found = TRUE;
+		}
+	}
+
+	return found;
+}
+
+/* how many parts of the template's most detailed level are its gauge */
+static long gauge_part_count(
+	struct saber_template const *template_)
+{
+	long count = 0;
+	long part_index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+
+		if (part->lod == 0 && part_gauge(template_, part) && part->vertex_count > 0)
+		{
+			count++;
+		}
+	}
+
+	return count;
 }
 
 /* the template's gauge, in the model's space (its vertices already are).
@@ -727,8 +899,7 @@ static boolean gauge_box(
 	{
 		struct saber_mesh_part const *part = &template_->parts[part_index];
 
-		if (part->material_index < 0 || part->material_index >= template_->material_count ||
-			!strstr(template_->materials[part->material_index], "gauge") || part->vertex_count <= 0)
+		if (!part_gauge(template_, part) || part->vertex_count <= 0)
 		{
 			continue;
 		}
@@ -767,8 +938,7 @@ static boolean gauge_box(
 	{
 		struct saber_mesh_part const *part = &template_->parts[part_index];
 
-		if (part->material_index < 0 || part->material_index >= template_->material_count ||
-			!strstr(template_->materials[part->material_index], "gauge") || part->vertex_count <= 0)
+		if (!part_gauge(template_, part) || part->vertex_count <= 0)
 		{
 			continue;
 		}
@@ -799,6 +969,500 @@ static boolean gauge_box(
 		*low = box_low;
 		*high = box_high;
 	}
+
+	return TRUE;
+}
+
+/* the plasma pistol's ring: a flat round face, tilted back and up, at the
+end of parts that run along the gun's top too. Its plane is that of its
+gauge triangles facing the gun's back; its frame, `normal` out of it,
+`across` the gun's width in it and `up` the third; its middle and its
+size in that frame. The classic meter is a ring too, tilted alike: its
+plane is the one its vertices spread least across */
+static void ring_cross(
+	real const *a,
+	real const *b,
+	real *result)
+{
+	result[0] = a[1] * b[2] - a[2] * b[1];
+	result[1] = a[2] * b[0] - a[0] * b[2];
+	result[2] = a[0] * b[1] - a[1] * b[0];
+}
+
+static real ring_dot(
+	real const *a,
+	real const *b)
+{
+	return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+static boolean ring_unit(
+	real *a)
+{
+	real length = (real)sqrt(ring_dot(a, a));
+
+	if (length <= 1e-9f)
+		return FALSE;
+	a[0] /= length;
+	a[1] /= length;
+	a[2] /= length;
+
+	return TRUE;
+}
+
+/* the frame of a plane: `across` the gun's width (y) laid in it, and `up`
+across times normal's turn, so up, across and normal turn as x, y, z */
+static boolean ring_frame(
+	real const *normal,
+	real *across,
+	real *up)
+{
+	real along;
+
+	across[0] = 0.f;
+	across[1] = 1.f;
+	across[2] = 0.f;
+	along = ring_dot(across, normal);
+	across[0] -= normal[0] * along;
+	across[1] -= normal[1] * along;
+	across[2] -= normal[2] * along;
+	if (!ring_unit(across))
+		return FALSE;
+	ring_cross(across, normal, up);
+
+	return ring_unit(up);
+}
+
+/* the eigenvector of the least eigenvalue of a symmetric 3x3 matrix
+(Jacobi's turns) */
+static void ring_least_axis(
+	real matrix[3][3],
+	real *axis)
+{
+	double a[3][3];
+	double v[3][3];
+	long sweep;
+	long row;
+	long column;
+	long least = 0;
+
+	for (row = 0; row < 3; row++)
+	{
+		for (column = 0; column < 3; column++)
+		{
+			a[row][column] = matrix[row][column];
+			v[row][column] = row == column ? 1.0 : 0.0;
+		}
+	}
+	for (sweep = 0; sweep < 32; sweep++)
+	{
+		long p;
+		long q;
+
+		for (p = 0; p < 2; p++)
+		{
+			for (q = p + 1; q < 3; q++)
+			{
+				double theta;
+				double t;
+				double c;
+				double s;
+				long k;
+
+				if (a[p][q] > -1e-18 && a[p][q] < 1e-18)
+					continue;
+				theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+				t = (theta >= 0.0 ? 1.0 : -1.0) / ((theta >= 0.0 ? theta : -theta) + sqrt(theta * theta + 1.0));
+				c = 1.0 / sqrt(t * t + 1.0);
+				s = t * c;
+				for (k = 0; k < 3; k++)
+				{
+					double kp = a[k][p];
+					double kq = a[k][q];
+
+					a[k][p] = c * kp - s * kq;
+					a[k][q] = s * kp + c * kq;
+				}
+				for (k = 0; k < 3; k++)
+				{
+					double pk = a[p][k];
+					double qk = a[q][k];
+
+					a[p][k] = c * pk - s * qk;
+					a[q][k] = s * pk + c * qk;
+				}
+				for (k = 0; k < 3; k++)
+				{
+					double kp = v[k][p];
+					double kq = v[k][q];
+
+					v[k][p] = c * kp - s * kq;
+					v[k][q] = s * kp + c * kq;
+				}
+			}
+		}
+	}
+	for (row = 1; row < 3; row++)
+	{
+		if (a[row][row] < a[least][least])
+			least = row;
+	}
+	axis[0] = (real)v[0][least];
+	axis[1] = (real)v[1][least];
+	axis[2] = (real)v[2][least];
+}
+
+/* the classic meter's vertices (`copy`, `count` of `stride`) laid on the
+ring, its shape kept, as large as the ring, its face the ring's, just
+clear of it. FALSE when the ring is not found. With no `copy`, only the
+ring's triangles of `ring_part` marked in `ring_triangles` */
+static boolean ring_meter_fit(
+	struct saber_template const *template_,
+	byte *copy,
+	long stride,
+	long count,
+	real_point3d *placed,
+	struct saber_mesh_part const *ring_part,
+	unsigned char *ring_triangles)
+{
+	real gun_low[3];
+	real gun_high[3];
+	real gun_mid[3];
+	real ring_normal[3] = { 0.f, 0.f, 0.f };
+	real ring_across[3];
+	real ring_up[3];
+	real ring_low[3];
+	real ring_high[3];
+	real ring_mid[3];
+	real meter_normal[3];
+	real meter_across[3];
+	real meter_up[3];
+	real meter_low[3];
+	real meter_high[3];
+	real meter_mid[3];
+	real covariance[3][3];
+	real offset = 0.f;
+	real weight = 0.f;
+	real scale;
+	real clear;
+	real side;
+	real full_low_x = 0.f;
+	real full_high_x = 0.f;
+	boolean any_gun = FALSE;
+	boolean any_gauge = FALSE;
+	boolean any_ring = FALSE;
+	long pass;
+	long part_index;
+	long index;
+	long axis;
+
+	/* (the gun's middle, and which end of the gauge is its back) */
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+		long vertex;
+
+		if (part->lod != 0)
+			continue;
+		for (vertex = 0; vertex < part->vertex_count; vertex++)
+		{
+			real_point3d const *position = &part->vertices[vertex].position;
+			real coordinates[3];
+
+			coordinates[0] = position->x;
+			coordinates[1] = position->y;
+			coordinates[2] = position->z;
+			for (axis = 0; axis < 3; axis++)
+			{
+				if (!any_gun || coordinates[axis] < gun_low[axis])
+					gun_low[axis] = coordinates[axis];
+				if (!any_gun || coordinates[axis] > gun_high[axis])
+					gun_high[axis] = coordinates[axis];
+			}
+			any_gun = TRUE;
+			if (part_gauge(template_, part))
+			{
+				if (!any_gauge || position->x < full_low_x)
+					full_low_x = position->x;
+				if (!any_gauge || position->x > full_high_x)
+					full_high_x = position->x;
+				any_gauge = TRUE;
+			}
+		}
+	}
+	if (!any_gun || !any_gauge || (copy && count <= 2))
+		return FALSE;
+	for (axis = 0; axis < 3; axis++)
+		gun_mid[axis] = (gun_low[axis] + gun_high[axis]) * 0.5f;
+	side = (full_low_x + full_high_x) * 0.5f >= gun_mid[0] ? 1.f : -1.f;
+	/* (the ring's plane: first the gauge triangles facing back at all,
+	then those facing as they do on the whole, then those of them in its
+	plane, the strongest there, by area) */
+	for (pass = 0; pass < 3; pass++)
+	{
+		real sum[3] = { 0.f, 0.f, 0.f };
+		real offset_sum = 0.f;
+		real area_sum = 0.f;
+
+		for (part_index = 0; part_index < template_->part_count; part_index++)
+		{
+			struct saber_mesh_part const *part = &template_->parts[part_index];
+			long triangle;
+
+			if (part->lod != 0 || !part_gauge(template_, part))
+				continue;
+			for (triangle = 0; triangle < part->triangle_count; triangle++)
+			{
+				real corners[3][3];
+				real edge_a[3];
+				real edge_b[3];
+				real facing[3];
+				real area;
+				real centre;
+				long corner;
+
+				for (corner = 0; corner < 3; corner++)
+				{
+					long vertex = part->triangles[triangle * 3 + corner];
+					real_point3d const *position;
+
+					if (vertex >= part->vertex_count)
+						break;
+					position = &part->vertices[vertex].position;
+					corners[corner][0] = position->x;
+					corners[corner][1] = position->y;
+					corners[corner][2] = position->z;
+				}
+				if (corner < 3)
+					continue;
+				for (axis = 0; axis < 3; axis++)
+				{
+					edge_a[axis] = corners[1][axis] - corners[0][axis];
+					edge_b[axis] = corners[2][axis] - corners[0][axis];
+				}
+				ring_cross(edge_a, edge_b, facing);
+				area = (real)sqrt(ring_dot(facing, facing));
+				if (area <= 1e-12f)
+					continue;
+				facing[0] /= area;
+				facing[1] /= area;
+				facing[2] /= area;
+				if (facing[0] * side < 0.f)
+				{
+					facing[0] = -facing[0];
+					facing[1] = -facing[1];
+					facing[2] = -facing[2];
+				}
+				if (pass == 0 ? facing[0] * side < 0.4f : ring_dot(facing, ring_normal) < 0.9f)
+					continue;
+				centre = (ring_dot(corners[0], facing) + ring_dot(corners[1], facing) +
+					ring_dot(corners[2], facing)) / 3.f;
+				if (pass == 2)
+				{
+					real away = (ring_dot(corners[0], ring_normal) + ring_dot(corners[1], ring_normal) +
+						ring_dot(corners[2], ring_normal)) / 3.f - offset;
+
+					if (away < 0.f)
+						away = -away;
+					if (away > (gun_high[0] - gun_low[0]) * 0.02f)
+						continue;
+				}
+				if (pass == 2 && part == ring_part && ring_triangles)
+					ring_triangles[triangle] = 1;
+				for (axis = 0; axis < 3; axis++)
+					sum[axis] += facing[axis] * area;
+				offset_sum += centre * area;
+				area_sum += area;
+				if (pass == 2)
+				{
+					for (corner = 0; corner < 3; corner++)
+					{
+						for (axis = 0; axis < 3; axis++)
+						{
+							real along = axis == 0 ? ring_dot(corners[corner], ring_up) :
+								(axis == 1 ? ring_dot(corners[corner], ring_across) : ring_dot(corners[corner], ring_normal));
+
+							if (!any_ring || along < ring_low[axis])
+								ring_low[axis] = along;
+							if (!any_ring || along > ring_high[axis])
+								ring_high[axis] = along;
+						}
+						any_ring = TRUE;
+					}
+				}
+			}
+		}
+		if (area_sum <= 1e-12f)
+			return FALSE;
+		if (pass < 2)
+		{
+			ring_normal[0] = sum[0];
+			ring_normal[1] = sum[1];
+			ring_normal[2] = sum[2];
+			if (!ring_unit(ring_normal) || !ring_frame(ring_normal, ring_across, ring_up))
+				return FALSE;
+			offset = offset_sum / area_sum;
+			weight = area_sum;
+		}
+	}
+	if (!any_ring || weight <= 0.f)
+		return FALSE;
+	if (!copy)
+	{
+		/* (and the ring's rim: the part's triangles within its round, from
+		its face to a quarter of its width behind it) */
+		real width = ring_high[1] - ring_low[1];
+
+		if (ring_part && ring_triangles && width > 0.f)
+		{
+			long triangle;
+
+			for (triangle = 0; triangle < ring_part->triangle_count; triangle++)
+			{
+				long corner;
+
+				for (corner = 0; corner < 3; corner++)
+				{
+					long vertex = ring_part->triangles[triangle * 3 + corner];
+					real point[3];
+					real along[3];
+
+					if (vertex >= ring_part->vertex_count)
+						break;
+					point[0] = ring_part->vertices[vertex].position.x;
+					point[1] = ring_part->vertices[vertex].position.y;
+					point[2] = ring_part->vertices[vertex].position.z;
+					along[0] = ring_dot(point, ring_up);
+					along[1] = ring_dot(point, ring_across);
+					along[2] = ring_dot(point, ring_normal);
+					if (along[0] < ring_low[0] - width * 0.03f || along[0] > ring_high[0] + width * 0.03f ||
+						along[1] < ring_low[1] - width * 0.03f || along[1] > ring_high[1] + width * 0.03f ||
+						along[2] < ring_low[2] - width * 0.25f || along[2] > ring_high[2] + width * 0.03f)
+					{
+						break;
+					}
+				}
+				if (corner == 3)
+					ring_triangles[triangle] = 1;
+			}
+		}
+
+		return TRUE;
+	}
+	/* (the classic meter's plane, its face away from the gun's middle) */
+	for (index = 0; index < 3; index++)
+		meter_mid[index] = 0.f;
+	for (index = 0; index < count; index++)
+	{
+		real_point3d const *position = (real_point3d const *)(copy + index * stride);
+
+		meter_mid[0] += position->x;
+		meter_mid[1] += position->y;
+		meter_mid[2] += position->z;
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		long other;
+
+		meter_mid[axis] /= (real)count;
+		for (other = 0; other < 3; other++)
+			covariance[axis][other] = 0.f;
+	}
+	for (index = 0; index < count; index++)
+	{
+		real_point3d const *position = (real_point3d const *)(copy + index * stride);
+		real away[3];
+		long other;
+
+		away[0] = position->x - meter_mid[0];
+		away[1] = position->y - meter_mid[1];
+		away[2] = position->z - meter_mid[2];
+		for (axis = 0; axis < 3; axis++)
+		{
+			for (other = 0; other < 3; other++)
+				covariance[axis][other] += away[axis] * away[other];
+		}
+	}
+	ring_least_axis(covariance, meter_normal);
+	{
+		real outward[3];
+
+		for (axis = 0; axis < 3; axis++)
+			outward[axis] = meter_mid[axis] - gun_mid[axis];
+		if (ring_dot(meter_normal, outward) < 0.f)
+		{
+			meter_normal[0] = -meter_normal[0];
+			meter_normal[1] = -meter_normal[1];
+			meter_normal[2] = -meter_normal[2];
+		}
+	}
+	if (!ring_unit(meter_normal) || !ring_frame(meter_normal, meter_across, meter_up))
+		return FALSE;
+	for (index = 0; index < count; index++)
+	{
+		real_point3d const *position = (real_point3d const *)(copy + index * stride);
+		real point[3];
+
+		point[0] = position->x;
+		point[1] = position->y;
+		point[2] = position->z;
+		for (axis = 0; axis < 3; axis++)
+		{
+			real along = axis == 0 ? ring_dot(point, meter_up) :
+				(axis == 1 ? ring_dot(point, meter_across) : ring_dot(point, meter_normal));
+
+			if (index == 0 || along < meter_low[axis])
+				meter_low[axis] = along;
+			if (index == 0 || along > meter_high[axis])
+				meter_high[axis] = along;
+		}
+	}
+	scale = 0.f;
+	for (axis = 0; axis < 2; axis++)
+	{
+		real meter_span = meter_high[axis] - meter_low[axis];
+		real ratio;
+
+		if (meter_span <= 1e-6f)
+			continue;
+		ratio = (ring_high[axis] - ring_low[axis]) / meter_span;
+		if (scale == 0.f || ratio < scale)
+			scale = ratio;
+	}
+	if (scale <= 0.f)
+		return FALSE;
+	for (axis = 0; axis < 2; axis++)
+	{
+		ring_mid[axis] = (ring_low[axis] + ring_high[axis]) * 0.5f;
+		meter_mid[axis] = (meter_low[axis] + meter_high[axis]) * 0.5f;
+	}
+	clear = (ring_high[1] - ring_low[1]) * 0.03f;
+	ring_mid[2] = ring_high[2] + clear;
+	/* (each vertex: its place in the meter's frame, scaled, to the same
+	place in the ring's; its depth from the meter's back on the ring's
+	face) */
+	for (index = 0; index < count; index++)
+	{
+		real_point3d *position = (real_point3d *)(copy + index * stride);
+		real point[3];
+		real frame[3];
+
+		point[0] = position->x;
+		point[1] = position->y;
+		point[2] = position->z;
+		frame[0] = ring_mid[0] + (ring_dot(point, meter_up) - meter_mid[0]) * scale;
+		frame[1] = ring_mid[1] + (ring_dot(point, meter_across) - meter_mid[1]) * scale;
+		frame[2] = ring_mid[2] + (ring_dot(point, meter_normal) - meter_low[2]) * scale;
+		position->x = ring_up[0] * frame[0] + ring_across[0] * frame[1] + ring_normal[0] * frame[2];
+		position->y = ring_up[1] * frame[0] + ring_across[1] * frame[1] + ring_normal[1] * frame[2];
+		position->z = ring_up[2] * frame[0] + ring_across[2] * frame[1] + ring_normal[2] * frame[2];
+	}
+	placed->x = ring_up[0] * ring_mid[0] + ring_across[0] * ring_mid[1] + ring_normal[0] * ring_mid[2];
+	placed->y = ring_up[1] * ring_mid[0] + ring_across[1] * ring_mid[1] + ring_normal[1] * ring_mid[2];
+	placed->z = ring_up[2] * ring_mid[0] + ring_across[2] * ring_mid[1] + ring_normal[2] * ring_mid[2];
+	platform_log("anniversary: the heat meter laid on the ring facing %.2f %.2f %.2f (its own %.2f %.2f %.2f), %.3f across, at %.3f %.3f %.3f, %.2f of its size",
+		ring_normal[0], ring_normal[1], ring_normal[2], meter_normal[0], meter_normal[1], meter_normal[2],
+		ring_high[1] - ring_low[1], placed->x, placed->y, placed->z, scale);
 
 	return TRUE;
 }
@@ -845,6 +1509,14 @@ static boolean meter_buffer_fit(
 	byte *copy = NULL;
 	struct vertex_buffer const *buffer = &source->vertex_buffer;
 	boolean fitted_ok = FALSE;
+	/* (a gauge of one side only, the plasma rifle's: the meter laid over
+	it box to box, its glyph on the gauge's) */
+	boolean one_sided = FALSE;
+	/* (and of two panes, the plasma rifle's either side of its ridge, the
+	meter on its side's; else one face, the plasma pistol's ring) */
+	boolean paned = FALSE;
+	/* (the middle of the gun, of its most detailed level) */
+	real gun_mid[3] = { 0.f, 0.f, 0.f };
 
 	if (!buffer->hardware_format || buffer->count <= 0)
 		return FALSE;
@@ -902,6 +1574,16 @@ static boolean meter_buffer_fit(
 	memcpy(copy, locked, (size_t)stride * (size_t)buffer->count);
 	IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)buffer->hardware_format);
 	locked = NULL;
+	/* (the plasma pistol's: the meter laid on its ring, of the ring's
+	plane, not its box) */
+	if (template_gauge_stand_in(template_) && ring_meter_fit(template_, copy, stride, buffer->count, placed, NULL, NULL))
+	{
+		fitted_ok = rasterizer_vertex_buffer_new(fitted, buffer->type, buffer->count, copy,
+			stride * buffer->count) ? TRUE : FALSE;
+		free(copy);
+
+		return fitted_ok;
+	}
 	centre_x = metre.x;
 	centre_y = metre.y;
 	centre_z = metre.z;
@@ -921,6 +1603,273 @@ static boolean meter_buffer_fit(
 		out_y = place_y - mid_y;
 		out_z = place_z - mid_z;
 		out_len = square_root(out_x * out_x + out_y * out_y + out_z * out_z);
+		/* (one gauge, across the top: the whole of it is the meter's, not a
+		side of it. The classic meter sits to one side of the gun's middle,
+		which halved the box it was fitted to) */
+		/* (or the plasma pistol's ring, of several parts one over another) */
+		if (gauge_part_count(template_) == 1 || template_gauge_stand_in(template_))
+		{
+			/* (its two panes either side of the top's ridge, one part: the
+			meter is the pane's on its side of the gun, across the axis the
+			meter is thinnest along, facing out along it) */
+			real meter_extent[3];
+			real meter_mid[3];
+			real full_mid[3];
+			real side_low[3];
+			real side_high[3];
+			real side;
+			long normal = 0;
+			long axis;
+			boolean any_side = FALSE;
+			long part_index;
+
+			meter_extent[0] = mhigh.x - mlow.x;
+			meter_extent[1] = mhigh.y - mlow.y;
+			meter_extent[2] = mhigh.z - mlow.z;
+			meter_mid[0] = metre.x;
+			meter_mid[1] = metre.y;
+			meter_mid[2] = metre.z;
+			full_mid[0] = mid_x;
+			full_mid[1] = mid_y;
+			full_mid[2] = mid_z;
+			for (axis = 1; axis < 3; axis++)
+			{
+				if (meter_extent[axis] < meter_extent[normal])
+					normal = axis;
+			}
+			side = meter_mid[normal] >= full_mid[normal] ? 1.f : -1.f;
+			/* (the gun's middle, and whether the gauge has a gap down its
+			middle across the meter's face: two panes) */
+			{
+				real gun_low[3];
+				real gun_high[3];
+				real full_extent = 0.f;
+				boolean any_gun = FALSE;
+
+				paned = TRUE;
+				for (part_index = 0; part_index < template_->part_count; part_index++)
+				{
+					struct saber_mesh_part const *part = &template_->parts[part_index];
+					long vertex;
+
+					if (part->lod != 0)
+						continue;
+					for (vertex = 0; vertex < part->vertex_count; vertex++)
+					{
+						real_point3d const *position = &part->vertices[vertex].position;
+						real coordinates[3];
+
+						coordinates[0] = position->x;
+						coordinates[1] = position->y;
+						coordinates[2] = position->z;
+						for (axis = 0; axis < 3; axis++)
+						{
+							if (!any_gun || coordinates[axis] < gun_low[axis])
+								gun_low[axis] = coordinates[axis];
+							if (!any_gun || coordinates[axis] > gun_high[axis])
+								gun_high[axis] = coordinates[axis];
+						}
+						any_gun = TRUE;
+					}
+				}
+				for (axis = 0; any_gun && axis < 3; axis++)
+					gun_mid[axis] = (gun_low[axis] + gun_high[axis]) * 0.5f;
+				full_extent = normal == 0 ? full_high.x - full_low.x :
+					(normal == 1 ? full_high.y - full_low.y : full_high.z - full_low.z);
+				for (part_index = 0; paned && part_index < template_->part_count; part_index++)
+				{
+					struct saber_mesh_part const *part = &template_->parts[part_index];
+					long vertex;
+
+					if (part->lod != 0 || !part_gauge(template_, part))
+						continue;
+					for (vertex = 0; vertex < part->vertex_count; vertex++)
+					{
+						real_point3d const *position = &part->vertices[vertex].position;
+						real value = normal == 0 ? position->x : (normal == 1 ? position->y : position->z);
+
+						if (value - full_mid[normal] < full_extent * 0.1f &&
+							full_mid[normal] - value < full_extent * 0.1f)
+						{
+							paned = FALSE;
+							break;
+						}
+					}
+				}
+			}
+			for (part_index = 0; paned && part_index < template_->part_count; part_index++)
+			{
+				struct saber_mesh_part const *part = &template_->parts[part_index];
+				long vertex;
+
+				if (part->lod != 0 || !part_gauge(template_, part))
+				{
+					continue;
+				}
+				for (vertex = 0; vertex < part->vertex_count; vertex++)
+				{
+					real_point3d const *position = &part->vertices[vertex].position;
+					real coordinates[3];
+
+					coordinates[0] = position->x;
+					coordinates[1] = position->y;
+					coordinates[2] = position->z;
+					if ((coordinates[normal] - full_mid[normal]) * side <= 0.f)
+						continue;
+					for (axis = 0; axis < 3; axis++)
+					{
+						if (!any_side || coordinates[axis] < side_low[axis])
+							side_low[axis] = coordinates[axis];
+						if (!any_side || coordinates[axis] > side_high[axis])
+							side_high[axis] = coordinates[axis];
+					}
+					any_side = TRUE;
+				}
+			}
+			if (!paned)
+			{
+				/* (one face: the whole of it, facing out along its thinnest
+				axis, away from the gun's middle) */
+				real extents[3];
+				long thinnest = 0;
+
+				glow = full_low;
+				ghigh = full_high;
+				extents[0] = full_high.x - full_low.x;
+				extents[1] = full_high.y - full_low.y;
+				extents[2] = full_high.z - full_low.z;
+				for (axis = 1; axis < 3; axis++)
+				{
+					if (extents[axis] < extents[thinnest])
+						thinnest = axis;
+				}
+				side = full_mid[thinnest] >= gun_mid[thinnest] ? 1.f : -1.f;
+				/* (the plasma pistol's ring is the back of parts that run along
+				the top too: its face the back, along the gun's length, and its
+				box the parts' backmost seventh) */
+				if (template_gauge_stand_in(template_))
+				{
+					real back;
+					real reach;
+					boolean any_back = FALSE;
+
+					thinnest = 0;
+					side = full_mid[0] >= gun_mid[0] ? 1.f : -1.f;
+					back = side > 0.f ? full_high.x : full_low.x;
+					reach = extents[0] / 7.f;
+					for (part_index = 0; part_index < template_->part_count; part_index++)
+					{
+						struct saber_mesh_part const *part = &template_->parts[part_index];
+						long vertex;
+
+						if (part->lod != 0 || !part_gauge(template_, part))
+							continue;
+						for (vertex = 0; vertex < part->vertex_count; vertex++)
+						{
+							real_point3d const *position = &part->vertices[vertex].position;
+							real coordinates[3];
+
+							if ((back - position->x) * side > reach)
+								continue;
+							coordinates[0] = position->x;
+							coordinates[1] = position->y;
+							coordinates[2] = position->z;
+							for (axis = 0; axis < 3; axis++)
+							{
+								if (!any_back || coordinates[axis] < side_low[axis])
+									side_low[axis] = coordinates[axis];
+								if (!any_back || coordinates[axis] > side_high[axis])
+									side_high[axis] = coordinates[axis];
+							}
+							any_back = TRUE;
+						}
+					}
+					if (any_back)
+					{
+						glow.x = side_low[0];
+						glow.y = side_low[1];
+						glow.z = side_low[2];
+						ghigh.x = side_high[0];
+						ghigh.y = side_high[1];
+						ghigh.z = side_high[2];
+					}
+				}
+				out_x = thinnest == 0 ? side : 0.f;
+				out_y = thinnest == 1 ? side : 0.f;
+				out_z = thinnest == 2 ? side : 0.f;
+				one_sided = TRUE;
+				out_len = 1.f;
+			}
+			else if (any_side)
+			{
+				glow.x = side_low[0];
+				glow.y = side_low[1];
+				glow.z = side_low[2];
+				ghigh.x = side_high[0];
+				ghigh.y = side_high[1];
+				ghigh.z = side_high[2];
+				out_x = normal == 0 ? side : 0.f;
+				out_y = normal == 1 ? side : 0.f;
+				out_z = normal == 2 ? side : 0.f;
+				one_sided = TRUE;
+				out_len = 1.f;
+			}
+			else
+			{
+				glow = full_low;
+				ghigh = full_high;
+				out_len = 0.f;
+			}
+		}
+		/* (a gauge of one side only, the plasma rifle's on its top: its
+		side's box is the whole, so no way out of it. Out along its thinnest
+		axis, away from the middle of the gun) */
+		if (out_len <= 0.0001f)
+		{
+			real_point3d gun_low;
+			real_point3d gun_high;
+			real thin_x = full_high.x - full_low.x;
+			real thin_y = full_high.y - full_low.y;
+			real thin_z = full_high.z - full_low.z;
+			boolean any_vertex = FALSE;
+			long part_index;
+
+			for (part_index = 0; part_index < template_->part_count; part_index++)
+			{
+				struct saber_mesh_part const *part = &template_->parts[part_index];
+				long vertex;
+
+				for (vertex = 0; vertex < part->vertex_count; vertex++)
+				{
+					real_point3d const *position = &part->vertices[vertex].position;
+
+					if (!any_vertex)
+					{
+						gun_low = *position;
+						gun_high = *position;
+						any_vertex = TRUE;
+					}
+					gun_low.x = MIN(gun_low.x, position->x);
+					gun_low.y = MIN(gun_low.y, position->y);
+					gun_low.z = MIN(gun_low.z, position->z);
+					gun_high.x = MAX(gun_high.x, position->x);
+					gun_high.y = MAX(gun_high.y, position->y);
+					gun_high.z = MAX(gun_high.z, position->z);
+				}
+			}
+			if (any_vertex)
+			{
+				one_sided = TRUE;
+				out_x = out_y = out_z = 0.f;
+				if (thin_x <= thin_y && thin_x <= thin_z)
+					out_x = place_x >= (gun_low.x + gun_high.x) * 0.5f ? 1.f : -1.f;
+				else if (thin_y <= thin_z)
+					out_y = place_y >= (gun_low.y + gun_high.y) * 0.5f ? 1.f : -1.f;
+				else
+					out_z = place_z >= (gun_low.z + gun_high.z) * 0.5f ? 1.f : -1.f;
+				out_len = 1.f;
+			}
+		}
 		if (out_len > 0.0001f)
 		{
 			out_x /= out_len;
@@ -974,9 +1923,148 @@ static boolean meter_buffer_fit(
 	{
 		real_point3d *position = (real_point3d *)(copy + index * stride);
 
-		position->x = place_x + (position->x - centre_x) * factor;
-		position->y = place_y + (position->y - centre_y) * factor;
-		position->z = place_z + (position->z - centre_z) * factor;
+		if (one_sided)
+		{
+			/* (the meter's box onto the gauge's. The classic meter lies on the
+			gun's side, facing out of it; the gauge on its top: the meter is
+			turned a quarter about the axis they share, its face to the
+			gauge's, then laid box to box and set out of the face a fiftieth
+			of its depth, clear of it) */
+			real meter_low[3];
+			real meter_high[3];
+			real gauge_low[3];
+			real gauge_high[3];
+			real gauge_mid[3];
+			real point[3];
+			real out[3];
+			real result[3];
+			long gauge_normal = out_x != 0.f ? 0 : (out_y != 0.f ? 1 : 2);
+			long meter_normal = 0;
+			long sources[3];
+			real signs[3];
+			long axis;
+
+			meter_low[0] = mlow.x; meter_low[1] = mlow.y; meter_low[2] = mlow.z;
+			meter_high[0] = mhigh.x; meter_high[1] = mhigh.y; meter_high[2] = mhigh.z;
+			gauge_low[0] = glow.x; gauge_low[1] = glow.y; gauge_low[2] = glow.z;
+			gauge_high[0] = ghigh.x; gauge_high[1] = ghigh.y; gauge_high[2] = ghigh.z;
+			gauge_mid[0] = mid_x; gauge_mid[1] = mid_y; gauge_mid[2] = mid_z;
+			point[0] = position->x; point[1] = position->y; point[2] = position->z;
+			out[0] = out_x; out[1] = out_y; out[2] = out_z;
+			for (axis = 0; axis < 3; axis++)
+			{
+				sources[axis] = axis;
+				signs[axis] = 1.f;
+			}
+			for (axis = 1; axis < 3; axis++)
+			{
+				if (meter_high[axis] - meter_low[axis] < meter_high[meter_normal] - meter_low[meter_normal])
+					meter_normal = axis;
+			}
+			if (meter_normal != gauge_normal)
+			{
+				/* (the meter's outward face, of its side of the gauge's middle,
+				turned to the gauge's; the other turned axis so the turn is a
+				turn, not a mirror) */
+				real meter_out = (meter_low[meter_normal] + meter_high[meter_normal]) * 0.5f >=
+					(paned ? gauge_mid[meter_normal] : gun_mid[meter_normal]) ? 1.f : -1.f;
+				real turn = meter_out * (out[gauge_normal] >= 0.f ? 1.f : -1.f);
+
+				sources[gauge_normal] = meter_normal;
+				signs[gauge_normal] = turn;
+				sources[meter_normal] = gauge_normal;
+				signs[meter_normal] = -turn;
+			}
+			for (axis = 0; axis < 3; axis++)
+			{
+				long source_axis = sources[axis];
+				real span = meter_high[source_axis] - meter_low[source_axis];
+				real along = span > 0.0001f ? (point[source_axis] - meter_low[source_axis]) / span : 0.5f;
+
+				if (signs[axis] < 0.f)
+					along = 1.f - along;
+				/* (the classic meter's glyph is not the whole of its box, as the
+				gauge's is of the pane's: its box reaches past the glyph's end
+				away from the prongs, and a little past its edges. Its box laid
+				over a little more than the pane's lays the glyph on the glyph:
+				along the gun, from a fifth before the pane's low end, the blob's,
+				to a thirtieth past its high, the prongs'; across it, a twentieth
+				past each edge) */
+				if (axis != gauge_normal && paned)
+				{
+					long longest = axis;
+					long other;
+
+					for (other = 0; other < 3; other++)
+					{
+						if (other != gauge_normal &&
+							gauge_high[other] - gauge_low[other] > gauge_high[longest] - gauge_low[longest])
+						{
+							longest = other;
+						}
+					}
+					/* (at its own size, the classic's: its middle where the stretch
+					above put it, the pane's 0.42 along the gun and its middle
+					across, and its own span about it) */
+					result[axis] = gauge_low[axis] + (axis == longest ? 0.42f : 0.5f) * (gauge_high[axis] - gauge_low[axis]) +
+						(along - 0.5f) * span +
+						out[axis] * (gauge_high[gauge_normal] - gauge_low[gauge_normal]) * 0.02f;
+				}
+				else
+				{
+					result[axis] = gauge_low[axis] + along * (gauge_high[axis] - gauge_low[axis]) +
+						out[axis] * (gauge_high[gauge_normal] - gauge_low[gauge_normal]) * 0.02f;
+				}
+				/* (one face, the pistol's ring: the meter kept its shape, as
+				large as the face's narrower side allows, centred on it) */
+				if (!paned && axis != gauge_normal)
+				{
+					real scale = 0.f;
+					long other;
+
+					for (other = 0; other < 3; other++)
+					{
+						real meter_span = meter_high[sources[other]] - meter_low[sources[other]];
+						real ratio;
+
+						if (other == gauge_normal || meter_span <= 0.0001f)
+							continue;
+						ratio = (gauge_high[other] - gauge_low[other]) / meter_span;
+						if (scale == 0.f || ratio < scale)
+							scale = ratio;
+					}
+					result[axis] = (gauge_low[axis] + gauge_high[axis]) * 0.5f +
+						(along - 0.5f) * (meter_high[source_axis] - meter_low[source_axis]) * scale;
+				}
+			}
+			/* (and onto the gauge's curved face where it is over it, else the
+			meter's own bow, laid in the gauge's depth, sinks under the shell) */
+			{
+				real height;
+
+				if (gauge_surface(template_, gauge_normal, out[gauge_normal] >= 0.f ? 1.f : -1.f, result, &height))
+				{
+					result[gauge_normal] = height +
+						out[gauge_normal] * (gauge_high[gauge_normal] - gauge_low[gauge_normal]) * 0.04f;
+				}
+			}
+			position->x = result[0];
+			position->y = result[1];
+			position->z = result[2];
+		}
+		else
+		{
+			position->x = place_x + (position->x - centre_x) * factor;
+			position->y = place_y + (position->y - centre_y) * factor;
+			position->z = place_z + (position->z - centre_z) * factor;
+		}
+	}
+	if (one_sided)
+	{
+		place_x = (glow.x + ghigh.x) * 0.5f;
+		place_y = (glow.y + ghigh.y) * 0.5f;
+		place_z = (glow.z + ghigh.z) * 0.5f;
+		factor = 1.f;
 	}
 	placed->x = place_x;
 	placed->y = place_y;
@@ -984,6 +2072,10 @@ static boolean meter_buffer_fit(
 	fitted_ok = rasterizer_vertex_buffer_new(fitted, buffer->type, buffer->count, copy,
 		stride * buffer->count) ? TRUE : FALSE;
 	free(copy);
+	if (fitted_ok)
+		platform_log("anniversary: the heat meter %.3f %.3f %.3f to %.3f %.3f %.3f on the gauge %.3f %.3f %.3f to %.3f %.3f %.3f%s",
+			mlow.x, mlow.y, mlow.z, mhigh.x, mhigh.y, mhigh.z, glow.x, glow.y, glow.z, ghigh.x, ghigh.y, ghigh.z,
+			one_sided ? ", box to box" : "");
 	if (fitted_ok)
 		platform_log("anniversary: the heat meter fitted to the gauge, %.2f of its size, %.3f clear of the shell",
 			factor, push);
@@ -1021,6 +2113,224 @@ static void meter_part_place(
 		made->meter_buffers[which] = fitted;
 		made->meter_sources[which] = source;
 		made->meter_centres[which] = placed;
+		made->meter_buffer_count++;
+	}
+	part->vertex_buffer = made->meter_buffers[which];
+	part->centroid = made->meter_centres[which];
+}
+
+/* the name of the shader a map's model's part is drawn by, or "" */
+static char const *part_shader_name(
+	struct model const *map_model,
+	struct model_geometry_part const *part)
+{
+	long shader_tag;
+
+	if (!map_model || !VALID_INDEX(part->shader_index, map_model->shaders.count))
+		return "";
+	shader_tag = TAG_BLOCK_GET_ELEMENT(&map_model->shaders, part->shader_index,
+		struct model_shader_reference)->shader.index;
+
+	return shader_tag == NONE ? "" : tag_get_name(shader_tag);
+}
+
+/* whether a map's model's part is of the assault rifle's classic ammo
+counter: its numbers, icons, data and compass */
+static boolean part_is_counter(
+	struct model const *map_model,
+	struct model_geometry_part const *part)
+{
+	char const *name = part_shader_name(map_model, part);
+
+	return strstr(name, "assault rifle") != NULL &&
+		(strstr(name, "\\numbers") != NULL || strstr(name, "\\icons") != NULL ||
+			strstr(name, "\\ar data") != NULL || strstr(name, "\\compass") != NULL);
+}
+
+/* the middle of a part's vertices (of its buffer); FALSE if it cannot be
+read */
+static boolean part_buffer_middle(
+	struct model_geometry_part const *part,
+	real_point3d *low,
+	real_point3d *high)
+{
+	struct vertex_buffer const *buffer = &part->vertex_buffer;
+	byte *locked = NULL;
+	long stride;
+	long index;
+
+	if (!buffer->hardware_format || buffer->count <= 0)
+		return FALSE;
+	if (buffer->type == _rasterizer_vertex_type_model_compressed)
+		stride = (long)sizeof(struct model_vertex_compressed);
+	else if (buffer->type == _rasterizer_vertex_type_model_uncompressed)
+		stride = (long)sizeof(struct model_vertex_uncompressed);
+	else
+		return FALSE;
+	IDirect3DVertexBuffer8_Lock((IDirect3DVertexBuffer8 *)buffer->hardware_format, 0, 0, &locked,
+		D3DLOCK_READONLY);
+	if (!locked)
+		return FALSE;
+	for (index = 0; index < buffer->count; index++)
+	{
+		real_point3d const *position = (real_point3d const *)(locked + index * stride);
+
+		low->x = MIN(low->x, position->x);
+		low->y = MIN(low->y, position->y);
+		low->z = MIN(low->z, position->z);
+		high->x = MAX(high->x, position->x);
+		high->y = MAX(high->y, position->y);
+		high->z = MAX(high->z, position->z);
+	}
+	IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)buffer->hardware_format);
+
+	return TRUE;
+}
+
+/* the classic ammo counter (the assault rifle's) moved onto the template's
+own counter, its digits (`digits`, not drawn): the classic numbers' middle
+on theirs. The classic sits high on the remastered display */
+static void counter_part_place(
+	struct saber_model *made,
+	struct model const *map_model,
+	struct saber_template const *template_,
+	struct model_geometry_part const *source,
+	struct model_geometry_part *part)
+{
+	long which;
+
+	if (!part_is_counter(map_model, source))
+		return;
+	if (!made->counter_looked)
+	{
+		real_point3d low = { 1e9f, 1e9f, 1e9f };
+		real_point3d high = { -1e9f, -1e9f, -1e9f };
+		real_point3d digits_low = { 1e9f, 1e9f, 1e9f };
+		real_point3d digits_high = { -1e9f, -1e9f, -1e9f };
+		boolean any_numbers = FALSE;
+		boolean any_digits = FALSE;
+		long geometry_index;
+		long part_index;
+
+		made->counter_looked = TRUE;
+		/* (the classic numbers, of the map's model's most detailed level) */
+		for (geometry_index = 0; geometry_index < map_model->geometries.count && !any_numbers; geometry_index++)
+		{
+			struct model_geometry const *geometry = TAG_BLOCK_GET_ELEMENT(&map_model->geometries, geometry_index,
+				struct model_geometry);
+
+			for (part_index = 0; part_index < geometry->parts.count; part_index++)
+			{
+				struct model_geometry_part const *numbers = TAG_BLOCK_GET_ELEMENT(&geometry->parts, part_index,
+					struct model_geometry_part);
+
+				if (strstr(part_shader_name(map_model, numbers), "\\numbers") &&
+					part_buffer_middle(numbers, &low, &high))
+				{
+					any_numbers = TRUE;
+				}
+			}
+		}
+		for (part_index = 0; part_index < template_->part_count; part_index++)
+		{
+			struct saber_mesh_part const *digits = &template_->parts[part_index];
+			long vertex;
+
+			if (digits->lod != 0 || digits->material_index < 0 || digits->material_index >= template_->material_count ||
+				!strstr(template_->materials[digits->material_index], "digits"))
+			{
+				continue;
+			}
+			for (vertex = 0; vertex < digits->vertex_count; vertex++)
+			{
+				real_point3d const *position = &digits->vertices[vertex].position;
+
+				digits_low.x = MIN(digits_low.x, position->x);
+				digits_low.y = MIN(digits_low.y, position->y);
+				digits_low.z = MIN(digits_low.z, position->z);
+				digits_high.x = MAX(digits_high.x, position->x);
+				digits_high.y = MAX(digits_high.y, position->y);
+				digits_high.z = MAX(digits_high.z, position->z);
+				any_digits = TRUE;
+			}
+		}
+		if (!any_numbers || !any_digits)
+		{
+			platform_log("anniversary: the classic ammo counter not moved: %s", !any_numbers ?
+				"its numbers' vertices cannot be read" : "the template has no digits");
+		}
+		if (any_numbers && any_digits)
+		{
+			made->counter_shift.i = (digits_low.x + digits_high.x - low.x - high.x) * 0.5f;
+			made->counter_shift.j = (digits_low.y + digits_high.y - low.y - high.y) * 0.5f;
+			made->counter_shift.k = (digits_low.z + digits_high.z - low.z - high.z) * 0.5f;
+			/* (a shift as far as the counter is wide, or more, is not one) */
+			made->counter_found =
+				made->counter_shift.i * made->counter_shift.i + made->counter_shift.j * made->counter_shift.j +
+					made->counter_shift.k * made->counter_shift.k <
+				((high.x - low.x) * (high.x - low.x) + (high.y - low.y) * (high.y - low.y) +
+					(high.z - low.z) * (high.z - low.z)) * 4.f;
+			platform_log("anniversary: the classic ammo counter %s by %.4f %.4f %.4f, onto the template's digits",
+				made->counter_found ? "moved" : "not moved, too far", made->counter_shift.i, made->counter_shift.j,
+				made->counter_shift.k);
+		}
+	}
+	if (!made->counter_found)
+		return;
+	for (which = 0; which < made->meter_buffer_count; which++)
+	{
+		if (made->meter_sources[which] == source)
+			break;
+	}
+	if (which == made->meter_buffer_count)
+	{
+		struct vertex_buffer const *buffer = &source->vertex_buffer;
+		byte *locked = NULL;
+		byte *copy;
+		long stride;
+		long index;
+		boolean made_ok;
+
+		if (made->meter_buffer_count >= (long)NUMBEROF(made->meter_buffers) || !buffer->hardware_format ||
+			buffer->count <= 0)
+		{
+			return;
+		}
+		if (buffer->type == _rasterizer_vertex_type_model_compressed)
+			stride = (long)sizeof(struct model_vertex_compressed);
+		else if (buffer->type == _rasterizer_vertex_type_model_uncompressed)
+			stride = (long)sizeof(struct model_vertex_uncompressed);
+		else
+			return;
+		copy = malloc((size_t)stride * (size_t)buffer->count);
+		if (!copy)
+			return;
+		IDirect3DVertexBuffer8_Lock((IDirect3DVertexBuffer8 *)buffer->hardware_format, 0, 0, &locked,
+			D3DLOCK_READONLY);
+		if (!locked)
+		{
+			free(copy);
+			return;
+		}
+		memcpy(copy, locked, (size_t)stride * (size_t)buffer->count);
+		IDirect3DVertexBuffer8_Unlock((IDirect3DVertexBuffer8 *)buffer->hardware_format);
+		for (index = 0; index < buffer->count; index++)
+		{
+			real_point3d *position = (real_point3d *)(copy + index * stride);
+
+			position->x += made->counter_shift.i;
+			position->y += made->counter_shift.j;
+			position->z += made->counter_shift.k;
+		}
+		made_ok = rasterizer_vertex_buffer_new(&made->meter_buffers[which], buffer->type, buffer->count, copy,
+			stride * buffer->count) ? TRUE : FALSE;
+		free(copy);
+		if (!made_ok)
+			return;
+		made->meter_sources[which] = source;
+		made->meter_centres[which].x = source->centroid.x + made->counter_shift.i;
+		made->meter_centres[which].y = source->centroid.y + made->counter_shift.j;
+		made->meter_centres[which].z = source->centroid.z + made->counter_shift.k;
 		made->meter_buffer_count++;
 	}
 	part->vertex_buffer = made->meter_buffers[which];
@@ -1085,6 +2395,12 @@ static struct saber_model *saber_model_new(
 	/* the geometry of each level and rank without the hideable region's
 	clear parts (after the heads'), NONE for none */
 	long plain_base = NONE;
+	/* when the hideable region is not the one that draws the body (a
+	Jackal's shield, its region of its own beside its arms'), the geometry
+	of each level and rank of the region's clear parts alone, after the plain
+	ones: the region's first permutation draws it, its others nothing, and
+	the body is drawn plain. NONE for none */
+	long clear_base = NONE;
 	char head_keys[MAXIMUM_SABER_HEAD_PERMUTATIONS][64];
 	long head_count = 0;
 	long body_span;
@@ -1123,6 +2439,8 @@ static struct saber_model *saber_model_new(
 	for (part_index = 0; part_index < template_->material_count; part_index++)
 	{
 		if (strstr(template_->materials[part_index], "gauge"))
+			own_meter = TRUE;
+		if (template_gauge_stand_in(template_))
 			own_meter = TRUE;
 		if (strstr(template_->materials[part_index], "monicle"))
 			own_monicle = TRUE;
@@ -1178,7 +2496,8 @@ static struct saber_model *saber_model_new(
 
 				if (shader_tag != NONE && shader_type != SHADER_TYPE_MODEL &&
 					!(own_monicle && shader_name && strstr(shader_name, "hud")) &&
-					!(shader_type == SHADER_TYPE_TRANSPARENT_GLASS && map_glass_replaced(shader_tag)))
+					!(shader_type == SHADER_TYPE_TRANSPARENT_GLASS && map_glass_replaced(shader_tag)) &&
+					!map_clear_replaced(shader_tag))
 				{
 					clear_regions[clear_count] = region_index;
 					clear_parts[clear_count++] = part;
@@ -1264,6 +2583,10 @@ static struct saber_model *saber_model_new(
 	room for them is checked before they are built, below) */
 	if (hideable_region != NONE)
 		plain_base = body_span * (1 + head_count);
+	if (hideable_region != NONE && hideable_region != (head_count ? body_region : 0))
+		clear_base = plain_base + body_span;
+	if (clear_base != NONE && clear_base + body_span > (long)NUMBEROF(made->geometries))
+		plain_base = clear_base = NONE;
 	/* the map's regions and permutations: the body by one region, a head
 	by the head region's permutation of its name */
 	for (region_index = 0; region_index < map_model->regions.count; region_index++)
@@ -1314,6 +2637,15 @@ static struct saber_model *saber_model_new(
 
 				if (head_count && region_index == head_region)
 					permutation->geometry_indices[detail] = (short)(body_span + which * body_span + slot);
+				else if (clear_base != NONE && region_index == hideable_region)
+					/* (the shield of its own region: there while the region is
+					its first permutation, gone at its others, a Jackal's
+					~shield_off as it dies) */
+					permutation->geometry_indices[detail] = permutation_index == 0 ?
+						(short)(clear_base + slot) : (short)NONE;
+				else if (clear_base != NONE && (head_count ? region_index == body_region : region_index == 0))
+					/* (and the body without it) */
+					permutation->geometry_indices[detail] = (short)(plain_base + slot);
 				else if (head_count ? region_index != body_region : region_index != 0)
 					permutation->geometry_indices[detail] = NONE;
 				else if (plain_base != NONE && region_index == hideable_region && permutation_index > 0)
@@ -1381,7 +2713,32 @@ static struct saber_model *saber_model_new(
 			scaled,
 			source->vertex_count * uncompressed_size);
 		free(scaled);
-		strip_count = part_strip(source, strips);
+		{
+			/* (the plasma pistol's heat ring left out of its part, the classic
+			meter laid where it was: of its ring's parts, and of its glow's,
+			`plasmapistol_04`, a second ring over the first) */
+			unsigned char *skip = NULL;
+
+			if ((part_gauge(template_, source) ||
+					(source->material_index >= 0 && source->material_index < template_->material_count &&
+						strstr(template_->materials[source->material_index], "plasmapistol_04") != NULL)) &&
+				template_gauge_stand_in(template_) && source->triangle_count > 0)
+			{
+				/* (malloc, as free is this build's: its calloc is the heap's own) */
+				skip = malloc((size_t)source->triangle_count);
+				if (skip)
+					memset(skip, 0, (size_t)source->triangle_count);
+				if (skip && !ring_meter_fit(template_, NULL, 0, 0, NULL, source, skip))
+				{
+					free(skip);
+					skip = NULL;
+				}
+			}
+			strip_count = part_strip(source, skip, strips);
+			/* (this build's free halts on no pointer) */
+			if (skip)
+				free(skip);
+		}
 		made->part_count = made_index + 1;
 		*reason = "the renderer cannot make its buffers";
 		if (!rasterizer_vertex_buffer_new(&part->vertex_buffer, _rasterizer_vertex_type_model_compressed,
@@ -1399,7 +2756,7 @@ static struct saber_model *saber_model_new(
 	level without a region's parts (a shield generator's shield) */
 	made->geometry_parts = malloc(sizeof(*made->geometry_parts) *
 		((size_t)MAXIMUM_PARTS_PER_MODEL_GEOMETRY * (size_t)level_count * (size_t)made->rank_count *
-			(size_t)(1 + head_count + (hideable_region != NONE ? 1 : 0)) + 1));
+			(size_t)(1 + head_count + (hideable_region != NONE ? 2 : 0)) + 1));
 	*reason = "out of memory";
 	if (!made->geometry_parts)
 		goto refused;
@@ -1422,7 +2779,7 @@ static struct saber_model *saber_model_new(
 				if (MIN(source->lod, 4) != levels[level] ||
 					(source->rank != _saber_rank_all && source->rank != rank) ||
 					(head_count && source->variant[0]) ||
-					material_monicle(template_, source) ||
+					material_monicle(template_, source) || part_stands_in(template_, source) ||
 					geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
 				{
 					continue;
@@ -1447,6 +2804,7 @@ static struct saber_model *saber_model_new(
 					part->vertex_buffer = clear_parts[index]->vertex_buffer;
 					part->centroid = clear_parts[index]->centroid;
 				}
+				counter_part_place(made, map_model, template_, clear_parts[index], part);
 			}
 			geometry->parts.count = geometry_part_count - first;
 			geometry->parts.address = made->geometry_parts + first;
@@ -1478,6 +2836,7 @@ static struct saber_model *saber_model_new(
 
 					if (MIN(source->lod, 4) != levels[level] ||
 						(source->rank != _saber_rank_all && source->rank != rank) ||
+						part_stands_in(template_, source) ||
 						geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
 					{
 						continue;
@@ -1509,6 +2868,7 @@ static struct saber_model *saber_model_new(
 						part->next_part_index = NONE;
 						if (own_meter)
 							meter_part_place(made, map_model, template_, clear_parts[index], part);
+						counter_part_place(made, map_model, template_, clear_parts[index], part);
 					}
 				}
 				geometry->parts.count = geometry_part_count - first;
@@ -1544,7 +2904,7 @@ static struct saber_model *saber_model_new(
 					if (MIN(source->lod, 4) != levels[level] ||
 						(source->rank != _saber_rank_all && source->rank != made->ranks[rank_index]) ||
 						(head_count && source->variant[0]) ||
-						material_monicle(template_, source) ||
+						material_monicle(template_, source) || part_stands_in(template_, source) ||
 						geometry_part_count - first >= MAXIMUM_PARTS_PER_MODEL_GEOMETRY)
 					{
 						continue;
@@ -1569,6 +2929,7 @@ static struct saber_model *saber_model_new(
 						part->vertex_buffer = clear_parts[index]->vertex_buffer;
 						part->centroid = clear_parts[index]->centroid;
 					}
+					counter_part_place(made, map_model, template_, clear_parts[index], part);
 				}
 				geometry->parts.count = geometry_part_count - first;
 				geometry->parts.address = made->geometry_parts + first;
@@ -1576,6 +2937,38 @@ static struct saber_model *saber_model_new(
 			}
 		}
 		made->geometry_count = plain_base + level_count * made->rank_count;
+	}
+	if (plain_base != NONE && clear_base != NONE)
+	{
+		/* the hideable region's clear parts alone, of each rank and level */
+		for (rank_index = 0; rank_index < made->rank_count; rank_index++)
+		{
+			for (level = 0; level < level_count; level++)
+			{
+				struct model_geometry *geometry = &made->geometries[clear_base + rank_index * level_count + level];
+				long first = geometry_part_count;
+				long index;
+
+				for (index = 0; index < clear_count && geometry_part_count - first < MAXIMUM_PARTS_PER_MODEL_GEOMETRY;
+					index++)
+				{
+					struct model_geometry_part *part;
+
+					if (clear_regions[index] != hideable_region)
+						continue;
+					part = &made->geometry_parts[geometry_part_count++];
+					*part = *clear_parts[index];
+					part->previous_part_index = NONE;
+					part->next_part_index = NONE;
+					part->vertex_buffer = clear_parts[index]->vertex_buffer;
+					part->centroid = clear_parts[index]->centroid;
+				}
+				geometry->parts.count = geometry_part_count - first;
+				geometry->parts.address = made->geometry_parts + first;
+				geometry->parts.definition = NULL;
+			}
+		}
+		made->geometry_count = clear_base + level_count * made->rank_count;
 	}
 	made->model.geometries.count = made->geometry_count;
 	made->model.geometries.address = made->geometries;
@@ -1634,6 +3027,24 @@ static boolean map_glass_replaced(
 	char const *name = shader_tag == NONE ? NULL : tag_get_name(shader_tag);
 
 	return name && strstr(name, "pelican") != NULL;
+}
+
+/* whether the map's transparent shader `shader_tag` draws a part the
+package's model has of its own, which drawn over it would show the classic
+texture: a Warthog's chain gun's ammunition belt (`chain gun belt ammo`, the
+package's gun has its belt) and the plate under the gun (`warthog lights`,
+behind the cab), and the Master Chief's lights (`light shield`, `light
+shield generator`): panes the classic armour covered but for its slits,
+which the anniversary's does not, and its own lights are in its texture */
+static boolean map_clear_replaced(
+	long shader_tag)
+{
+	char const *name = shader_tag == NONE ? NULL : tag_get_name(shader_tag);
+
+	/* (and the plasma grenade's decal: the template's glyph is drawn) */
+	return name && (strstr(name, "belt") != NULL || strstr(name, "warthog lights") != NULL ||
+		strstr(name, "plasma grenade\\shaders\\pg decal") != NULL ||
+		strstr(name, "cyborg\\shaders\\light shield") != NULL);
 }
 
 /* the stream's package, pak_stream.s3dpak, beside the level's, or NULL */
@@ -1954,6 +3365,9 @@ static boolean shader_plug(
 /* the package's colour-change mask of the texture `texture_name` (its
 "_mpmask", else, if `banded`, its "_br"), of the most detail there is, or
 FALSE */
+/* the name's end of the mask mask_find found last, for the log */
+static char const *mask_found_suffix = "mask";
+
 static boolean mask_find(
 	struct saber_pak *pak,
 	char const *texture_name,
@@ -1987,7 +3401,10 @@ static boolean mask_find(
 			if (bytes)
 				free(bytes);
 			if (read)
+			{
+				mask_found_suffix = suffix ? "_br" : "_mpmask";
 				return TRUE;
+			}
 		}
 	}
 
@@ -2026,6 +3443,87 @@ static boolean mask_set_put(
 	return TRUE;
 }
 
+/* how many of the map's own bitmaps of the bitmap `bitmap_tag` a set of the
+package's textures keeps first (saber_bitmap classic_count): the map's other
+shaders that draw it draw them still (the Master Chief's lights draw his
+armour's bitmap `cyborg`, and drew the package's armour as a pane) */
+static long classic_bitmap_count(
+	long bitmap_tag)
+{
+	struct bitmap_group const *group = bitmap_tag == NONE ? NULL : bitmap_group_get(bitmap_tag);
+
+	/* (a character's alone: a Warthog's dashboard displays, which draw its
+	hull's bitmap too, are drawn as they were, of the package's textures) */
+	if (!group || group->bitmaps.count <= 0 || !strstr(tag_get_name(bitmap_tag), "characters\\"))
+		return 0;
+	return MIN(group->bitmaps.count, MAXIMUM_SABER_BITMAP_TEXTURES / 4);
+}
+
+/* whether the map's shader `shader_tag` changes colour (a grunt's, an
+Elite's rank), as the map has it, before the package's models change it */
+static boolean shader_changes_color(
+	long shader_tag)
+{
+	struct saber_shader const *played;
+	struct shader_model_definition const *shader;
+
+	for (played = saber_models_globals.shaders; played; played = played->next)
+	{
+		if (played->tag_index == shader_tag)
+		{
+			return played->map_shader.model.change_color_source > 0 &&
+				played->map_shader.model.multipurpose_map.index != NONE;
+		}
+	}
+	shader = (struct shader_model_definition const *)shader_definition_get(shader_tag);
+	return shader && shader->model.change_color_source > 0 && shader->model.multipurpose_map.index != NONE;
+}
+
+/* whether a template has the marine's eyepiece, which takes the last of
+the usable shaders for itself */
+static boolean template_has_monicle(
+	struct saber_template const *template_)
+{
+	long index;
+
+	for (index = 0; index < template_->material_count; index++)
+	{
+		if (material_scrolls(template_->materials[index]))
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* whether the packages have a colour-change mask for the texture
+`texture_name` (its "_mpmask", or if `banded` its "_br"), as mask_find
+would look for it */
+static boolean mask_exists(
+	struct saber_pak *pak,
+	char const *texture_name,
+	boolean banded)
+{
+	struct saber_pak *paks[MAXIMUM_TEXTURE_PAKS];
+	long types[MAXIMUM_TEXTURE_PAKS];
+	long count = texture_paks(pak, paks, types, NULL);
+	long suffix;
+	long index;
+
+	for (suffix = 0; suffix < (banded ? 2 : 1); suffix++)
+	{
+		char name[96];
+
+		snprintf(name, sizeof(name), "%s%s", texture_name, suffix ? "_br" : "_mpmask");
+		for (index = 0; index < count; index++)
+		{
+			if (paks[index] && saber_pak_find(paks[index], name, types[index]) != NONE)
+				return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
 /* Has a material keep its classic shader's colour change (a grunt's or an
 Elite's rank), masked as the package's "_mpmask" or "_br" texture masks it:
 its shader's multipurpose map the masks, each at its material's
@@ -2055,6 +3553,8 @@ static void material_mask_play(
 	if (!played || played->map_shader.model.change_color_source <= 0 ||
 		played->map_shader.model.multipurpose_map.index == NONE)
 	{
+		if (mask_exists(pak, texture_name, banded))
+			platform_log("anniversary: %s has a colour-change mask, but its shader changes no colour", texture_name);
 		return;
 	}
 	mask_tag = played->map_shader.model.multipurpose_map.index;
@@ -2065,8 +3565,11 @@ static void material_mask_play(
 	if (set && !set->masks)
 		return;
 	found = mask_find(pak, texture_name, banded, base, &mask);
-	if (!found && !set)
-		return;
+	/* (none of its own: a blank one at its place still, not the map's mask,
+	whose layout is the map's texture's, which would change its colour in
+	blotches over the package's: an Elite major's armour, ch_elite_officer_01) */
+	if (!found)
+		platform_log("anniversary: %s has no colour-change mask: drawn with none", texture_name);
 	if (!set)
 	{
 		struct bitmap_group *group = bitmap_group_get(mask_tag);
@@ -2074,7 +3577,8 @@ static void material_mask_play(
 		set = malloc(sizeof(*set));
 		if (!set)
 		{
-			saber_texture_dispose(&mask);
+			if (found)
+				saber_texture_dispose(&mask);
 			return;
 		}
 		csmemset(set, 0, sizeof(*set));
@@ -2098,8 +3602,9 @@ static void material_mask_play(
 		return;
 	}
 	if (found)
-		platform_log("anniversary: %s's colour change masked by its %s, %dx%d", texture_name, "mask", mask.width,
-			mask.height);
+		platform_log("anniversary: %s's colour change masked by its %s, %dx%d, %ld%% of it, at %ld of %s (%s's)",
+			texture_name, mask_found_suffix, mask.width, mask.height, saber_texture_mask_coverage(), permutation,
+			tag_get_name(mask_tag), tag_get_name(shader_tag));
 	/* (the package's shader takes the mask, and only it: the map's models share
 	the tag, and Back gives them their own shader back, saber_toggle.c. The
 tag is written only while the templates are drawn, so that what it holds
@@ -2131,10 +3636,11 @@ static boolean material_effect(
 {
 	/* (and an energy shield's: a Jackal's, whose own the map's model draws;
 	a field generator's, whose the map's model draws and hides by permuting
-	its region when the shield breaks) */
+	its region when the shield breaks. And the arc between a plasma pistol's
+	or rifle's prongs, not drawn at all) */
 	return !strncmp(material, "sfx_", 4) || !strncmp(material, "lig_", 4) || !strncmp(material, "fx_", 3) ||
 		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8) ||
-		strstr(material, "shield") != NULL;
+		strstr(material, "shield") != NULL || strstr(material, "lightning") != NULL;
 }
 
 /* whether a material is a plant's leaves or branches, by its name
@@ -2178,6 +3684,30 @@ static boolean material_lightning(
 	char const *material)
 {
 	return strstr(material, "lightning") != NULL;
+}
+
+/* whether a scrolling material of another model scrolls the shader
+`shader_tag` (saber_models_globals scroll_shaders) */
+static boolean scroll_shader(
+	long shader_tag)
+{
+	long index;
+
+	for (index = 0; index < saber_models_globals.scroll_shader_count; index++)
+	{
+		if (saber_models_globals.scroll_shaders[index] == shader_tag)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* a material whose texture scrolls, on a shader of its own: the marine's
+eyepiece's lens, the arc between a plasma rifle's prongs */
+static boolean material_scrolls(
+	char const *material)
+{
+	return strstr(material, "monicle") != NULL || material_lightning(material);
 }
 
 /* a material whose alpha is its shape: a decal, dirt, a grate. A shaded
@@ -3101,6 +4631,8 @@ static boolean model_play(
 	/* the eyepiece's shader, which no other material uses, so its scroll
 	does not move the face */
 	long monicle_shader_tag = NONE;
+	/* (the plasma rifle's arc's shader, which scrolls, NONE for none) */
+	long lightning_shader_tag = NONE;
 	real scale;
 	boolean skinned = FALSE;
 	long matched_bones = 0;
@@ -3220,17 +4752,81 @@ static boolean model_play(
 		place = material_count++;
 		material_places[material] = (short)place;
 		shader_indices[index] = (short)(definition->shaders.count + place);
-		/* (the eyepiece takes the last shader for itself. Another material
-		that would have taken it takes one of the rest, so the scroll is
-		the lens's alone) */
+		/* (the eyepiece takes the last shader for itself, as the arc between
+		a plasma rifle's prongs does. Another material that would have taken
+		it takes one of the rest, so the scroll is the lens's, or the arc's,
+		alone) */
 		material_shaders[place] = usable[place % usable_count];
-		if (usable_count > 1 && strstr(template_.materials[material], "monicle"))
+		if (usable_count > 1 && material_scrolls(template_.materials[material]))
+		{
+			long turn;
+
 			material_shaders[place] = usable[usable_count - 1];
+			/* (the one another model's arc scrolls already, if this model has
+			it: the first-person rifle shares the third-person's shaders) */
+			for (turn = 0; turn < usable_count; turn++)
+			{
+				if (scroll_shader(model_shader_tag(definition, usable[turn])))
+				{
+					material_shaders[place] = usable[turn];
+					break;
+				}
+			}
+		}
 		else if (usable_count > 1 && material_shaders[place] == usable[usable_count - 1])
 			material_shaders[place] = usable[place % (usable_count - 1)];
+		/* (and another material not on one another model's arc scrolls) */
+		if (usable_count > 1 && !material_scrolls(template_.materials[material]) &&
+			scroll_shader(model_shader_tag(definition, material_shaders[place])))
+		{
+			long turn;
+
+			for (turn = 0; turn < usable_count; turn++)
+			{
+				short candidate = usable[(place + turn) % usable_count];
+
+				if (!scroll_shader(model_shader_tag(definition, candidate)) &&
+					(candidate != usable[usable_count - 1] || !template_has_monicle(&template_)))
+				{
+					material_shaders[place] = candidate;
+					break;
+				}
+			}
+		}
+		/* (a material with a colour-change mask, an Elite's body, takes a
+		shader that changes colour, if the map's model has one: the shaders
+		are dealt out in turn, and its own may not, which would leave its
+		grey plates white for every rank) */
+		if (!material_scrolls(template_.materials[material]) &&
+			!shader_changes_color(model_shader_tag(definition, material_shaders[place])) &&
+			mask_exists(pak, template_.materials[material], skinned))
+		{
+			long turn;
+
+			for (turn = 0; turn < usable_count; turn++)
+			{
+				short candidate = usable[(place + turn) % usable_count];
+
+				if (shader_changes_color(model_shader_tag(definition, candidate)) &&
+					(usable_count <= 1 || candidate != usable[usable_count - 1] || !template_has_monicle(&template_)))
+				{
+					material_shaders[place] = candidate;
+					break;
+				}
+			}
+		}
 		shader_tag = model_shader_tag(definition, material_shaders[place]);
 		if (usable_count > 1 && strstr(template_.materials[material], "monicle"))
 			monicle_shader_tag = shader_tag;
+		if (usable_count > 1 && material_lightning(template_.materials[material]))
+		{
+			lightning_shader_tag = shader_tag;
+			if (!scroll_shader(shader_tag) &&
+				saber_models_globals.scroll_shader_count < (long)NUMBEROF(saber_models_globals.scroll_shaders))
+			{
+				saber_models_globals.scroll_shaders[saber_models_globals.scroll_shader_count++] = shader_tag;
+			}
+		}
 		bitmap_tag = ((struct shader_model_definition *)shader_definition_get(shader_tag))->model.base_map.index;
 		material_bitmaps[place] = bitmap_tag;
 		for (other = 0; other < shader_count && shader_tags[other] != shader_tag; other++)
@@ -3259,7 +4855,7 @@ static boolean model_play(
 				material_lightning(template_.materials[material]) ? TRUE : FALSE;
 			continue;
 		}
-		existing = played ? played->count : 0;
+		existing = played ? played->count : classic_bitmap_count(bitmap_tag);
 		for (other = 0; other < place; other++)
 		{
 			if (material_bitmaps[other] == bitmap_tag && material_textures[other])
@@ -3286,6 +4882,10 @@ static boolean model_play(
 		if (strstr(template_.materials[material], "pelican") &&
 			strstr(template_.materials[material], "plating"))
 			saber_texture_darken(material_textures[place], 2, 5);
+		/* (the plasma pistol's own heat ring is drawn black: the classic meter
+		lies over it, and the ring's cyan would show around it) */
+		if (strstr(template_.materials[material], "plasmapistol_02"))
+			saber_texture_blacken(material_textures[place]);
 		/* (the eyepiece's mask is nearly black. Green, the lens is the
 		display and the marks on it are the brighter part) */
 		if (strstr(template_.materials[material], "monicle"))
@@ -3328,6 +4928,40 @@ static boolean model_play(
 			saber_texture_glass(material_textures[place]);
 		if (material_lightning(template_.materials[material]))
 			saber_texture_punch_black(material_textures[place]);
+		/* (the plasma rifle's gauge is a black pane the classic meter is laid
+		over: its black gone, its glyph left under the meter's) */
+		if (strstr(template_.materials[material], "plasma") && strstr(template_.materials[material], "gauge"))
+		{
+			material_blends[place] = TRUE;
+			saber_texture_punch_black(material_textures[place]);
+		}
+		/* (a glyph, one colour, its picture its alpha: the plasma grenade's
+		green one, blended on it, not a green square. Its first level alone:
+		its smaller ones' alpha was drawn half solid) */
+		if (saber_texture_alpha_glyph(material_textures[place]))
+		{
+			long levels[8];
+			long level;
+			long count = saber_texture_alpha_levels(material_textures[place], levels, 8);
+			char text[96];
+
+			text[0] = 0;
+			for (level = 0; level < count; level++)
+				snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s%ld%%", level ? " " : "", levels[level]);
+			material_cutouts[place] = FALSE;
+			material_blends[place] = TRUE;
+			material_textures[place]->mipmap_count = 0;
+			material_bitmap_data[place]->mipmap_count = 0;
+			material_bitmap_data[place]->pixels_size = bitmap_get_pixel_data_size(material_bitmap_data[place]);
+			platform_log("anniversary: %s is a glyph in its alpha: blended on it, its first level alone (clear by level: %s)",
+				template_.materials[material], text);
+		}
+		else if (strstr(template_.materials[material], "grenade") && !material_cutouts[place] &&
+			!material_blends[place])
+		{
+			platform_log("anniversary: %s (format %d) drawn solid", template_.materials[material],
+				(int)material_textures[place]->format);
+		}
 		/* (one that is not cut out drawn whole, though its shader be alpha
 		tested for another's) */
 		if (!material_cutouts[place] && !material_blends[place])
@@ -3379,6 +5013,17 @@ static boolean model_play(
 			played->classic_group = *group;
 			played->shown = TRUE;
 			played->count = 0;
+			/* (the map's own first, as they are) */
+			played->classic_count = classic_bitmap_count(material_bitmaps[index]);
+			for (slot = 0; slot < played->classic_count; slot++)
+			{
+				played->bitmaps[slot] = *TAG_BLOCK_GET_ELEMENT(&played->map_group.bitmaps, slot, struct bitmap_data);
+				/* (not cached yet: the map's own may be, in a block of its own) */
+				SET_FLAG(played->bitmaps[slot].flags, _bitmap_cached_bit, FALSE);
+				played->bitmaps[slot].hardware_format = NULL;
+				csstrncpy(played->names[slot], "\001classic", sizeof(played->names[slot]) - 1);
+			}
+			played->count = played->classic_count;
 			group->sequences.count = 0;
 			group->bitmaps.address = played->bitmaps;
 			group->bitmaps.definition = NULL;
@@ -3420,6 +5065,24 @@ static boolean model_play(
 		shader->model.texture_animation.v_function = 6;
 		shader->model.texture_animation.v_period = 2.f;
 		shader->model.texture_animation.v_scale = 1.f;
+	}
+	/* (and the arc runs along its bolt, as the classic arc flickers: the
+	same slide, quicker. Only the package's copy: Back's switch gives the
+	map's back) */
+	if (lightning_shader_tag != NONE)
+	{
+		struct shader_model_definition *shader =
+			(struct shader_model_definition *)shader_definition_get(lightning_shader_tag);
+		struct saber_shader *plugged;
+
+		shader->model.texture_animation.v_function = 6;
+		shader->model.texture_animation.v_period = 0.4f;
+		shader->model.texture_animation.v_scale = 1.f;
+		for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
+		{
+			if (plugged->tag_index == lightning_shader_tag)
+				plugged->played.model.texture_animation = shader->model.texture_animation;
+		}
 	}
 	/* (a shader of a texture cut out by its alpha, leaves', is alpha
 	tested again, and drawn from both sides as Saber3D draws leaves. Only in
@@ -3484,10 +5147,40 @@ static boolean model_play(
 		{
 			struct saber_bitmap const *played = bitmap_played_get(material_bitmaps[index]);
 
+			struct saber_texture const *base = played && material_permutations[index] < played->count ?
+				&played->textures[material_permutations[index]] : NULL;
+			real band[3];
+			long weight = 0;
+			/* (a ranked character's armour baked in colour, an Elite minor's
+			blue: its mask takes it, and it is turned grey, so each rank's colour
+			changes it, the least rank's the band it was) */
+			boolean banded = skinned && made->rank_count > 1 && base &&
+				mask_exists(pak, template_.materials[material], TRUE) &&
+				saber_texture_band_color(base, band, &weight);
+
+			if (skinned)
+				platform_log("anniversary: %s drawn by %s, its texture %d of %s",
+					template_.materials[material], tag_get_name(model_shader_tag(definition, material_shaders[index])),
+					(int)material_permutations[index], tag_get_name(material_bitmaps[index]));
+			saber_texture_mask_baked(banded);
+			saber_texture_mask_plates(skinned && made->rank_count > 1);
 			material_mask_play(pak, model_shader_tag(definition, material_shaders[index]),
-				template_.materials[material], material_permutations[index], skinned,
-				played && material_permutations[index] < played->count ?
-					&played->textures[material_permutations[index]] : NULL);
+				template_.materials[material], material_permutations[index], skinned, base);
+			saber_texture_mask_baked(FALSE);
+			saber_texture_mask_plates(FALSE);
+			if (banded)
+				saber_texture_band_grey((struct saber_texture *)base, band);
+			/* (the colour its plates are drawn for its least rank: of the
+			material most of its armour is baked in) */
+			if (banded && weight > made->band_weight)
+			{
+				made->band_color.red = band[0];
+				made->band_color.green = band[1];
+				made->band_color.blue = band[2];
+				made->band_weight = weight;
+				platform_log("anniversary: %s's plates drawn %.2f %.2f %.2f for its least rank, as %s's armour",
+					tag_get_name(tag_index), band[0], band[1], band[2], template_.materials[material]);
+			}
 		}
 	}
 	*definition = made->model;
@@ -3594,6 +5287,25 @@ struct saber_level_part
 	real radius;
 	short lit_bsp;
 	struct render_lighting lighting;
+	/* a terrain's layers over its base (sand, grass, dust over a cliff),
+	drawn blended over it by the weights of its vertices
+	(saber_models_level_render): of its vertices their places, texture
+	coordinates (repeated) and normals, and the colour they are lit (of
+	`lighting`, as each vertex faces); each layer's texture, whether it
+	multiplies what is under it (a darkening, a tint) rather than covering
+	it, its weight a vertex and the triangles it weighs anything in */
+	long layer_count;
+	long layer_vertex_count;
+	real (*layer_positions)[3];
+	real (*layer_texcoords)[2];
+	real (*layer_normals)[3];
+	unsigned char (*layer_lit)[3];
+	short layer_lit_bsp;
+	short layer_textures[SABER_MAXIMUM_LAYERS];
+	boolean layer_multiply[SABER_MAXIMUM_LAYERS];
+	unsigned char *layer_weights[SABER_MAXIMUM_LAYERS];
+	long layer_triangle_counts[SABER_MAXIMUM_LAYERS];
+	unsigned short *layer_triangles[SABER_MAXIMUM_LAYERS];
 };
 
 static struct
@@ -3617,6 +5329,163 @@ static struct
 	long map_instance_count;
 } saber_level;
 
+static void saber_level_layers_free(
+	struct saber_level_part *part)
+{
+	long layer;
+
+	if (part->layer_positions)
+		free(part->layer_positions);
+	if (part->layer_texcoords)
+		free(part->layer_texcoords);
+	if (part->layer_normals)
+		free(part->layer_normals);
+	if (part->layer_lit)
+		free(part->layer_lit);
+	for (layer = 0; layer < SABER_MAXIMUM_LAYERS; layer++)
+	{
+		if (part->layer_weights[layer])
+			free(part->layer_weights[layer]);
+		if (part->layer_triangles[layer])
+			free(part->layer_triangles[layer]);
+	}
+	part->layer_positions = NULL;
+	part->layer_texcoords = NULL;
+	part->layer_normals = NULL;
+	part->layer_lit = NULL;
+	csmemset(part->layer_weights, 0, sizeof(part->layer_weights));
+	csmemset(part->layer_triangles, 0, sizeof(part->layer_triangles));
+	part->layer_count = 0;
+}
+
+/* The layers of a level terrain's part over its base, of the package's
+part: each layer's texture (its slot of the level's bitmap, read as it is
+first drawn; none, the layer is not drawn), its weights (its channel of
+the vertices' colour) and the triangles it weighs anything in. A layer that
+multiplies what is under it is not drawn. */
+static void saber_level_layers_make(
+	struct saber_pak *pak,
+	struct saber_template const *level,
+	struct saber_mesh_part const *part,
+	short *slots,
+	struct saber_level_part *made)
+{
+	short *layer_slots = slots + level->material_count;
+	long layer;
+	long vertex;
+
+	made->layer_count = 0;
+	made->layer_lit_bsp = NONE;
+	if (!part->layer_weights || part->layer_count <= 0)
+		return;
+	for (layer = 0; layer < part->layer_count && layer < SABER_MAXIMUM_LAYERS; layer++)
+	{
+		short material = part->layer_materials[layer];
+		short channel = part->layer_channels[layer];
+		long drawn = made->layer_count;
+		long triangle;
+		unsigned char *weights;
+		unsigned short *triangles;
+
+		/* (not a multiplying layer: of the weights this reads, the Forerunner
+		structures' dirt, dirt_multi_04, darkens them near black. Which
+		weights a multiplying layer has is not known yet) */
+		if (part->layer_multiply[layer] || material < 0 || material >= level->material_count ||
+			channel < 0 || channel > 3)
+		{
+			continue;
+		}
+		if (layer_slots[material] == NONE)
+		{
+			struct saber_texture *texture = &saber_level.textures[saber_level.texture_count];
+			char const *source = NULL;
+			char const *texture_reason = NULL;
+
+			if (saber_level.texture_count >= MAXIMUM_SABER_LEVEL_TEXTURES ||
+				!texture_find(pak, level->materials[material], texture, &source, &texture_reason))
+			{
+				layer_slots[material] = -2;
+			}
+			else if (!bitmap_describe(texture, saber_level.bitmap_tag, &saber_level.bitmaps[saber_level.texture_count]))
+			{
+				saber_texture_dispose(texture);
+				layer_slots[material] = -2;
+			}
+			else
+			{
+				layer_slots[material] = (short)saber_level.texture_count++;
+				/* (a covering layer's alpha its height, by which it gives way to
+				what is under it; a multiplying one's solid) */
+				if (part->layer_multiply[layer])
+					saber_texture_make_solid(texture);
+				else
+					saber_texture_height_alpha(texture);
+			}
+		}
+		if (layer_slots[material] < 0)
+			continue;
+		weights = malloc((size_t)part->vertex_count);
+		triangles = malloc(sizeof(*triangles) * 3 * (size_t)part->triangle_count);
+		if (!weights || !triangles)
+		{
+			if (weights)
+				free(weights);
+			if (triangles)
+				free(triangles);
+			continue;
+		}
+		for (vertex = 0; vertex < part->vertex_count; vertex++)
+			weights[vertex] = part->layer_weights[vertex][channel];
+		made->layer_triangle_counts[drawn] = 0;
+		for (triangle = 0; triangle < part->triangle_count; triangle++)
+		{
+			unsigned short const *corners = &part->triangles[3 * triangle];
+
+			if (weights[corners[0]] || weights[corners[1]] || weights[corners[2]])
+			{
+				memcpy(&triangles[3 * made->layer_triangle_counts[drawn]], corners, 3 * sizeof(*corners));
+				made->layer_triangle_counts[drawn]++;
+			}
+		}
+		if (!made->layer_triangle_counts[drawn])
+		{
+			free(weights);
+			free(triangles);
+			continue;
+		}
+		made->layer_textures[drawn] = layer_slots[material];
+		made->layer_multiply[drawn] = part->layer_multiply[layer] ? TRUE : FALSE;
+		made->layer_weights[drawn] = weights;
+		made->layer_triangles[drawn] = triangles;
+		made->layer_count++;
+	}
+	if (!made->layer_count)
+		return;
+	made->layer_vertex_count = part->vertex_count;
+	made->layer_positions = malloc(sizeof(*made->layer_positions) * (size_t)part->vertex_count);
+	made->layer_texcoords = malloc(sizeof(*made->layer_texcoords) * (size_t)part->vertex_count);
+	made->layer_normals = malloc(sizeof(*made->layer_normals) * (size_t)part->vertex_count);
+	made->layer_lit = malloc(sizeof(*made->layer_lit) * (size_t)part->vertex_count);
+	if (!made->layer_positions || !made->layer_texcoords || !made->layer_normals || !made->layer_lit)
+	{
+		saber_level_layers_free(made);
+		return;
+	}
+	for (vertex = 0; vertex < part->vertex_count; vertex++)
+	{
+		struct model_vertex_uncompressed const *point = &part->vertices[vertex];
+
+		made->layer_positions[vertex][0] = point->position.x;
+		made->layer_positions[vertex][1] = point->position.y;
+		made->layer_positions[vertex][2] = point->position.z;
+		made->layer_texcoords[vertex][0] = point->texcoord.x * made->uv_scale[0];
+		made->layer_texcoords[vertex][1] = point->texcoord.y * made->uv_scale[1];
+		made->layer_normals[vertex][0] = point->normal.i;
+		made->layer_normals[vertex][1] = point->normal.j;
+		made->layer_normals[vertex][2] = point->normal.k;
+	}
+}
+
 static void saber_level_free(
 	boolean give_back)
 {
@@ -3626,6 +5495,7 @@ static void saber_level_free(
 	{
 		rasterizer_triangle_buffer_delete(&saber_level.parts[index].triangle_buffer);
 		rasterizer_vertex_buffer_delete(&saber_level.parts[index].vertex_buffer);
+		saber_level_layers_free(&saber_level.parts[index]);
 	}
 	if (saber_level.parts)
 		free(saber_level.parts);
@@ -3739,6 +5609,7 @@ static boolean saber_level_play(
 	long drawn = 0;
 	long triangles = 0;
 	long sky_parts = 0;
+	long layered_parts = 0;
 	real_rectangle3d bounds;
 
 	csmemset(&level, 0, sizeof(level));
@@ -3769,7 +5640,9 @@ static boolean saber_level_play(
 	/* its parts drawn: of a material drawn, not far off (the sky however far
 	it stands); in world units */
 	saber_level.texture_count = 0;
-	slots = malloc(sizeof(*slots) * ((size_t)level.material_count + 1));
+	/* (each material's texture as a base, and after them as a layer: a
+	layer's alpha is its height, saber_texture_height_alpha) */
+	slots = malloc(sizeof(*slots) * (2 * (size_t)level.material_count + 1));
 	saber_level.textures = malloc(sizeof(*saber_level.textures) * MAXIMUM_SABER_LEVEL_TEXTURES);
 	saber_level.bitmaps = malloc(sizeof(*saber_level.bitmaps) * MAXIMUM_SABER_LEVEL_TEXTURES);
 	saber_level.parts = malloc(sizeof(*saber_level.parts) * ((size_t)level.part_count + 1));
@@ -3777,7 +5650,7 @@ static boolean saber_level_play(
 		goto refused;
 	csmemset(saber_level.textures, 0, sizeof(*saber_level.textures) * MAXIMUM_SABER_LEVEL_TEXTURES);
 	csmemset(saber_level.parts, 0, sizeof(*saber_level.parts) * ((size_t)level.part_count + 1));
-	for (index = 0; index < level.material_count; index++)
+	for (index = 0; index < 2 * level.material_count; index++)
 		slots[index] = NONE;
 	saber_level.bitmap_tag = saber_level_bitmap_tag_add();
 	reason = "a bitmap of its own cannot be added to the map's tags";
@@ -3913,6 +5786,12 @@ static boolean saber_level_play(
 		bounds.z1 = MAX(bounds.z1, made->bounds.z1);
 		if (made->sky)
 			sky_parts++;
+		/* (not over a cut out part's: a layer drawn whole over a leaf's card
+		would cover, or darken, what shows through around the leaf) */
+		if (!made->sky && !made->cutout)
+			saber_level_layers_make(pak, &level, part, slots, made);
+		if (made->layer_count)
+			layered_parts++;
 		saber_level.part_count++;
 	}
 	reason = "none of its parts is drawn";
@@ -4021,7 +5900,7 @@ static boolean saber_level_play(
 			made = &saber_level.parts[made_index];
 			rasterizer_geometry_compress_vertices(_rasterizer_vertex_type_model_uncompressed, part->vertex_count, vertices,
 				part->vertex_count * compressed_size, part->vertices, part->vertex_count * uncompressed_size);
-			strip_count = part_strip(part, strips);
+			strip_count = part_strip(part, NULL, strips);
 			reason = "the renderer cannot make its buffers";
 			if (!rasterizer_vertex_buffer_new(&made->vertex_buffer, _rasterizer_vertex_type_model_compressed,
 					part->vertex_count, vertices, part->vertex_count * compressed_size) ||
@@ -4039,9 +5918,10 @@ static boolean saber_level_play(
 		drawn = made_index;
 	}
 	saber_level.drawn = TRUE;
-	platform_log("anniversary: the structure drawn as %s: %ld parts, %ld of them the sky, %ld triangles, %ld textures; "
-		"its bounds %.1f %.1f %.1f to %.1f %.1f %.1f world units", saber_pak_entry_name(pak, entry), drawn, sky_parts,
-		triangles, saber_level.texture_count, bounds.x0, bounds.y0, bounds.z0, bounds.x1, bounds.y1, bounds.z1);
+	platform_log("anniversary: the structure drawn as %s: %ld parts, %ld of them the sky, %ld with layers blended over "
+		"them, %ld triangles, %ld textures; its bounds %.1f %.1f %.1f to %.1f %.1f %.1f world units",
+		saber_pak_entry_name(pak, entry), drawn, sky_parts, layered_parts, triangles, saber_level.texture_count, bounds.x0,
+		bounds.y0, bounds.z0, bounds.x1, bounds.y1, bounds.z1);
 	saber_template_dispose(&level);
 	free(slots);
 
@@ -4249,6 +6129,7 @@ void saber_models_tags_unloaded(
 		free(saber_models_globals.kept_tags);
 	saber_models_globals.kept_tags = NULL;
 	saber_models_globals.kept_count = 0;
+	saber_models_globals.scroll_shader_count = 0;
 	while (saber_models_globals.models)
 	{
 		struct saber_model *made = saber_models_globals.models;
@@ -4298,7 +6179,9 @@ static short object_rank(
 	color = &object->object.base_change_colors[0];
 	high = MAX(color->red, MAX(color->green, color->blue));
 	low = MIN(color->red, MIN(color->green, color->blue));
-	if (high < 0.3f)
+	/* (dark is spec ops only when it is grey too: a major's red is dark,
+	0.25 0.08 0.09 in b30, and his) */
+	if (high < 0.08f)
 		return _saber_rank_spec_ops;
 	if (high - low < 0.25f * high)
 		return high < 0.5f ? _saber_rank_spec_ops : _saber_rank_minor;
@@ -4410,6 +6293,59 @@ short saber_models_geometry_index(
 	}
 
 	return geometry_index;
+}
+
+/* the shader permutation an object is drawn with: its actor variant's
+forced one (an Elite major's 1, a commander's 2: the map's bitmaps of the
+rank), but none while the template is drawn, whose shaders' permutations
+are its own textures' places, the same for every rank */
+short saber_models_shader_permutation(
+	long model_tag,
+	short forced)
+{
+	struct saber_model const *made;
+
+	if (!forced || model_tag == NONE)
+		return forced;
+	for (made = saber_models_globals.models; made; made = made->next)
+	{
+		if (made->tag_index == model_tag)
+			return model_definition_get(model_tag)->geometries.address == made->geometries ? 0 : forced;
+	}
+
+	return forced;
+}
+
+real_rgb_color const *saber_models_change_colors(
+	long model_tag,
+	long object_index,
+	real_rgb_color const *colors)
+{
+	static real_rgb_color changed[MAXIMUM_CHANGE_COLORS_PER_MODEL];
+	struct saber_model const *made;
+
+	if (!colors || model_tag == NONE)
+		return colors;
+	for (made = saber_models_globals.models; made; made = made->next)
+	{
+		long index;
+
+		if (made->tag_index != model_tag)
+			continue;
+		/* (while the template is drawn, and for the least rank alone: a major
+		is red as its colour says) */
+		if (!made->band_weight || model_definition_get(model_tag)->geometries.address != made->geometries ||
+			object_rank(object_index) != _saber_rank_minor)
+		{
+			return colors;
+		}
+		for (index = 0; index < MAXIMUM_CHANGE_COLORS_PER_MODEL; index++)
+			changed[index] = colors[index];
+		changed[0] = made->band_color;
+		return changed;
+	}
+
+	return colors;
 }
 
 int saber_models_level_drawn(
@@ -4598,6 +6534,183 @@ void saber_models_level_sky_render(
 	rasterizer_models_end();
 }
 
+/* The light a level part's layers are drawn in at each vertex: of the
+part's lighting (the structure's about it, as its base is drawn in), its
+ambient and each distant light as the vertex faces it, of 255. */
+static void saber_level_layers_light(
+	struct saber_level_part *part)
+{
+	long vertex;
+
+	for (vertex = 0; vertex < part->layer_vertex_count; vertex++)
+	{
+		real const *normal = part->layer_normals[vertex];
+		real color[3];
+		long light;
+		long channel;
+
+		color[0] = part->lighting.ambient_color.red;
+		color[1] = part->lighting.ambient_color.green;
+		color[2] = part->lighting.ambient_color.blue;
+		for (light = 0; light < part->lighting.distant_light_count && light < MAXIMUM_RENDERED_DISTANT_LIGHTS;
+			light++)
+		{
+			struct render_distant_light const *distant = &part->lighting.distant_lights[light];
+			real facing = -(normal[0] * distant->direction.i + normal[1] * distant->direction.j +
+				normal[2] * distant->direction.k);
+
+			if (facing <= 0.f)
+				continue;
+			color[0] += distant->color.red * facing;
+			color[1] += distant->color.green * facing;
+			color[2] += distant->color.blue * facing;
+		}
+		for (channel = 0; channel < 3; channel++)
+		{
+			real value = color[channel] * 255.f;
+
+			part->layer_lit[vertex][channel] = (unsigned char)(value <= 0.f ? 0.f : value >= 255.f ? 255.f : value);
+		}
+	}
+	part->layer_lit_bsp = part->lit_bsp;
+}
+
+/* Draws the level's terrains' layers over their bases (sand over a
+cliff), each texture lit as the vertex is and blended by the vertex's
+weight, as Halo draws a decal: its vertex shader of decals, alpha
+blended, the depth tested and not written. */
+static void saber_level_layers_render(
+	void)
+{
+	struct pixel_shader_definition shader;
+	long index;
+	boolean begun = FALSE;
+	/* (the kind of layer the state is set for: NONE, none yet) */
+	long multiplying = NONE;
+
+	for (index = 0; index < saber_level.part_count; index++)
+	{
+		struct saber_level_part *part = &saber_level.parts[index];
+		long layer;
+
+		if (!part->layer_count || part->sky || part->lit_bsp == NONE ||
+			!render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
+		{
+			continue;
+		}
+		if (!begun)
+		{
+			begun = TRUE;
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_NONE);
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHABLENDENABLE, TRUE);
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHATESTENABLE, FALSE);
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZENABLE, TRUE);
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, FALSE);
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZBIAS, rasterizer_debug_options.zbias);
+			rasterizer_set_vertex_shader_permutation(1, 10, 0);
+		}
+		if (part->layer_lit_bsp != part->lit_bsp)
+			saber_level_layers_light(part);
+		for (layer = 0; layer < part->layer_count; layer++)
+		{
+			unsigned char const *weights = part->layer_weights[layer];
+			unsigned short const *triangles = part->layer_triangles[layer];
+			boolean multiply = part->layer_multiply[layer];
+			long corner;
+
+			if (multiplying != (long)multiply)
+			{
+				multiplying = (long)multiply;
+				csmemset(&shader, 0, sizeof(shader));
+				shader.texture_modes = 1;
+				shader.combiner_count = 2;
+				shader.rgb_outputs[0] = 0xc00;
+				shader.rgb_outputs[1] = 0xc00;
+				shader.alpha_outputs[1] = 0xc00;
+				shader.final_combiner_inputs_abcd = 0xc;
+				shader.final_combiner_inputs_efg = 0x1c00;
+				if (multiply)
+				{
+					/* (as a decal's multiply: white where it weighs nothing,
+					the texture where it weighs fully, the framebuffer times
+					it) */
+					shader.rgb_inputs[0] = 0x28240820;
+					shader.rgb_inputs[1] = 0x340c1420;
+					shader.alpha_inputs[1] = 0x341c1420;
+					IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
+						D3DCOLORWRITEENABLE_ALL);
+					/* (1: the shader tags' multiply) */
+					rasterizer_set_framebuffer_blend_function(1);
+				}
+				else
+				{
+					/* (as a decal's alpha blend: the colour the texture's times
+					the vertex's, the alpha the texture's times the vertex's
+					inverted) */
+					shader.rgb_inputs[0] = 0x08040000;
+					shader.rgb_inputs[1] = 0x200c0000;
+					/* (its cover by its weight w and the texture's height h,
+					a height blend: clamp(4w + 2h - 2.5). Nothing where it weighs
+					nothing, whole where it weighs fully, and between them the
+					texture's high places first, so the edge between two layers
+					follows the rock and sand rather than the triangles. Of
+					(1 - v0.a) w, t0.a h and c0.a a half: first 2w + h - 1,
+					of w + h/2 biased and doubled; then twice that, biased) */
+					shader.constant_0[0] = 0x80000000;
+					shader.alpha_inputs[0] = 0x34201811;
+					shader.alpha_outputs[0] = 0x18c00;
+					shader.alpha_inputs[1] = 0xdc20dc20;
+					shader.alpha_outputs[1] = 0x8c00;
+					IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
+						D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+					/* (0: the shader tags' alpha blend, as hud_draw.c names it) */
+					rasterizer_set_framebuffer_blend_function(0);
+				}
+				rasterizer_set_pixel_shader(&shader);
+			}
+			if (!rasterizer_set_texture_bitmap_data(0, &saber_level.bitmaps[part->layer_textures[layer]]))
+				continue;
+			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+			IDirect3DDevice8_Begin(global_d3d_device, D3DPT_TRIANGLELIST);
+			for (corner = 0; corner < 3 * part->layer_triangle_counts[layer]; corner++)
+			{
+				unsigned short vertex = triangles[corner];
+				unsigned char const *lit = part->layer_lit[vertex];
+
+				/* (a multiplying layer unlit: it scales the lit colour under it) */
+				if (multiply)
+				{
+					IDirect3DDevice8_SetVertexData4ub(global_d3d_device, 9, 255, 255, 255,
+						(unsigned char)(255 - weights[vertex]));
+				}
+				else
+				{
+					IDirect3DDevice8_SetVertexData4ub(global_d3d_device, 9, lit[0], lit[1], lit[2],
+						(unsigned char)(255 - weights[vertex]));
+				}
+				IDirect3DDevice8_SetVertexData2f(global_d3d_device, 4, part->layer_texcoords[vertex][0],
+					part->layer_texcoords[vertex][1]);
+				IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0, part->layer_positions[vertex][0],
+					part->layer_positions[vertex][1], part->layer_positions[vertex][2], 1.f);
+			}
+			IDirect3DDevice8_End(global_d3d_device);
+		}
+	}
+	if (begun)
+	{
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, TRUE);
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHABLENDENABLE, FALSE);
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZBIAS, 0);
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_ALL);
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_CCW);
+	}
+}
+
 void saber_models_level_render(
 	void)
 {
@@ -4666,6 +6779,7 @@ void saber_models_level_render(
 			&part->triangle_buffer, NONE, part->triangle_buffer.count, &part->vertex_buffer, NONE);
 		rasterizer_model_end();
 	}
+	saber_level_layers_render();
 }
 
 int saber_bitmaps_contain(
@@ -4680,11 +6794,29 @@ int saber_bitmaps_contain(
 		/* (only while the group holds the package's textures: the map's own
 		array can lie where the package's did) */
 		if (bitmap_group_get(played->tag_index)->bitmaps.address == played->bitmaps &&
-			bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
+			bitmap >= played->bitmaps + played->classic_count && bitmap < played->bitmaps + played->count)
 			return TRUE;
 	}
 
 	return FALSE;
+}
+
+struct bitmap_data const *saber_bitmaps_original(
+	struct bitmap_data const *bitmap)
+{
+	struct saber_bitmap const *played;
+
+	for (played = saber_models_globals.bitmaps; played; played = played->next)
+	{
+		if (bitmap_group_get(played->tag_index)->bitmaps.address == played->bitmaps &&
+			bitmap >= played->bitmaps && bitmap < played->bitmaps + played->classic_count &&
+			bitmap - played->bitmaps < played->map_group.bitmaps.count)
+		{
+			return TAG_BLOCK_GET_ELEMENT(&played->map_group.bitmaps, bitmap - played->bitmaps, struct bitmap_data);
+		}
+	}
+
+	return NULL;
 }
 
 int saber_bitmaps_read(
@@ -4710,7 +6842,7 @@ int saber_bitmaps_read(
 		array can lie where the package's did, and then the map's own bitmap
 		would be given the package's, and not its own) */
 		if (bitmap_group_get(played->tag_index)->bitmaps.address == played->bitmaps &&
-			bitmap >= played->bitmaps && bitmap < played->bitmaps + played->count)
+			bitmap >= played->bitmaps + played->classic_count && bitmap < played->bitmaps + played->count)
 		{
 			struct saber_texture const *texture = &played->textures[bitmap - played->bitmaps];
 

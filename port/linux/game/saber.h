@@ -39,6 +39,17 @@ enum
 	NUMBER_OF_SABER_RANKS
 };
 
+/* the most layers a level's terrain is drawn with over its base, and the
+channels of its vertices' colour that weigh them */
+#define SABER_MAXIMUM_LAYERS 4
+enum
+{
+	_saber_layer_channel_alpha = 0,
+	_saber_layer_channel_red,
+	_saber_layer_channel_green,
+	_saber_layer_channel_blue
+};
+
 /* (saber_lzx_decompress's errors) */
 #define SABER_LZX_ERROR_ARGUMENTS (-1)
 #define SABER_LZX_ERROR_DATA (-2)
@@ -81,6 +92,16 @@ struct saber_mesh_part
 	/* a level's sky object (its skydome, its cloud layers): drawn with
 	the sky, whichever material it uses */
 	short sky;
+	/* a level's terrain's layers over its base material (sand, grass, dust
+	over a cliff): each one's material, the channel of its vertices' colour
+	it is weighted by (SABER_LAYER_CHANNEL_), and whether it multiplies
+	what is under it rather than covering it; and each vertex's colour,
+	four bytes (alpha, red, green, blue), NULL with none */
+	short layer_count;
+	short layer_materials[SABER_MAXIMUM_LAYERS];
+	short layer_channels[SABER_MAXIMUM_LAYERS];
+	short layer_multiply[SABER_MAXIMUM_LAYERS];
+	unsigned char (*layer_weights)[4];
 };
 
 struct saber_template
@@ -210,6 +231,20 @@ void saber_texture_holo(struct saber_texture *texture);
 cockpit glass is plotted dark and opaque; its alpha keeps a fifth of itself,
 so the bay shows through it as the map's own glass does */
 void saber_texture_glass(struct saber_texture *texture);
+/* a layer's alpha as its height, of its colour's brightness (DXT3, DXT5) */
+void saber_texture_height_alpha(struct saber_texture *texture);
+/* every colour black, the alpha kept (the plasma pistol's own heat ring) */
+void saber_texture_blacken(struct saber_texture *texture);
+/* the colour change that turns a character's grey plates its armour's baked colour,
+of each channel; FALSE if it has too little of either. *weight: the baked texels */
+int saber_texture_band_color(struct saber_texture const *base, real color[3], long *weight);
+void saber_texture_band_grey(struct saber_texture *texture, real const band[3]);
+int saber_texture_tint_greys(struct saber_texture *texture);
+void saber_texture_mask_baked(int baked);
+void saber_texture_mask_plates(int plates);
+int saber_texture_alpha_glyph(struct saber_texture const *texture);
+long saber_texture_alpha_levels(struct saber_texture const *texture, long *levels, long level_count);
+long saber_texture_mask_coverage(void);
 
 /* ---------- prototypes/SABER_MODELS.C */
 
@@ -226,6 +261,9 @@ void saber_models_tags_unloaded(int give_back);
 package's texture, its pixels put in buffer */
 int saber_bitmaps_read(struct bitmap_data *bitmap, void *buffer);
 int saber_bitmaps_contain(struct bitmap_data const *bitmap);
+/* (mod_bitmaps.c) the map's own bitmap of which `bitmap` is the copy a set
+of the package's textures keeps ahead of them, or NULL */
+struct bitmap_data const *saber_bitmaps_original(struct bitmap_data const *bitmap);
 /* (render.c) whether the level's structure is drawn as the package's level
 geometry (display.remastered_bsp), and its drawing, in place of the
 structure's lightmapped surfaces. The sky is the package's too, drawn in
@@ -239,6 +277,14 @@ struct model;
 template that the object `object_index` is drawn with: its rank's (by its
 colour), of the geometry `geometry_index` Halo chose */
 short saber_models_geometry_index(struct model const *model, long object_index, short geometry_index);
+/* (render_objects.c) the change colours the object `object_index` is drawn
+with by the map's model `model_tag`: an Elite minor drawn as a template, its
+primary colour the blue its armour is baked, so its plates match its helmet;
+else `colors` as they are */
+union real_rgb_color;
+union real_rgb_color const *saber_models_change_colors(long model_tag, long object_index,
+	union real_rgb_color const *colors);
+short saber_models_shader_permutation(long model_tag, short forced);
 /* (models.c) whether the shader's base map at `permutation` is a package
 texture cut out by its alpha, drawn alpha tested and from both sides */
 int saber_models_part_cutout(long shader_tag, short permutation);

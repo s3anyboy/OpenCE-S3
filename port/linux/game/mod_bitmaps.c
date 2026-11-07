@@ -747,7 +747,13 @@ static struct mod_bitmap *bitmap_of(
 {
 	struct mod_bitmap_override const *override = override_get(bitmap->tag_index);
 	struct mod_bitmap *made = override ? override->bitmap : NULL;
+	/* (or a copy of one an Anniversary model's textures keep ahead of
+	theirs, for the map's other shaders that draw the bitmap: the Master
+	Chief's lights, saber_models.c) */
+	struct bitmap_data const *original = made ? saber_bitmaps_original(bitmap) : NULL;
 
+	if (original)
+		bitmap = original;
 	return made && bitmap >= made->bitmaps && bitmap < made->bitmaps + made->group.bitmaps.count ? made : NULL;
 }
 
