@@ -1,15 +1,17 @@
 /*
 SABER_TOGGLE.C
 
-The Back button switching the remastered models on and off in the game
-(saber_toggle.h). Each press of it draws the map's own models, instead of
-Halo: Combat Evolved Anniversary's, or them again. The models' tags are
+The Back button switching the remastered models and level on and off in the
+game (saber_toggle.h). A press of it (let go of within five seconds) switches
+between the map's own models and Halo: Combat Evolved Anniversary's; held
+five seconds, it switches the remastered structure and sky
+(display.remastered_bsp) on or off instead. The models' tags are
 written as the press says: each template's geometries are written into the
 map's model and taken out again (saber.h's saber_models_anniversary_set), so
 that everything that draws the model reads either the package's geometry or
 the map's own, its shaders, regions and nodes as the map's. The level's
-structure and the settings are as they are (display.remastered_bsp still
-draws the remastered geometry). The package's models are made as the map
+structure is only made when display.remastered_bsp asks for it; Back says
+whether it is drawn (saber_models_level_drawn). The package's models are made as the map
 loads when display.anniversary_models asks for them, so the switch only says
 which are drawn.
 
@@ -36,14 +38,23 @@ long saber_models_geometry_count(void);
 int config_boolean(const char *name);
 void platform_log(const char *format, ...);
 
+/* ---------- constants */
+
+/* how long Back is held to switch the remastered structure (milliseconds) */
+#define SABER_TOGGLE_LEVEL_HOLD 5000UL
+
 /* ---------- globals */
 
 static struct
 {
-	/* Back was held when the game was last looked at */
+	/* Back was held when the game was last looked at, since when, and
+	whether this hold has switched the structure already */
 	boolean held;
-	/* the map's own models are drawn, instead of the package's */
-	boolean classic;
+	unsigned long held_since;
+	boolean hold_switched;
+	/* the package's models drawn, and its structure and sky */
+	boolean models;
+	boolean level;
 } saber_toggle;
 
 /* ---------- private code */
@@ -67,29 +78,44 @@ void saber_toggle_initialize(
 	void)
 {
 	csmemset(&saber_toggle, 0, sizeof(saber_toggle));
+	/* (as the settings ask, until Back is pressed) */
+	saber_toggle.models = config_boolean("display.anniversary_models") ? TRUE : FALSE;
+	saber_toggle.level = config_boolean("display.remastered_bsp") ? TRUE : FALSE;
 }
 
 void saber_toggle_update(
 	void)
 {
 	boolean held = saber_toggle_held();
+	unsigned long now = GetTickCount();
 
-	/* (a press: Back, let go of, is pressed again) */
-	if (!held || saber_toggle.held)
+	if (held && !saber_toggle.held)
 	{
-		saber_toggle.held = held;
-		return;
+		/* (pressed: timed from now) */
+		saber_toggle.held_since = now;
+		saber_toggle.hold_switched = FALSE;
+	}
+	else if (held && !saber_toggle.hold_switched && now - saber_toggle.held_since >= SABER_TOGGLE_LEVEL_HOLD)
+	{
+		/* (held five seconds: the structure and sky switched, once a hold) */
+		saber_toggle.hold_switched = TRUE;
+		saber_toggle.level = !saber_toggle.level;
+		platform_log("anniversary: Back held: the %s structure and sky", saber_toggle.level ? "remastered" : "classic");
+	}
+	else if (!held && saber_toggle.held && !saber_toggle.hold_switched)
+	{
+		/* (let go of before then: the models switched) */
+		long models;
+		long geometries;
+
+		saber_toggle.models = !saber_toggle.models;
+		/* (the tags written over, before the next frame reads them) */
+		models = saber_models_anniversary_set(saber_toggle.models);
+		geometries = saber_models_geometry_count();
+		platform_log("anniversary: Back pressed: the %s models: %ld models of the map's %ld geometries",
+			saber_toggle.models ? "remastered" : "classic", models, geometries);
 	}
 	saber_toggle.held = held;
-	saber_toggle.classic = saber_toggle.classic ? FALSE : TRUE;
-	{
-		/* (the tags written over, before the next frame reads them) */
-		long models = saber_models_anniversary_set(saber_toggle.classic ? FALSE : TRUE);
-		long geometries = saber_models_geometry_count();
-
-		platform_log("anniversary: Back pressed: the models are drawn as %s: %ld models of the map's %ld geometries",
-			saber_toggle.classic ? "the map's" : "templates", models, geometries);
-	}
 }
 
 int saber_toggle_models_wanted(
@@ -101,5 +127,11 @@ int saber_toggle_models_wanted(
 int saber_toggle_classic_models(
 	void)
 {
-	return saber_toggle.classic;
+	return !saber_toggle.models;
+}
+
+int saber_toggle_classic_level(
+	void)
+{
+	return !saber_toggle.level;
 }

@@ -75,6 +75,7 @@ goes.
 #include "math/real_math.h"
 #include "models/model_definitions.h"
 #include "objects/objects.h"
+#include "units/units.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_geometry.h"
 #include "rasterizer/rasterizer_model_types.h"
@@ -82,6 +83,7 @@ goes.
 #include "rasterizer/rasterizer_models.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_console_vars.h"
+#include "rasterizer/rasterizer_lights.h"
 #include "render/render.h"
 #include "render/render_cameras_internal.h"
 #include "objects/object_lights_rendering.h"
@@ -95,6 +97,7 @@ goes.
 #include "saber.h"
 #include "saber_toggle.h" /* port: the Back button's switch, port/linux/game/saber_toggle.c */
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -108,6 +111,24 @@ int config_boolean(const char *name);
 const char *config_string(const char *name);
 void config_executable_folder(char *path, size_t size);
 void platform_log(char const *format, ...);
+
+/* (this file's lines in debug.txt as well as on the standard error, which a
+Windows build shows nowhere: why a model of the map is drawn as it is) */
+static void saber_log(
+	char const *format,
+	...)
+{
+	char line[1024];
+	va_list arguments;
+
+	va_start(arguments, format);
+	vsnprintf(line, sizeof(line), format, arguments);
+	va_end(arguments);
+	platform_log("%s", line);
+	error(_error_silent, "%s", line);
+}
+#define platform_log saber_log
+
 void halo_custom_edition_texels_channels(void const *texels, unsigned char channel_order);
 
 /* the game's (port) */
@@ -141,6 +162,7 @@ faces), besides the body */
 #define MAXIMUM_SABER_HEAD_PERMUTATIONS 16
 
 /* models.c's shader types and model flags */
+#define SHADER_TYPE_ENVIRONMENT 3
 #define SHADER_TYPE_MODEL 4
 #define SHADER_TYPE_TRANSPARENT_GLASS 8
 #define SHADER_TYPE_TRANSPARENT_METER 9
@@ -181,6 +203,30 @@ struct model_geometry
 	byte reserved[0x24];
 	struct tag_block parts;
 };
+
+/* a part's flags of the package's: a vehicle's wreck, drawn once it is
+destroyed, and its whole hull, drawn until then (saber_models_part_hidden) */
+#define SABER_PART_WRECK_FLAG 0x40000000UL
+#define SABER_PART_WHOLE_FLAG 0x20000000UL
+/* a part of a group the map's region of its name permutes (a Flood combat
+form's arm): its region's index in bits 20..23, and whether it is the
+group's damaged copy, drawn at the region's ~damaged, or its whole one */
+#define SABER_PART_REGION_FLAG 0x10000000UL
+#define SABER_PART_DAMAGED_FLAG 0x08000000UL
+#define SABER_PART_REGION_SHIFT 20
+#define SABER_PART_REGION_MASK 0xFUL
+/* a part of one variant of a group its region permutes (a marine's arms:
+bare with gloves, or one of its full sleeves): its region's index in bits
+20..23, as above, and in bits 12..19 the mask of the region's first eight
+permutations it is drawn at. (Not an index of its model's masks: the model
+drawn is the map's tag the template's was copied over, not the copy's) */
+#define SABER_PART_VARIANT_FLAG 0x04000000UL
+/* the rest of a sheet whose cards are cut from its corner: drawn solid,
+though its material is cut out (models.c) */
+#define SABER_PART_SOLID_FLAG 0x02000000UL
+#define SABER_PART_VARIANT_SHIFT 12
+#define SABER_PART_VARIANT_MASK 0xFFUL
+#define MAXIMUM_SABER_VARIANT_MASKS 64
 
 struct model_geometry_part
 {
@@ -291,6 +337,9 @@ struct saber_model
 	/* the geometries' parts: each a part's, or a part of the map's model's
 	(neither theirs to let go of) */
 	struct model_geometry_part *geometry_parts;
+	/* each variant's permutations, a bit each (SABER_PART_VARIANT_FLAG) */
+	unsigned long variant_masks[MAXIMUM_SABER_VARIANT_MASKS];
+	long variant_mask_count;
 	/* a classic heat meter shrunk onto the template's gauge: its own
 	buffer, not the map's */
 	struct vertex_buffer meter_buffers[8];
@@ -674,6 +723,8 @@ static void variant_normalize(
 }
 
 /* which of `keys` is `name`, or NONE */
+static long permutation_variant_region(struct saber_template const *template_, struct model const *model);
+
 static long head_key_index(
 	char keys[][64],
 	long count,
@@ -2003,11 +2054,15 @@ static boolean meter_buffer_fit(
 							longest = other;
 						}
 					}
-					/* (at its own size, the classic's: its middle where the stretch
-					above put it, the pane's 0.42 along the gun and its middle
-					across, and its own span about it) */
-					result[axis] = gauge_low[axis] + (axis == longest ? 0.42f : 0.5f) * (gauge_high[axis] - gauge_low[axis]) +
-						(along - 0.5f) * span +
+					/* (the prongs kept where the fit above lays them, a thirtieth
+					past the pane's high end; the glyph's other end, its top, on
+					the remastered glyph's: three tenths of the pane past the low
+					end, where its blob's ovals reach) */
+					if (axis == longest)
+						along = -0.547f + along * 1.587f;
+					else
+						along = -0.05f + along * 1.10f;
+					result[axis] = gauge_low[axis] + along * (gauge_high[axis] - gauge_low[axis]) +
 						out[axis] * (gauge_high[gauge_normal] - gauge_low[gauge_normal]) * 0.02f;
 				}
 				else
@@ -2254,10 +2309,56 @@ static void counter_part_place(
 				any_digits = TRUE;
 			}
 		}
+		/* (its digits are an effect's, left out of the template as it is
+		read: where they were on its display, wpn_assault_display, of the
+		display's box, 0.29 of it back to front, its middle across and 0.39
+		bottom to top) */
+		if (!any_digits)
+		{
+			real_point3d display_low = { 1e9f, 1e9f, 1e9f };
+			real_point3d display_high = { -1e9f, -1e9f, -1e9f };
+			boolean any_display = FALSE;
+
+			for (part_index = 0; part_index < template_->part_count; part_index++)
+			{
+				struct saber_mesh_part const *display = &template_->parts[part_index];
+				long vertex;
+
+				if (display->lod != 0 || display->material_index < 0 ||
+					display->material_index >= template_->material_count ||
+					strcmp(template_->materials[display->material_index], "wpn_assault_display") != 0)
+				{
+					continue;
+				}
+				for (vertex = 0; vertex < display->vertex_count; vertex++)
+				{
+					real_point3d const *position = &display->vertices[vertex].position;
+
+					display_low.x = MIN(display_low.x, position->x);
+					display_low.y = MIN(display_low.y, position->y);
+					display_low.z = MIN(display_low.z, position->z);
+					display_high.x = MAX(display_high.x, position->x);
+					display_high.y = MAX(display_high.y, position->y);
+					display_high.z = MAX(display_high.z, position->z);
+					any_display = TRUE;
+				}
+			}
+			if (any_display)
+			{
+				real_point3d middle;
+
+				middle.x = display_low.x + (display_high.x - display_low.x) * 0.29f;
+				middle.y = (display_low.y + display_high.y) * 0.5f;
+				middle.z = display_low.z + (display_high.z - display_low.z) * 0.39f;
+				digits_low = middle;
+				digits_high = middle;
+				any_digits = TRUE;
+			}
+		}
 		if (!any_numbers || !any_digits)
 		{
 			platform_log("anniversary: the classic ammo counter not moved: %s", !any_numbers ?
-				"its numbers' vertices cannot be read" : "the template has no digits");
+				"its numbers' vertices cannot be read" : "the template has no digits nor display");
 		}
 		if (any_numbers && any_digits)
 		{
@@ -2337,6 +2438,112 @@ static void counter_part_place(
 	part->centroid = made->meter_centres[which];
 }
 
+/* the map's model's region a template's part is the whole or damaged copy
+of (its group's name, "left_arm", as the region's, "left arm"), when the
+region has a damaged permutation (~damaged) to draw it by: NONE otherwise */
+static long template_part_region(
+	struct model const *map_model,
+	struct saber_mesh_part const *part)
+{
+	char group[64];
+	long region_index;
+
+	if (!part->region[0])
+		return NONE;
+	variant_normalize(part->region, group, (long)sizeof(group));
+	for (region_index = 0; region_index < map_model->regions.count && region_index <= (long)SABER_PART_REGION_MASK;
+		region_index++)
+	{
+		struct model_region const *region = TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index, struct model_region);
+		char name[64];
+		long permutation;
+
+		variant_normalize(region->name, name, (long)sizeof(name));
+		if (strcmp(name, group) != 0)
+			continue;
+		for (permutation = 0; permutation < region->permutations.count; permutation++)
+		{
+			if (TAG_BLOCK_GET_ELEMENT(&region->permutations, permutation, struct model_region_permutation)->name[0] == '~')
+				return region_index;
+		}
+		return NONE;
+	}
+
+	return NONE;
+}
+
+/* the variant of its group a template's part is, as the map's region of the
+group's name permutes it (a marine's "arms": "__base" bare with gloves,
+"arms_full_sleeve_100"): its model's mask of the region's permutations it is
+drawn at, its index among made's (*region the region's), NONE when the
+map's model has no such region or it is drawn at every permutation. The
+"__base" is drawn at a permutation no variant is named */
+static long template_part_variant(
+	struct saber_model *made,
+	struct saber_template const *template_,
+	struct model const *map_model,
+	struct saber_mesh_part const *part,
+	long *region)
+{
+	char group[64];
+	long region_index;
+	unsigned long mask = 0;
+	long index;
+
+	*region = NONE;
+	variant_normalize(part->region, group, (long)sizeof(group));
+	for (region_index = 0; region_index < map_model->regions.count && region_index <= (long)SABER_PART_REGION_MASK;
+		region_index++)
+	{
+		struct model_region const *map_region = TAG_BLOCK_GET_ELEMENT(&map_model->regions, region_index,
+			struct model_region);
+		char name[64];
+		long permutation;
+
+		variant_normalize(map_region->name, name, (long)sizeof(name));
+		if (strcmp(name, group) != 0)
+			continue;
+		for (permutation = 0; permutation < map_region->permutations.count && permutation < 32; permutation++)
+		{
+			char permutation_name[64];
+			boolean named = FALSE;
+			long other;
+
+			variant_normalize(TAG_BLOCK_GET_ELEMENT(&map_region->permutations, permutation,
+				struct model_region_permutation)->name, permutation_name, (long)sizeof(permutation_name));
+			if (!strcmp(permutation_name, part->group_variant))
+			{
+				mask |= 1UL << permutation;
+				continue;
+			}
+			/* (the base at a permutation none of the group's variants is) */
+			for (other = 0; other < template_->part_count && !named; other++)
+			{
+				struct saber_mesh_part const *sibling = &template_->parts[other];
+
+				if (sibling->group_variant[0] && !strcmp(sibling->region, part->region) &&
+					!strcmp(sibling->group_variant, permutation_name))
+				{
+					named = TRUE;
+				}
+			}
+			if (!named && !strcmp(part->group_variant, "__base"))
+				mask |= 1UL << permutation;
+		}
+		if (map_region->permutations.count <= 1 || map_region->permutations.count > 8 ||
+			mask == (1UL << map_region->permutations.count) - 1)
+		{
+			return NONE;
+		}
+		(void)made;
+		(void)index;
+		*region = region_index;
+		return (long)mask;
+	}
+
+	return NONE;
+}
+
 /* The model the template makes of the map's model: the map's, its every
 permutation drawing the template's geometry (`shader_indices`, the shader
 each part is drawn with). NULL, with *reason saying why, when it cannot be
@@ -2383,6 +2590,8 @@ static struct saber_model *saber_model_new(
 	head it runs across the face */
 	boolean own_meter = FALSE;
 	boolean own_monicle = FALSE;
+	/* whether the template has a wreck (its parts flagged) */
+	boolean template_wrecked = FALSE;
 	/* a region named head, the template's heads (its nodes under one named
 	head), and the region that draws the body */
 	long head_region = NONE;
@@ -2494,7 +2703,7 @@ static struct saber_model *saber_model_new(
 					((struct shader *)shader_definition_get(shader_tag))->base.type;
 				char const *shader_name = shader_tag == NONE ? NULL : tag_get_name(shader_tag);
 
-				if (shader_tag != NONE && shader_type != SHADER_TYPE_MODEL &&
+				if (shader_tag != NONE && shader_type != SHADER_TYPE_MODEL && shader_type != SHADER_TYPE_ENVIRONMENT &&
 					!(own_monicle && shader_name && strstr(shader_name, "hud")) &&
 					!(shader_type == SHADER_TYPE_TRANSPARENT_GLASS && map_glass_replaced(shader_tag)) &&
 					!map_clear_replaced(shader_tag))
@@ -2530,9 +2739,12 @@ static struct saber_model *saber_model_new(
 	made->map_model = *map_model;
 	made->model = *map_model;
 	made->model.flags &= ~FLAG(MODEL_PARTS_HAVE_LOCAL_NODES_BIT);
-	/* (the package's texture coordinates are its own, drawn as they are) */
-	made->model.base_map_scale.i = 1.f;
-	made->model.base_map_scale.j = 1.f;
+	/* (the map's model's texture scale kept, for the map's parts drawn
+	with the template's, a Jackal's shield, whose coordinates it scales:
+	the template's are divided by it as they are made, so drawn as they
+	are) */
+	made->model.base_map_scale.i = map_model->base_map_scale.i > 0.01f ? map_model->base_map_scale.i : 1.f;
+	made->model.base_map_scale.j = map_model->base_map_scale.j > 0.01f ? map_model->base_map_scale.j : 1.f;
 
 	/* a region named head draws one of the template's heads (the nodes
 	under one named head). The body is the other meshes, drawn by the
@@ -2546,6 +2758,10 @@ static struct saber_model *saber_model_new(
 		if (!_stricmp(map_region->name, "head"))
 			head_region = region_index;
 	}
+	/* (or the region whose permutations are the template's bones, a
+	boulder's: each of its rocks drawn as a head is) */
+	if (head_region == NONE)
+		head_region = permutation_variant_region(template_, map_model);
 	if (head_region != NONE && level_count > 0)
 	{
 		for (part_index = 0; part_index < template_->part_count; part_index++)
@@ -2641,8 +2857,18 @@ static struct saber_model *saber_model_new(
 					/* (the shield of its own region: there while the region is
 					its first permutation, gone at its others, a Jackal's
 					~shield_off as it dies) */
+					/* (its others the map's own geometry of that permutation, its
+					shield generator, which the template has none of: the map's,
+					found among this model's below, marked until then) */
 					permutation->geometry_indices[detail] = permutation_index == 0 ?
-						(short)(clear_base + slot) : (short)NONE;
+						(short)(clear_base + slot) :
+						(short)(VALID_INDEX(permutation->geometry_indices[detail], map_model->geometries.count) &&
+							/* (a character's, whose bitmaps keep the map's own first;
+							a shield's other permutation, ~shield_off, not a Grunt's
+							shellback, a whole other head and back) */
+							strstr(tag_get_name(tag_index), "characters\\") != NULL &&
+							strstr(permutation->name, "shield") != NULL ?
+							-2 - permutation->geometry_indices[detail] : NONE);
 				else if (clear_base != NONE && (head_count ? region_index == body_region : region_index == 0))
 					/* (and the body without it) */
 					permutation->geometry_indices[detail] = (short)(plain_base + slot);
@@ -2679,6 +2905,11 @@ static struct saber_model *saber_model_new(
 		vertices += template_->parts[part_index].vertex_count;
 	strips = (word *)vertices;
 	vertices = (struct model_vertex_compressed *)made->vertices;
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		if (template_->parts[part_index].wreck)
+			template_wrecked = TRUE;
+	}
 	for (made_index = 0; made_index < template_->part_count; made_index++)
 	{
 		struct saber_mesh_part const *source = &template_->parts[made_index];
@@ -2695,9 +2926,51 @@ static struct saber_model *saber_model_new(
 		part->next_part_index = NONE;
 		part->centroid_primary_node_weight = 1.f;
 		part_centroid_node(part, source);
+		/* (a template with a wreck: its whole hull drawn while it lives, its
+		wreck once it is destroyed, saber_models_part_hidden) */
+		{
+			long region = template_part_region(map_model, source);
+
+			long variant_mask_index = NONE;
+
+			if (source->card == 2)
+				part->flags |= SABER_PART_SOLID_FLAG;
+
+			if (region == NONE && source->group_variant[0])
+				variant_mask_index = template_part_variant(made, template_, map_model, source, &region);
+			if (variant_mask_index != NONE)
+			{
+				part->flags |= SABER_PART_VARIANT_FLAG | ((unsigned long)region << SABER_PART_REGION_SHIFT) |
+					((unsigned long)variant_mask_index << SABER_PART_VARIANT_SHIFT);
+			}
+			else if (region != NONE)
+			{
+				part->flags |= SABER_PART_REGION_FLAG | ((unsigned long)region << SABER_PART_REGION_SHIFT) |
+					(source->wreck ? SABER_PART_DAMAGED_FLAG : 0);
+			}
+			else if (template_wrecked)
+			{
+				part->flags |= source->wreck ? SABER_PART_WRECK_FLAG : SABER_PART_WHOLE_FLAG;
+			}
+		}
 		for (index = 0; index < source->vertex_count; index++)
 		{
 			scaled[index] = source->vertices[index];
+			/* (its coordinates divided by the map's model's texture scale,
+			which the game multiplies them by; kept within the compressed
+			range they were in, a scale a little under 1 (a Jackal's 0.997)
+			taking an edge's 1 past it, where it wraps) */
+			{
+				real u = scaled[index].texcoord.x / made->model.base_map_scale.i;
+				real v = scaled[index].texcoord.y / made->model.base_map_scale.j;
+
+				if (scaled[index].texcoord.x >= -1.05f && scaled[index].texcoord.x <= 1.05f)
+					u = u > 1.f ? 1.f : (u < -1.f ? -1.f : u);
+				if (scaled[index].texcoord.y >= -1.05f && scaled[index].texcoord.y <= 1.05f)
+					v = v > 1.f ? 1.f : (v < -1.f ? -1.f : v);
+				scaled[index].texcoord.x = u;
+				scaled[index].texcoord.y = v;
+			}
 			scaled[index].position.x *= scale;
 			scaled[index].position.y *= scale;
 			scaled[index].position.z *= scale;
@@ -2963,12 +3236,85 @@ static struct saber_model *saber_model_new(
 					part->vertex_buffer = clear_parts[index]->vertex_buffer;
 					part->centroid = clear_parts[index]->centroid;
 				}
+				/* (and with it the map's own geometry of the region's second
+				permutation, a Jackal's shield generator (~shield_off), which
+				the template has none of: there with the shield, as without
+				it. A character's, whose bitmaps keep the map's own first) */
+				if (strstr(tag_get_name(tag_index), "characters\\"))
+				{
+					struct model_region const *hideable = TAG_BLOCK_GET_ELEMENT(&map_model->regions, hideable_region,
+						struct model_region);
+					short map_index = hideable->permutations.count > 1 &&
+						strstr(TAG_BLOCK_GET_ELEMENT(&hideable->permutations, 1, struct model_region_permutation)->name,
+							"shield") != NULL ?
+						TAG_BLOCK_GET_ELEMENT(&hideable->permutations, 1, struct model_region_permutation)->geometry_indices[4] :
+						(short)NONE;
+
+					if (VALID_INDEX(map_index, map_model->geometries.count))
+					{
+						struct model_geometry const *generator = TAG_BLOCK_GET_ELEMENT(&map_model->geometries, map_index,
+							struct model_geometry);
+						long generator_part;
+
+						for (generator_part = 0; generator_part < generator->parts.count &&
+							geometry_part_count - first < MAXIMUM_PARTS_PER_MODEL_GEOMETRY; generator_part++)
+						{
+							struct model_geometry_part *part = &made->geometry_parts[geometry_part_count++];
+
+							*part = *TAG_BLOCK_GET_ELEMENT(&generator->parts, generator_part, struct model_geometry_part);
+							part->previous_part_index = NONE;
+							part->next_part_index = NONE;
+						}
+					}
+				}
 				geometry->parts.count = geometry_part_count - first;
 				geometry->parts.address = made->geometry_parts + first;
 				geometry->parts.definition = NULL;
 			}
 		}
 		made->geometry_count = clear_base + level_count * made->rank_count;
+	}
+	/* (the map's own geometries the hideable region's other permutations
+	draw, a Jackal's shield generator, copied after the template's) */
+	{
+		long map_indices[16];
+		long made_indices[16];
+		long copied = 0;
+		long permutation;
+
+		for (permutation = 0; permutation < next; permutation++)
+		{
+			long detail;
+
+			for (detail = 0; detail < 5; detail++)
+			{
+				short *index = &made->permutations[permutation].geometry_indices[detail];
+				long map_index;
+				long which;
+
+				if (*index > -2)
+					continue;
+				map_index = -2 - *index;
+				for (which = 0; which < copied && map_indices[which] != map_index; which++)
+				{
+				}
+				if (which == copied)
+				{
+					if (copied >= (long)NUMBEROF(map_indices) ||
+						made->geometry_count >= (long)NUMBEROF(made->geometries))
+					{
+						*index = NONE;
+						continue;
+					}
+					made->geometries[made->geometry_count] = *TAG_BLOCK_GET_ELEMENT(&map_model->geometries, map_index,
+						struct model_geometry);
+					map_indices[copied] = map_index;
+					made_indices[copied] = made->geometry_count++;
+					copied++;
+				}
+				*index = (short)made_indices[which];
+			}
+		}
 	}
 	made->model.geometries.count = made->geometry_count;
 	made->model.geometries.address = made->geometries;
@@ -3016,6 +3362,63 @@ static long model_shader_tag(
 	return shader && shader->base.type == SHADER_TYPE_MODEL ? reference->shader.index : NONE;
 }
 
+/* (model_play: a model of no model shader, its shaders the structure's
+(an a10 barricade's steel and plate), draws its template with another's,
+borrowed: its index among the model's shaders this) */
+#define BORROWED_SHADER_INDEX (-2)
+
+/* model_shader_tag, or `borrowed` for BORROWED_SHADER_INDEX */
+static long play_shader_tag(
+	struct model const *model,
+	long borrowed,
+	short shader_index)
+{
+	return shader_index == BORROWED_SHADER_INDEX ? borrowed : model_shader_tag(model, shader_index);
+}
+
+static boolean tag_kept(long tag_index);
+static boolean scroll_shader(long shader_tag);
+
+/* a model shader of the map's to draw a model of none with: one a model
+drawn as a template already plays over (its maps already its base map
+alone), else the first that no model drawn as it is draws with. NONE when
+there is none */
+static long borrowed_model_shader(void)
+{
+	struct saber_shader const *played;
+	struct tag_iterator iterator;
+	long shader_tag;
+
+	for (played = saber_models_globals.shaders; played; played = played->next)
+	{
+		struct shader const *shader = shader_definition_get(played->tag_index);
+
+		/* (not one that scrolls, a plasma rifle's arc's, nor changes colour) */
+		if (shader && shader->base.type == SHADER_TYPE_MODEL && !tag_kept(played->tag_index) &&
+			!scroll_shader(played->tag_index) &&
+			((struct shader_model_definition const *)shader)->model.change_color_source <= 0 &&
+			((struct shader_model_definition const *)shader)->model.base_map.index != NONE &&
+			!tag_kept(((struct shader_model_definition const *)shader)->model.base_map.index))
+		{
+			return played->tag_index;
+		}
+	}
+	tag_iterator_new(&iterator, SHADER_DEFINITION_TAG);
+	while ((shader_tag = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct shader const *shader = shader_definition_get(shader_tag);
+
+		if (shader && shader->base.type == SHADER_TYPE_MODEL && !tag_kept(shader_tag) &&
+			((struct shader_model_definition const *)shader)->model.base_map.index != NONE &&
+			!tag_kept(((struct shader_model_definition const *)shader)->model.base_map.index))
+		{
+			return shader_tag;
+		}
+	}
+
+	return NONE;
+}
+
 /* whether the map's shader `shader_tag` is the glass a Pelican's cockpit is
 drawn with: `vehicles\pelican\shaders\pelican_glass`, which the package's
 model draws for itself. Its panes are not a model shader's, so there is no
@@ -3044,6 +3447,10 @@ static boolean map_clear_replaced(
 	/* (and the plasma grenade's decal: the template's glyph is drawn) */
 	return name && (strstr(name, "belt") != NULL || strstr(name, "warthog lights") != NULL ||
 		strstr(name, "plasma grenade\\shaders\\pg decal") != NULL ||
+		/* (and the needler's needles: the template's are drawn, and go with
+		their frames as the needler empties. Their glow is `needler luminous`
+		(`needler luminous 3p` held by another), their cores `needler core`) */
+		strstr(name, "needler luminous") != NULL || strstr(name, "needler\\shaders\\needler core") != NULL ||
 		strstr(name, "cyborg\\shaders\\light shield") != NULL);
 }
 
@@ -3628,6 +4035,18 @@ matches what is drawn) */
 	}
 }
 
+/* whether a material is a glow drawn over another's geometry, its name
+that one's and "_sfx" ("ch_flood_infection_fronds_01_sfx"): a dark texture
+of no alpha, additive in the remastered game, drawn solid over the fronds
+it covered them black */
+static boolean material_glow_overlay(
+	char const *material)
+{
+	size_t length = strlen(material);
+
+	return length > 4 && !strcmp(material + length - 4, "_sfx");
+}
+
 /* whether a part's material is an effect's (a muzzle flash, a light's
 cone, an overshield, a weapon's counter's digits), which a model shader
 would draw solid: such parts are left out */
@@ -3640,7 +4059,8 @@ static boolean material_effect(
 	or rifle's prongs, not drawn at all) */
 	return !strncmp(material, "sfx_", 4) || !strncmp(material, "lig_", 4) || !strncmp(material, "fx_", 3) ||
 		strstr(material, "digits") != NULL || !strncmp(material, "c_shield", 8) || !strncmp(material, "sc_white", 8) ||
-		strstr(material, "shield") != NULL || strstr(material, "lightning") != NULL;
+		strstr(material, "shield") != NULL || strstr(material, "lightning") != NULL ||
+		material_glow_overlay(material);
 }
 
 /* whether a material is a plant's leaves or branches, by its name
@@ -3857,6 +4277,205 @@ the part that spreads furthest, from that part's middle. Measured from the
 part with the most vertices, a pelican's pilot (a metre across) let the
 hull go, fourteen metres off. c_uplink__h's crates sit 69 metres off its
 station, past four times the station's reach */
+/* whether a template's bone is under one with `word` in its name: a whip
+antenna's ("pos antenna", "antenna 0".."antenna 6", a Warthog's), or a
+wreck's ("_damaged" and its "damaged geom" bones, a Wraith's destroyed
+hull, skinned into the compound with its whole one) */
+static boolean template_bone_under(
+	struct saber_template const *template_,
+	long bone,
+	char const *word)
+{
+	long depth;
+
+	for (depth = 0; bone >= 0 && bone < template_->bone_count && depth < 64; depth++)
+	{
+		char const *name = template_->bones[bone];
+
+		/* (an antenna is a whip's chain, "pos antenna" and "antenna 0".., a
+		Warthog's: an Infection form's "frame antenna ..." bones hold its
+		fronds and its head, which are drawn) */
+		if (!strcmp(word, "antenna") ?
+			(!strncmp(name, "antenna", 7) || !strncmp(name, "pos antenna", 11)) :
+			strstr(name, word) != NULL)
+		{
+			return TRUE;
+		}
+		bone = template_->bone_parents[bone];
+	}
+
+	return FALSE;
+}
+
+/* Takes away the triangles of a template's whip antenna (a Warthog's, which
+Anniversary's graphics do not draw), and moves its wreck's (a Wraith's)
+into parts of their own, marked a wreck's: drawn in place of the whole
+hull once the vehicle is destroyed. A triangle any of whose corners those
+bones hold goes; the vertices stay, unused */
+static void template_antenna_remove(
+	struct saber_template *template_)
+{
+	boolean *antenna;
+	boolean *wreck;
+	long bone;
+	long part_index;
+	long part_total;
+	boolean any = FALSE;
+
+	if (template_->bone_count <= 0)
+		return;
+	antenna = malloc(sizeof(*antenna) * (size_t)template_->bone_count);
+	wreck = malloc(sizeof(*wreck) * (size_t)template_->bone_count);
+	if (!antenna || !wreck)
+	{
+		if (antenna)
+			free(antenna);
+		if (wreck)
+			free(wreck);
+		return;
+	}
+	for (bone = 0; bone < template_->bone_count; bone++)
+	{
+		antenna[bone] = template_bone_under(template_, bone, "antenna");
+		wreck[bone] = !antenna[bone] && template_bone_under(template_, bone, "damaged");
+		if (antenna[bone] || wreck[bone])
+			any = TRUE;
+	}
+	part_total = template_->part_count;
+	for (part_index = 0; any && part_index < part_total; part_index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[part_index];
+		unsigned short *wrecked = NULL;
+		long wrecked_count = 0;
+		long triangle;
+		long kept = 0;
+		long dropped_count = 0;
+
+		if (part->wreck)
+			continue;
+		for (triangle = 0; triangle < part->triangle_count; triangle++)
+		{
+			/* 0 kept, 1 the antenna's, 2 the wreck's */
+			long whose = 0;
+			long corner;
+
+			for (corner = 0; corner < 3 && whose != 1; corner++)
+			{
+				long index = part->triangles[3 * triangle + corner];
+				struct model_vertex_uncompressed const *vertex;
+				long influence;
+
+				if (index >= part->vertex_count)
+					continue;
+				vertex = &part->vertices[index];
+				for (influence = 0; influence < 2; influence++)
+				{
+					long slot = vertex->nodes[influence];
+
+					if (vertex->node_weights[influence] > 0.5f && slot >= 0 && slot < template_->bone_count)
+					{
+						if (antenna[slot])
+							whose = 1;
+						else if (wreck[slot])
+							whose = 2;
+					}
+				}
+			}
+			if (whose == 1)
+			{
+				dropped_count++;
+				continue;
+			}
+			if (whose == 2)
+			{
+				if (!wrecked)
+				{
+					wrecked = malloc(sizeof(*wrecked) * 3 * (size_t)part->triangle_count);
+					if (!wrecked)
+						continue;
+				}
+				wrecked[3 * wrecked_count] = part->triangles[3 * triangle];
+				wrecked[3 * wrecked_count + 1] = part->triangles[3 * triangle + 1];
+				wrecked[3 * wrecked_count + 2] = part->triangles[3 * triangle + 2];
+				wrecked_count++;
+				continue;
+			}
+			part->triangles[3 * kept] = part->triangles[3 * triangle];
+			part->triangles[3 * kept + 1] = part->triangles[3 * triangle + 1];
+			part->triangles[3 * kept + 2] = part->triangles[3 * triangle + 2];
+			kept++;
+		}
+		part->triangle_count = kept;
+		if (dropped_count)
+			platform_log("anniversary: %ld of a part's triangles are its antenna's, not drawn", dropped_count);
+		if (wrecked_count)
+		{
+			struct saber_mesh_part *parts = realloc(template_->parts,
+				sizeof(*template_->parts) * ((size_t)template_->part_count + 1));
+			struct model_vertex_uncompressed *vertices;
+
+			if (parts)
+			{
+				template_->parts = parts;
+				part = &template_->parts[part_index];
+			}
+			vertices = parts ? malloc(sizeof(*vertices) * (size_t)part->vertex_count) : NULL;
+			if (vertices)
+			{
+				struct saber_mesh_part *copy = &template_->parts[template_->part_count];
+
+				memcpy(vertices, part->vertices, sizeof(*vertices) * (size_t)part->vertex_count);
+				*copy = *part;
+				copy->vertices = vertices;
+				copy->triangles = wrecked;
+				copy->triangle_count = wrecked_count;
+				copy->layer_weights = NULL;
+				copy->layer_count = 0;
+				copy->wreck = TRUE;
+				template_->part_count++;
+				platform_log("anniversary: %ld of a part's triangles are its wreck's, drawn once it is destroyed",
+					wrecked_count);
+			}
+			else
+			{
+				free(wrecked);
+			}
+		}
+		else if (wrecked)
+		{
+			free(wrecked);
+		}
+	}
+	/* (a part left with no triangles, all of them its wreck's or its
+	antenna's, is taken out: a geometry part of none halts the renderer,
+	count>0) */
+	{
+		long kept = 0;
+
+		for (part_index = 0; part_index < template_->part_count; part_index++)
+		{
+			struct saber_mesh_part *part = &template_->parts[part_index];
+
+			if (part->triangle_count <= 0)
+			{
+				if (part->vertices)
+					free(part->vertices);
+				if (part->triangles)
+					free(part->triangles);
+				if (part->layer_weights)
+					free(part->layer_weights);
+				continue;
+			}
+			if (kept != part_index)
+				template_->parts[kept] = *part;
+			kept++;
+		}
+		template_->part_count = kept;
+	}
+	free(antenna);
+	free(wreck);
+}
+
 static void template_strays_remove(
 	struct saber_template *template_)
 {
@@ -4051,6 +4670,198 @@ static boolean skeleton_scale(
 	return *scale > 0.f && *scale < 1000.f;
 }
 
+/* a template's jaw: its "b jaw" bone and those under it (the lower lips),
+which have no node of the map's model and so stood still on its head. They
+are skinned to a node the model has not, the one after its last, which
+render_model makes each frame its head's turned about the jaw's hinge by
+the unit's mouth aperture (the sound's mouth data, unit_set_mouth_aperture) */
+enum
+{
+	MAXIMUM_SABER_JAWS = 32,
+	/* (the jaw's turn wide open; Halo's aperture is 0..1) */
+};
+
+#define SABER_JAW_OPEN_ANGLE 0.30f
+
+static struct saber_jaw
+{
+	long model_tag;
+	short head_node;
+	short jaw_node;
+	/* (in the model's default pose: the hinge, and the axis it turns about,
+	opening the mouth for a positive angle) */
+	real_point3d pivot;
+	real_vector3d axis;
+} saber_jaws[MAXIMUM_SABER_JAWS];
+static long saber_jaw_count = 0;
+
+/* whether a template's bone is its jaw or under it */
+static boolean template_bone_jaw(
+	struct saber_template const *template_,
+	long bone)
+{
+	long depth;
+
+	for (depth = 0; bone >= 0 && bone < template_->bone_count && depth < 64; depth++)
+	{
+		if (!strcmp(template_->bones[bone], "b jaw"))
+			return TRUE;
+		bone = template_->bone_parents[bone];
+	}
+
+	return FALSE;
+}
+
+/* a point (w 1) or vector (w 0) of a template's model space as a vertex of
+its bone `slot`'s is placed (template_nodes_map): in that bone's own space,
+scaled, then where `node` is by default */
+static void template_point_placed(
+	struct saber_template const *template_,
+	long slot,
+	struct model_node const *node,
+	real scale,
+	real x,
+	real y,
+	real z,
+	real w,
+	real_vector3d *placed)
+{
+	real local[3];
+
+	bind_transform(template_->bone_binds[slot], x, y, z, w, local);
+	if (w != 0.f)
+	{
+		real_point3d point;
+		real_point3d moved;
+
+		point.x = local[0] * scale;
+		point.y = local[1] * scale;
+		point.z = local[2] * scale;
+		matrix4x3_inverse_transform_point(&node->runtime_default_inverse_matrix, &point, &moved);
+		placed->i = moved.x;
+		placed->j = moved.y;
+		placed->k = moved.z;
+	}
+	else
+	{
+		real_vector3d direction;
+
+		direction.i = local[0];
+		direction.j = local[1];
+		direction.k = local[2];
+		matrix4x3_inverse_transform_vector(&node->runtime_default_inverse_matrix, &direction, placed);
+	}
+}
+
+/* the jaw of a template mapped to `model` (model_tag's): its hinge and
+axis, and which node it is skinned to. FALSE when it has none, or the
+model's head has no node, or the model has no room for one more */
+static boolean template_jaw_find(
+	struct saber_template const *template_,
+	struct model const *model,
+	short const *nodes,
+	long const *binds,
+	real scale,
+	struct saber_jaw *jaw)
+{
+	long bone;
+	long jaw_bone = NONE;
+	long lip_bone = NONE;
+	long slot;
+	struct model_node const *head;
+	real_vector3d pivot;
+	real_vector3d lip;
+	real_vector3d axis;
+	real_vector3d down;
+
+	if (model->nodes.count + 1 >= RASTERIZER_MAXIMUM_NODES_PER_MODEL ||
+		model->nodes.count + 1 > MAXIMUM_NODES_PER_MODEL)
+	{
+		return FALSE;
+	}
+	for (bone = 0; bone < template_->bone_count; bone++)
+	{
+		if (!strcmp(template_->bones[bone], "b jaw"))
+			jaw_bone = bone;
+	}
+	if (jaw_bone == NONE || nodes[jaw_bone] == NONE || binds[jaw_bone] == NONE || binds[jaw_bone] == jaw_bone)
+		return FALSE;
+	/* (the chin: the lower lip's middle, else the jaw's farthest child) */
+	for (bone = 0; bone < template_->bone_count; bone++)
+	{
+		if (template_->bone_parents[bone] == jaw_bone && strstr(template_->bones[bone], " c lip lower"))
+		{
+			lip_bone = bone;
+			break;
+		}
+	}
+	if (lip_bone == NONE)
+	{
+		real farthest = 0.f;
+
+		for (bone = 0; bone < template_->bone_count; bone++)
+		{
+			real dx;
+			real dz;
+
+			if (template_->bone_parents[bone] != jaw_bone)
+				continue;
+			dx = template_->bone_origins[bone][0] - template_->bone_origins[jaw_bone][0];
+			dz = template_->bone_origins[bone][2] - template_->bone_origins[jaw_bone][2];
+			if (dx * dx + dz * dz > farthest)
+			{
+				farthest = dx * dx + dz * dz;
+				lip_bone = bone;
+			}
+		}
+	}
+	if (lip_bone == NONE)
+		return FALSE;
+	slot = binds[jaw_bone];
+	head = TAG_BLOCK_GET_ELEMENT(&model->nodes, nodes[jaw_bone], struct model_node);
+	template_point_placed(template_, slot, head, scale, template_->bone_origins[jaw_bone][0],
+		template_->bone_origins[jaw_bone][1], template_->bone_origins[jaw_bone][2], 1.f, &pivot);
+	template_point_placed(template_, slot, head, scale, template_->bone_origins[lip_bone][0],
+		template_->bone_origins[lip_bone][1], template_->bone_origins[lip_bone][2], 1.f, &lip);
+	/* (the hinge's axis is across the face, the template's y; the chin goes
+	down, the template's -z, as the mouth opens) */
+	template_point_placed(template_, slot, head, scale, 0.f, 1.f, 0.f, 0.f, &axis);
+	template_point_placed(template_, slot, head, scale, 0.f, 0.f, -1.f, 0.f, &down);
+	if (normalize3d(&axis) < 0.0001f)
+		return FALSE;
+	{
+		real_matrix4x3 turn;
+		real_point3d arm;
+		real_point3d swung;
+		real_vector3d swing;
+
+		/* (which way a turn by matrix4x3_rotation_from_axis_and_angle
+		takes the chin: down, or the axis is turned round) */
+		arm.x = lip.i - pivot.i;
+		arm.y = lip.j - pivot.j;
+		arm.z = lip.k - pivot.k;
+		matrix4x3_rotation_from_axis_and_angle(&turn, &axis, (real)sin(0.1), (real)cos(0.1));
+		matrix4x3_transform_point(&turn, &arm, &swung);
+		swing.i = swung.x - arm.x;
+		swing.j = swung.y - arm.y;
+		swing.k = swung.z - arm.z;
+		if (dot_product3d(&swing, &down) < 0.f)
+		{
+			axis.i = -axis.i;
+			axis.j = -axis.j;
+			axis.k = -axis.k;
+		}
+	}
+	jaw->head_node = nodes[jaw_bone];
+	jaw->jaw_node = (short)model->nodes.count;
+	jaw->pivot.x = pivot.i;
+	jaw->pivot.y = pivot.j;
+	jaw->pivot.z = pivot.k;
+	jaw->axis = axis;
+
+	return TRUE;
+}
+
 /* Has the template's vertices move with the map's model's nodes, in the
 map's model's units: each bone the node of its name, else its nearest
 parent's that has one (a vertex of a bone with none, as a vehicle's
@@ -4062,6 +4873,7 @@ animations pose it, though the two's skeletons stand otherwise. */
 static void template_nodes_map(
 	struct saber_template *template_,
 	struct model const *model,
+	long model_tag,
 	real scale,
 	long *matched_bones,
 	long *posed_vertices,
@@ -4070,6 +4882,8 @@ static void template_nodes_map(
 	short *nodes = malloc(sizeof(*nodes) * ((size_t)template_->bone_count + 1));
 	long *binds = malloc(sizeof(*binds) * ((size_t)template_->bone_count + 1));
 	boolean defaults = TRUE;
+	boolean has_jaw = FALSE;
+	short jaw_node = NONE;
 	long bone;
 	long part_index;
 	long node_index;
@@ -4115,6 +4929,27 @@ static void template_nodes_map(
 				at = template_->bone_parents[at];
 		}
 	}
+	/* (its jaw, skinned to the node after the model's last) */
+	{
+		struct saber_jaw found;
+		long at;
+
+		has_jaw = FALSE;
+		if (model_tag != NONE && defaults && template_jaw_find(template_, model, nodes, binds, scale, &found))
+		{
+			found.model_tag = model_tag;
+			for (at = 0; at < saber_jaw_count && saber_jaws[at].model_tag != model_tag; at++)
+				;
+			if (at < MAXIMUM_SABER_JAWS)
+			{
+				saber_jaws[at] = found;
+				if (at == saber_jaw_count)
+					saber_jaw_count++;
+				has_jaw = TRUE;
+				jaw_node = found.jaw_node;
+			}
+		}
+	}
 	for (part_index = 0; part_index < template_->part_count; part_index++)
 	{
 		struct saber_mesh_part *part = &template_->parts[part_index];
@@ -4123,6 +4958,7 @@ static void template_nodes_map(
 		for (index = 0; index < part->vertex_count; index++)
 		{
 			struct model_vertex_uncompressed *vertex = &part->vertices[index];
+			boolean jawed[2] = { FALSE, FALSE };
 			real_point3d position = { 0.f, 0.f, 0.f };
 			real_vector3d normal = { 0.f, 0.f, 0.f };
 			real_vector3d tangent = { 0.f, 0.f, 0.f };
@@ -4138,6 +4974,8 @@ static void template_nodes_map(
 
 				if (node == NONE && vertex->node_weights[influence] > 0.f)
 					posed = FALSE;
+				jawed[influence] = has_jaw && node != NONE && binds[slot] != slot &&
+					template_bone_jaw(template_, slot) ? TRUE : FALSE;
 				slots[influence] = node == NONE ? NONE : binds[slot];
 				vertex->nodes[influence] = node == NONE ? 0 : node;
 			}
@@ -4202,6 +5040,13 @@ static void template_nodes_map(
 				vertex->tangent = tangent;
 				cross_product3d(&normal, &tangent, &vertex->binormal);
 				normalize3d(&vertex->binormal);
+				/* (a jaw's vertex is placed by its head's default, as the
+				jaw's node is the head's turned) */
+				for (influence = 0; influence < 2; influence++)
+				{
+					if (jawed[influence])
+						vertex->nodes[influence] = jaw_node;
+				}
 			}
 			else
 			{
@@ -4220,6 +5065,314 @@ static void template_nodes_map(
 	}
 	free(nodes);
 	free(binds);
+}
+
+/* the map's model's region whose permutations are the template's bones
+(a boulder's "boulder", base00..base04, each its own rock, skinned into
+one compound with the others): NONE when there is none */
+static long permutation_variant_region(
+	struct saber_template const *template_,
+	struct model const *model)
+{
+	long region_index;
+
+	for (region_index = 0; region_index < model->regions.count; region_index++)
+	{
+		struct model_region const *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
+		long permutation;
+		long matched = 0;
+
+		if (region->permutations.count < 2 || !_stricmp(region->name, "head"))
+			continue;
+		for (permutation = 0; permutation < region->permutations.count; permutation++)
+		{
+			char key[64];
+			long bone;
+
+			variant_normalize(TAG_BLOCK_GET_ELEMENT(&region->permutations, permutation,
+				struct model_region_permutation)->name, key, (long)sizeof(key));
+			for (bone = 0; bone < template_->bone_count; bone++)
+			{
+				if (!strcmp(template_->bones[bone], key))
+				{
+					matched++;
+					break;
+				}
+			}
+		}
+		if (matched == region->permutations.count)
+			return region_index;
+	}
+
+	return NONE;
+}
+
+/* Has a template whose rocks are the map's permutations (a boulder's
+base00..base04, skinned into one compound) draw only the one the map's
+object chose: each triangle the variant of the permutation bone over its
+first corner's, its part split by variant, as a marine's heads are, and
+the region drawn as the head region is (saber_model_new). Drawn whole,
+every rock of the five stood in the one's place */
+static void template_permutation_variants(
+	struct saber_template *template_,
+	struct model const *model)
+{
+	long region_index = permutation_variant_region(template_, model);
+	struct model_region const *region;
+	long *variant_of;
+	long bone;
+	long part_total;
+	long part_index;
+	long split = 0;
+
+	if (region_index == NONE || template_->bone_count <= 0)
+		return;
+	region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
+	variant_of = malloc(sizeof(*variant_of) * (size_t)template_->bone_count);
+	if (!variant_of)
+		return;
+	/* (each bone's permutation: its own name's, or the nearest above it) */
+	for (bone = 0; bone < template_->bone_count; bone++)
+	{
+		long walk = bone;
+		long depth;
+
+		variant_of[bone] = NONE;
+		for (depth = 0; walk >= 0 && walk < template_->bone_count && depth < 64 && variant_of[bone] == NONE; depth++)
+		{
+			long permutation;
+
+			for (permutation = 0; permutation < region->permutations.count; permutation++)
+			{
+				char key[64];
+
+				variant_normalize(TAG_BLOCK_GET_ELEMENT(&region->permutations, permutation,
+					struct model_region_permutation)->name, key, (long)sizeof(key));
+				if (!strcmp(template_->bones[walk], key))
+				{
+					variant_of[bone] = permutation;
+					break;
+				}
+			}
+			walk = template_->bone_parents[walk];
+		}
+	}
+	part_total = template_->part_count;
+	for (part_index = 0; part_index < part_total; part_index++)
+	{
+		long permutation;
+		long first = NONE;
+
+		if (template_->parts[part_index].variant[0])
+			continue;
+		for (permutation = 0; permutation < region->permutations.count; permutation++)
+		{
+			struct saber_mesh_part *part = &template_->parts[part_index];
+			unsigned short *mine;
+			long count = 0;
+			long triangle;
+
+			mine = malloc(sizeof(*mine) * 3 * ((size_t)part->triangle_count + 1));
+			if (!mine)
+				continue;
+			for (triangle = 0; triangle < part->triangle_count; triangle++)
+			{
+				long index = part->triangles[3 * triangle];
+				long slot = index < part->vertex_count ? part->vertices[index].nodes[0] : NONE;
+
+				if (slot >= 0 && slot < template_->bone_count && variant_of[slot] == permutation)
+				{
+					mine[3 * count] = part->triangles[3 * triangle];
+					mine[3 * count + 1] = part->triangles[3 * triangle + 1];
+					mine[3 * count + 2] = part->triangles[3 * triangle + 2];
+					count++;
+				}
+			}
+			if (!count)
+			{
+				free(mine);
+				continue;
+			}
+			{
+				struct saber_mesh_part *parts = realloc(template_->parts,
+					sizeof(*template_->parts) * ((size_t)template_->part_count + 1));
+				struct model_vertex_uncompressed *vertices;
+
+				if (!parts)
+				{
+					free(mine);
+					continue;
+				}
+				template_->parts = parts;
+				part = &template_->parts[part_index];
+				vertices = malloc(sizeof(*vertices) * (size_t)part->vertex_count);
+				if (!vertices)
+				{
+					free(mine);
+					continue;
+				}
+				memcpy(vertices, part->vertices, sizeof(*vertices) * (size_t)part->vertex_count);
+				template_->parts[template_->part_count] = *part;
+				template_->parts[template_->part_count].vertices = vertices;
+				template_->parts[template_->part_count].triangles = mine;
+				template_->parts[template_->part_count].triangle_count = count;
+				template_->parts[template_->part_count].layer_weights = NULL;
+				template_->parts[template_->part_count].layer_count = 0;
+				variant_normalize(TAG_BLOCK_GET_ELEMENT(&region->permutations, permutation,
+					struct model_region_permutation)->name, template_->parts[template_->part_count].variant,
+					(long)sizeof(template_->parts[template_->part_count].variant));
+				template_->part_count++;
+				if (first == NONE)
+					first = permutation;
+				split++;
+			}
+		}
+		/* (what is left, of no permutation, stays the body; a part all of
+		whose triangles went is emptied, then taken out) */
+		if (first != NONE)
+		{
+			struct saber_mesh_part *part = &template_->parts[part_index];
+			long kept = 0;
+			long triangle;
+
+			for (triangle = 0; triangle < part->triangle_count; triangle++)
+			{
+				long index = part->triangles[3 * triangle];
+				long slot = index < part->vertex_count ? part->vertices[index].nodes[0] : NONE;
+
+				if (slot >= 0 && slot < template_->bone_count && variant_of[slot] != NONE)
+					continue;
+				part->triangles[3 * kept] = part->triangles[3 * triangle];
+				part->triangles[3 * kept + 1] = part->triangles[3 * triangle + 1];
+				part->triangles[3 * kept + 2] = part->triangles[3 * triangle + 2];
+				kept++;
+			}
+			part->triangle_count = kept;
+		}
+	}
+	free(variant_of);
+	{
+		long kept = 0;
+
+		for (part_index = 0; part_index < template_->part_count; part_index++)
+		{
+			struct saber_mesh_part *part = &template_->parts[part_index];
+
+			if (part->triangle_count <= 0)
+			{
+				if (part->vertices)
+					free(part->vertices);
+				if (part->triangles)
+					free(part->triangles);
+				if (part->layer_weights)
+					free(part->layer_weights);
+				continue;
+			}
+			if (kept != part_index)
+				template_->parts[kept] = *part;
+			kept++;
+		}
+		template_->part_count = kept;
+	}
+	if (split)
+		platform_log("anniversary: the template's %ld parts of the map's %s permutations, each drawn as its own",
+			split, region->name);
+}
+
+/* Turns a vehicle's floors under its own roof away from the sky: a
+Pelican's bay. Halo lights a model by its normals alone, shadowing none of
+it, so the bay's floor, facing up, took the sun as the hull's top does and
+stood out bright and flat in the dark bay. A vertex facing up with the
+model's own geometry straight above it (of its level of detail) is turned
+mostly sideways, keeping its lean across, so it takes the ambient light the
+walls do. Its texture's shading is its own */
+static void template_covered_floors_shade(
+	struct saber_template *template_)
+{
+	long part_index;
+	long turned = 0;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[part_index];
+		long vertex;
+
+		for (vertex = 0; vertex < part->vertex_count; vertex++)
+		{
+			struct model_vertex_uncompressed *point = &part->vertices[vertex];
+			real px = point->position.x;
+			real py = point->position.y;
+			real pz = point->position.z;
+			boolean covered = FALSE;
+			long other_index;
+
+			if (point->normal.k < 0.7f)
+				continue;
+			for (other_index = 0; other_index < template_->part_count && !covered; other_index++)
+			{
+				struct saber_mesh_part const *other = &template_->parts[other_index];
+				long triangle;
+
+				if (other->lod != part->lod)
+					continue;
+				for (triangle = 0; triangle < other->triangle_count && !covered; triangle++)
+				{
+					real_point3d const *a = &other->vertices[other->triangles[3 * triangle]].position;
+					real_point3d const *b = &other->vertices[other->triangles[3 * triangle + 1]].position;
+					real_point3d const *c = &other->vertices[other->triangles[3 * triangle + 2]].position;
+					real d0;
+					real d1;
+					real d2;
+					real area;
+					real height;
+
+					/* (above it, by its box first) */
+					if (a->z <= pz + 0.05f && b->z <= pz + 0.05f && c->z <= pz + 0.05f)
+						continue;
+					if ((a->x < px && b->x < px && c->x < px) || (a->x > px && b->x > px && c->x > px) ||
+						(a->y < py && b->y < py && c->y < py) || (a->y > py && b->y > py && c->y > py))
+					{
+						continue;
+					}
+					/* (the point under the triangle, by its corners' weights
+					across) */
+					area = (b->x - a->x) * (c->y - a->y) - (c->x - a->x) * (b->y - a->y);
+					if (area > -1e-8f && area < 1e-8f)
+						continue;
+					d0 = ((b->x - px) * (c->y - py) - (c->x - px) * (b->y - py)) / area;
+					d1 = ((c->x - px) * (a->y - py) - (a->x - px) * (c->y - py)) / area;
+					d2 = 1.f - d0 - d1;
+					if (d0 < 0.f || d1 < 0.f || d2 < 0.f)
+						continue;
+					height = d0 * a->z + d1 * b->z + d2 * c->z;
+					if (height > pz + 0.05f)
+						covered = TRUE;
+				}
+			}
+			if (covered)
+			{
+				real across_x = point->normal.i;
+				real across_y = point->normal.j;
+				real length = (real)sqrt((double)(across_x * across_x + across_y * across_y));
+				real_vector3d normal;
+
+				if (length < 0.05f)
+				{
+					across_x = 1.f;
+					across_y = 0.f;
+					length = 1.f;
+				}
+				normal.i = across_x / length;
+				normal.j = across_y / length;
+				normal.k = 0.35f;
+				normalize3d(&normal);
+				point->normal = normal;
+				turned++;
+			}
+		}
+	}
+	if (turned)
+		platform_log("anniversary: %ld vertices facing up under the model's roof turned from the sky", turned);
 }
 
 /* Turns each part's triangles to face as Halo's do, clockwise about their
@@ -4283,6 +5436,39 @@ static boolean weapon_model(
 	return FALSE;
 }
 
+/* whether a model of the map's is drawn as a template with the structure
+the map's own: a weapon's, a vehicle's, a character's or a powerup's (its
+tag's top folder), or scenery named after a vehicle */
+static boolean model_is_remastered_without_structure(
+	char const *model_name)
+{
+	static char const *const folders[] = { "weapons\\", "vehicles\\", "characters\\", "powerups\\" };
+	static char const *const vehicles[] = { "pelican", "banshee", "ghost", "warthog", "scorpion", "wraith",
+		"dropship", "lifepod", "shade", "c_gun_turret", "gun turret" };
+	char lower[256];
+	long index;
+
+	for (index = 0; model_name[index] && index < (long)sizeof(lower) - 1; index++)
+	{
+		char c = model_name[index];
+
+		lower[index] = c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c == '/' ? '\\' : c;
+	}
+	lower[index] = 0;
+	for (index = 0; index < (long)NUMBEROF(folders); index++)
+	{
+		if (!strncmp(lower, folders[index], strlen(folders[index])))
+			return TRUE;
+	}
+	for (index = 0; index < (long)NUMBEROF(vehicles); index++)
+	{
+		if (strstr(lower, vehicles[index]))
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
 /* the package's template of a model of the map, by the model's name: its
 last folder (or, for a first-person model, its folder's, "_fp"), lower
 case with underscores for spaces, as it is or followed by "__h" or another
@@ -4290,7 +5476,7 @@ case with underscores for spaces, as it is or followed by "__h" or another
 The Collection's first-person weapon is the weapon's own template (pistol,
 not pistol_fp). The first that has a mesh, read (*template_name its name);
 FALSE when none has */
-static boolean template_find(
+static boolean template_find_named(
 	struct saber_pak *pak,
 	char const *model_name,
 	char const *map_name,
@@ -4363,6 +5549,18 @@ static boolean template_find(
 		else if (base[index] >= 'A' && base[index] <= 'Z')
 			base[index] = (char)(base[index] - 'A' + 'a');
 	}
+	/* (with no remastered structure, only the weapons', the vehicles', the
+	characters' and the powerups' models are drawn as templates, and scenery of a vehicle (a
+	crashed Pelican or Banshee, a lifepod, a dropship): the rest, scenery and
+	machines, stays the map's, as its structure is) */
+	if (!config_boolean("display.remastered_bsp") && !model_is_remastered_without_structure(model_name))
+		return FALSE;
+	/* (the overshield and the active camouflage stay the map's: their
+	templates' cases and cores are drawn by shaders a model shader does not
+	draw. Of no template here, their shaders are kept as the map's, and no
+	other model borrows them) */
+	if (!strcmp(base, "over_shield") || !strncmp(base, "active_camo", 11))
+		return FALSE;
 
 	/* (as it is; "__h"; with the map's name, "__h"; any other "__" kind,
 	without and with the map's name) */
@@ -4413,15 +5611,20 @@ static boolean template_find(
 
 				if (bytes)
 					free(bytes);
+				if (!read)
+					platform_log("anniversary: %s's template %s cannot be read: %s", model_name, name,
+						bytes ? reason : "its entry cannot be read");
 				if (read)
 				{
 					template_effects_remove(template_);
 					template_strays_remove(template_);
+					template_antenna_remove(template_);
 					if (template_->part_count > 0)
 					{
 						snprintf(template_name, template_name_size, "%s", name);
 						return TRUE;
 					}
+					platform_log("anniversary: %s's template %s has no part left to draw", model_name, name);
 				}
 				saber_template_dispose(template_);
 			}
@@ -4429,6 +5632,43 @@ static boolean template_find(
 	}
 
 	return FALSE;
+}
+
+/* template_find_named by the map's name, else by the level its tag's in
+("levels\\a10\\devices\\h oxy tank\\h oxy tank" a10's: d40 has a10's oxy tank,
+its template h_oxy_tank_a10__h) */
+static boolean template_find(
+	struct saber_pak *pak,
+	char const *model_name,
+	char const *map_name,
+	struct saber_template *template_,
+	char *template_name,
+	size_t template_name_size)
+{
+	char level[64];
+	char const *at = model_name;
+	size_t length = 0;
+
+	if (template_find_named(pak, model_name, map_name, template_, template_name, template_name_size))
+		return TRUE;
+	while (*at && _strnicmp(at, "levels\\", 7))
+	{
+		at = strchr(at, '\\');
+		at = at ? at + 1 : "";
+	}
+	if (!*at)
+		return FALSE;
+	at += 7;
+	while (at[length] && at[length] != '\\' && length < sizeof(level) - 1)
+	{
+		level[length] = at[length] >= 'A' && at[length] <= 'Z' ? (char)(at[length] - 'A' + 'a') : at[length];
+		length++;
+	}
+	level[length] = 0;
+	if (!length || at[length] != '\\' || !_stricmp(level, map_name))
+		return FALSE;
+
+	return template_find_named(pak, model_name, level, template_, template_name, template_name_size);
 }
 
 /* The ranks' meshes of the template's "_special" template (an Elite's spec
@@ -4479,7 +5719,7 @@ static void template_specials_merge(
 	template_effects_remove(&special);
 	/* (by its own skeleton, else the template's scale) */
 	skeleton_scale(&special, model, &scale);
-	template_nodes_map(&special, model, scale, &matched, &posed, &unposed);
+	template_nodes_map(&special, model, NONE, scale, &matched, &posed, &unposed);
 	parts_face_halo(&special);
 	for (index = 0; index < special.part_count; index++)
 	{
@@ -4623,6 +5863,9 @@ static boolean model_play(
 	short material_permutations[MAXIMUM_SABER_MATERIALS];
 	boolean material_cutouts[MAXIMUM_SABER_MATERIALS];
 	boolean material_blends[MAXIMUM_SABER_MATERIALS];
+	/* (a sheet with cards on its clear corner: the corner's rectangle) */
+	boolean material_sheets[MAXIMUM_SABER_MATERIALS];
+	real material_sheet_bounds[MAXIMUM_SABER_MATERIALS][4];
 	struct saber_texture *material_textures[MAXIMUM_SABER_MATERIALS];
 	struct bitmap_data *material_bitmap_data[MAXIMUM_SABER_MATERIALS];
 	long usable_count = 0;
@@ -4631,8 +5874,12 @@ static boolean model_play(
 	/* the eyepiece's shader, which no other material uses, so its scroll
 	does not move the face */
 	long monicle_shader_tag = NONE;
+	/* (the assault rifle's display's one colour, once found, a 565 colour) */
+	long display_color = -1;
 	/* (the plasma rifle's arc's shader, which scrolls, NONE for none) */
 	long lightning_shader_tag = NONE;
+	/* (a model shader of another's, for a model of none: BORROWED_SHADER_INDEX) */
+	long borrowed_shader = NONE;
 	real scale;
 	boolean skinned = FALSE;
 	long matched_bones = 0;
@@ -4664,8 +5911,11 @@ static boolean model_play(
 	{
 		scale = template_scale(&template_, template_name, definition);
 	}
-	template_nodes_map(&template_, definition, scale, &matched_bones, &posed_vertices, &unposed_vertices);
+	template_permutation_variants(&template_, definition);
+	template_nodes_map(&template_, definition, tag_index, scale, &matched_bones, &posed_vertices, &unposed_vertices);
 	parts_face_halo(&template_);
+	if (strstr(template_name, "pelican"))
+		template_covered_floors_shade(&template_);
 	template_specials_merge(pak, &template_, template_name, definition, scale);
 	shader_indices = malloc(sizeof(*shader_indices) * ((size_t)template_.part_count + 1));
 	reason = "out of memory";
@@ -4690,7 +5940,7 @@ static boolean model_play(
 		{
 			for (index = 0; index < definition->shaders.count && usable_count < MAXIMUM_SHADERS_PER_MODEL; index++)
 			{
-				long shader_tag = model_shader_tag(definition, (short)index);
+				long shader_tag = play_shader_tag(definition, borrowed_shader, (short)index);
 				struct shader_model_definition const *shader;
 				boolean decal;
 				boolean lit;
@@ -4711,13 +5961,21 @@ static boolean model_play(
 				if (pass != (decal ? 2 : lit ? 1 : 0))
 					continue;
 				for (other = 0; other < usable_count &&
-					model_shader_tag(definition, usable[other]) != shader_tag; other++)
+					play_shader_tag(definition, borrowed_shader, usable[other]) != shader_tag; other++)
 				{
 				}
 				if (other == usable_count)
 					usable[usable_count++] = (short)index;
 			}
 		}
+	}
+	/* (a model of no model shader, of the structure's (an a10 barricade):
+	another's) */
+	if (!usable_count && (borrowed_shader = borrowed_model_shader()) != NONE)
+	{
+		usable[usable_count++] = BORROWED_SHADER_INDEX;
+		platform_log("anniversary: %s has no model shader: drawn with %s", tag_get_name(tag_index),
+			tag_get_name(borrowed_shader));
 	}
 	reason = "the map's model has no model shader with a base map";
 	if (!usable_count)
@@ -4766,7 +6024,7 @@ static boolean model_play(
 			it: the first-person rifle shares the third-person's shaders) */
 			for (turn = 0; turn < usable_count; turn++)
 			{
-				if (scroll_shader(model_shader_tag(definition, usable[turn])))
+				if (scroll_shader(play_shader_tag(definition, borrowed_shader, usable[turn])))
 				{
 					material_shaders[place] = usable[turn];
 					break;
@@ -4777,7 +6035,7 @@ static boolean model_play(
 			material_shaders[place] = usable[place % (usable_count - 1)];
 		/* (and another material not on one another model's arc scrolls) */
 		if (usable_count > 1 && !material_scrolls(template_.materials[material]) &&
-			scroll_shader(model_shader_tag(definition, material_shaders[place])))
+			scroll_shader(play_shader_tag(definition, borrowed_shader, material_shaders[place])))
 		{
 			long turn;
 
@@ -4785,7 +6043,7 @@ static boolean model_play(
 			{
 				short candidate = usable[(place + turn) % usable_count];
 
-				if (!scroll_shader(model_shader_tag(definition, candidate)) &&
+				if (!scroll_shader(play_shader_tag(definition, borrowed_shader, candidate)) &&
 					(candidate != usable[usable_count - 1] || !template_has_monicle(&template_)))
 				{
 					material_shaders[place] = candidate;
@@ -4798,7 +6056,7 @@ static boolean model_play(
 		are dealt out in turn, and its own may not, which would leave its
 		grey plates white for every rank) */
 		if (!material_scrolls(template_.materials[material]) &&
-			!shader_changes_color(model_shader_tag(definition, material_shaders[place])) &&
+			!shader_changes_color(play_shader_tag(definition, borrowed_shader, material_shaders[place])) &&
 			mask_exists(pak, template_.materials[material], skinned))
 		{
 			long turn;
@@ -4807,7 +6065,7 @@ static boolean model_play(
 			{
 				short candidate = usable[(place + turn) % usable_count];
 
-				if (shader_changes_color(model_shader_tag(definition, candidate)) &&
+				if (shader_changes_color(play_shader_tag(definition, borrowed_shader, candidate)) &&
 					(usable_count <= 1 || candidate != usable[usable_count - 1] || !template_has_monicle(&template_)))
 				{
 					material_shaders[place] = candidate;
@@ -4815,7 +6073,7 @@ static boolean model_play(
 				}
 			}
 		}
-		shader_tag = model_shader_tag(definition, material_shaders[place]);
+		shader_tag = play_shader_tag(definition, borrowed_shader, material_shaders[place]);
 		if (usable_count > 1 && strstr(template_.materials[material], "monicle"))
 			monicle_shader_tag = shader_tag;
 		if (usable_count > 1 && material_lightning(template_.materials[material]))
@@ -4849,7 +6107,8 @@ static boolean model_play(
 		{
 			material_permutations[place] = (short)other;
 			material_cutouts[place] = played->cutouts[other] ||
-				material_card(template_.materials[material]) ? TRUE : FALSE;
+				material_card(template_.materials[material]) ||
+				strstr(template_.materials[material], "decal") != NULL ? TRUE : FALSE;
 			material_blends[place] = played->blends[other] ||
 				material_glass(template_.materials[material]) ||
 				material_lightning(template_.materials[material]) ? TRUE : FALSE;
@@ -4886,6 +6145,27 @@ static boolean model_play(
 		lies over it, and the ring's cyan would show around it) */
 		if (strstr(template_.materials[material], "plasmapistol_02"))
 			saber_texture_blacken(material_textures[place]);
+		/* (the Pelican's cockpit glass, half as solid: from inside, through
+		two panes of it, it was too dark to see through) */
+		if (strstr(template_.materials[material], "pelican") && material_glass(template_.materials[material]))
+			saber_texture_scale_alpha(material_textures[place], 1, 2);
+		/* (the needler's needles: grey in their texture, the remastered
+		game's shader tints them violet) */
+		if (!strcmp(template_.materials[material], "h_needle"))
+		{
+			real const pink[3] = { 1.2f, 0.55f, 1.75f };
+
+			saber_texture_tint(material_textures[place], pink);
+		}
+		/* (the assault rifle's display, its own counter's marks under the
+		classic counter laid on it: all its background's blue. And the
+		third person's display over it, in the same place: the same blue, or
+		the two flicker through each other) */
+		if (!strcmp(template_.materials[material], "wpn_assault_display") ||
+			!strcmp(template_.materials[material], "wpn_assault_display_3p_back_01"))
+		{
+			saber_texture_flatten(material_textures[place], &display_color);
+		}
 		/* (the eyepiece's mask is nearly black. Green, the lens is the
 		display and the marks on it are the brighter part) */
 		if (strstr(template_.materials[material], "monicle"))
@@ -4900,6 +6180,11 @@ static boolean model_play(
 		is solid for the test. Filling that alpha in draws the card's
 		background, the whole quad) */
 		if (!material_cutouts[place] && material_card(template_.materials[material]))
+			material_cutouts[place] = TRUE;
+		/* (and a decal sheet's: a marine's UNSC patch and rank chevron are
+		small marks on a clear card, too little of it solid for the test.
+		Filled in, the patch drew its whole dark card) */
+		if (!material_cutouts[place] && strstr(template_.materials[material], "decal") != NULL)
 			material_cutouts[place] = TRUE;
 		/* (the pelican's seats and bay: the texture is a shade, clear and
 		solid enough to be taken for a cutout, and testing it discards most
@@ -4935,6 +6220,42 @@ static boolean model_play(
 			material_blends[place] = TRUE;
 			saber_texture_punch_black(material_textures[place]);
 		}
+		/* (a cut-out card's smaller levels, which the package may hold with
+little or none of its alpha clear: the tree's root cards drawn whole and
+grey a few steps off, their first level a clean mask. Its levels from the
+first whose clear is under half the first's are left off) */
+		if (material_cutouts[place] && material_textures[place]->mipmap_count > 0)
+		{
+			long levels[16];
+			long count = saber_texture_alpha_levels(material_textures[place], levels, 16);
+			long level;
+			char text[160];
+
+			text[0] = 0;
+			for (level = 0; level < count; level++)
+				snprintf(text + strlen(text), sizeof(text) - strlen(text), "%s%ld%%", level ? " " : "", levels[level]);
+			/* (and a sheet solid but for a few cut holes, a marine's body,
+			ch_marine_01, 1% clear: its smaller levels are none clear, so a
+			few steps off the rolled sleeves were drawn whole over the bare
+			arms under them, two arms) */
+			for (level = 1; level < count && levels[0] >= 1; level++)
+			{
+				if (levels[level] * 2 < levels[0])
+					break;
+			}
+			if (count > 0 && levels[0] >= 1 && level < count)
+			{
+				material_textures[place]->mipmap_count = (short)(level - 1);
+				material_bitmap_data[place]->mipmap_count = (short)(level - 1);
+				material_bitmap_data[place]->pixels_size = bitmap_get_pixel_data_size(material_bitmap_data[place]);
+				platform_log("anniversary: %s is cut out by its first %ld levels (clear by level: %s)",
+					template_.materials[material], level, text);
+			}
+			else
+			{
+				platform_log("anniversary: %s is cut out (clear by level: %s)", template_.materials[material], text);
+			}
+		}
 		/* (a glyph, one colour, its picture its alpha: the plasma grenade's
 		green one, blended on it, not a green square. Its first level alone:
 		its smaller ones' alpha was drawn half solid) */
@@ -4962,10 +6283,153 @@ static boolean model_play(
 			platform_log("anniversary: %s (format %d) drawn solid", template_.materials[material],
 				(int)material_textures[place]->format);
 		}
+		/* (every material's: why a card is drawn solid) */
+		{
+			long clear = 0;
+			long solid = 0;
+			long texels = 0;
+
+			saber_texture_alpha_counts(material_textures[place], material_foliage(template_.materials[material]),
+				&clear, &solid, &texels);
+			platform_log("anniversary: %s of %s: %ld%% clear, %ld%% solid%s", template_.materials[material], template_name,
+				texels ? clear * 100 / texels : 0, texels ? solid * 100 / texels : 0,
+				material_foliage(template_.materials[material]) ? " (foliage)" : "");
+		}
+		platform_log("anniversary: %s (format %d, %dx%d) cut out %d, blended %d, its texture %d", template_.materials[material],
+				(int)material_textures[place]->format, (int)material_textures[place]->width,
+				(int)material_textures[place]->height, (int)material_cutouts[place], (int)material_blends[place],
+				(int)material_permutations[place]);
+		/* (a sheet solid but for a corner of hard-edged holes, whose cards
+		are drawn of it: a marine's armour's eagle and UNSC, ch_marine_01's
+		corner. Its alpha kept and its parts' triangles on the corner split
+		into cards that are cut out, the sheet's other triangles drawn solid:
+		cut whole, its sleeves showed the arms under them through the
+		lettering, and solid, the patches were dark squares) */
+		material_sheets[place] = FALSE;
+		if (!material_cutouts[place] && !material_blends[place])
+		{
+			long clear = 0;
+			long solid = 0;
+			long texels = 0;
+			real bounds[4];
+
+			if (saber_texture_alpha_counts(material_textures[place], FALSE, &clear, &solid, &texels) && texels &&
+				clear * 300 >= texels && clear * 10 < texels && solid * 100 >= texels * 85 &&
+				saber_texture_clear_bounds(material_textures[place], &bounds[0], &bounds[1], &bounds[2], &bounds[3]) &&
+				(bounds[2] - bounds[0]) * (bounds[3] - bounds[1]) < 0.1f)
+			{
+				material_sheets[place] = TRUE;
+				material_cutouts[place] = TRUE;
+				memcpy(material_sheet_bounds[place], bounds, sizeof(bounds));
+				platform_log("anniversary: %s's clear corner %.2f..%.2f, %.2f..%.2f: its cards cut out",
+					template_.materials[material], bounds[0], bounds[2], bounds[1], bounds[3]);
+			}
+		}
 		/* (one that is not cut out drawn whole, though its shader be alpha
 		tested for another's) */
 		if (!material_cutouts[place] && !material_blends[place])
 			saber_texture_make_solid(material_textures[place]);
+	}
+	/* (each sheet's cards split from its parts) */
+	{
+		long count = template_.part_count;
+		long split;
+
+		for (split = 0; split < count; split++)
+		{
+			short material = template_.parts[split].material_index;
+			long place = material >= 0 && material < 256 ? material_places[material] : NONE;
+			real const *bounds;
+			struct saber_mesh_part *sheet;
+			struct saber_mesh_part *grown;
+			short *grown_indices;
+			long inside = 0;
+			long triangle;
+
+			if (place == NONE || !material_sheets[place])
+				continue;
+			bounds = material_sheet_bounds[place];
+			sheet = &template_.parts[split];
+			sheet->card = 2;
+			for (triangle = 0; triangle < sheet->triangle_count; triangle++)
+			{
+				long corner;
+				boolean all = TRUE;
+
+				for (corner = 0; corner < 3 && all; corner++)
+				{
+					struct model_vertex_uncompressed const *vertex = &sheet->vertices[sheet->triangles[3 * triangle + corner]];
+
+					all = vertex->texcoord.x >= bounds[0] - 0.004f && vertex->texcoord.x <= bounds[2] + 0.004f &&
+						vertex->texcoord.y >= bounds[1] - 0.004f && vertex->texcoord.y <= bounds[3] + 0.004f;
+				}
+				inside += all;
+			}
+			if (!inside || inside == sheet->triangle_count)
+			{
+				if (inside)
+					sheet->card = 1;
+				continue;
+			}
+			grown = realloc(template_.parts, sizeof(*grown) * ((size_t)template_.part_count + 1));
+			if (!grown)
+				continue;
+			template_.parts = grown;
+			grown_indices = realloc(shader_indices, sizeof(*shader_indices) * ((size_t)template_.part_count + 2));
+			if (!grown_indices)
+				continue;
+			shader_indices = grown_indices;
+			sheet = &template_.parts[split];
+			{
+				struct saber_mesh_part *card = &template_.parts[template_.part_count];
+				long kept = 0;
+				long taken = 0;
+
+				*card = *sheet;
+				card->card = 1;
+				card->layer_weights = NULL;
+				card->vertex_alpha = NULL;
+				card->vertices = malloc(sizeof(*card->vertices) * (size_t)sheet->vertex_count);
+				card->triangles = malloc(sizeof(*card->triangles) * 3 * (size_t)inside);
+				if (!card->vertices || !card->triangles)
+				{
+					if (card->vertices)
+						free(card->vertices);
+					if (card->triangles)
+						free(card->triangles);
+					continue;
+				}
+				memcpy(card->vertices, sheet->vertices, sizeof(*card->vertices) * (size_t)sheet->vertex_count);
+				for (triangle = 0; triangle < sheet->triangle_count; triangle++)
+				{
+					long corner;
+					boolean all = TRUE;
+
+					for (corner = 0; corner < 3 && all; corner++)
+					{
+						struct model_vertex_uncompressed const *vertex =
+							&sheet->vertices[sheet->triangles[3 * triangle + corner]];
+
+						all = vertex->texcoord.x >= bounds[0] - 0.004f && vertex->texcoord.x <= bounds[2] + 0.004f &&
+							vertex->texcoord.y >= bounds[1] - 0.004f && vertex->texcoord.y <= bounds[3] + 0.004f;
+					}
+					if (all)
+					{
+						memcpy(&card->triangles[3 * taken], &sheet->triangles[3 * triangle], sizeof(*card->triangles) * 3);
+						taken++;
+					}
+					else
+					{
+						memmove(&sheet->triangles[3 * kept], &sheet->triangles[3 * triangle], sizeof(*sheet->triangles) * 3);
+						kept++;
+					}
+				}
+				sheet->triangle_count = kept;
+				card->triangle_count = taken;
+				shader_indices[template_.part_count] = shader_indices[split];
+				template_.part_count++;
+			}
+		}
 	}
 	made = saber_model_new(tag_index, definition, &template_, shader_indices, 1.f, &reason);
 	if (!made)
@@ -4984,7 +6448,18 @@ static boolean model_play(
 		made->shaders[index] = *TAG_BLOCK_GET_ELEMENT(&definition->shaders, index, struct model_shader_reference);
 	for (index = 0; index < material_count; index++)
 	{
-		made->shaders[definition->shaders.count + index] = made->shaders[material_shaders[index]];
+		if (material_shaders[index] == BORROWED_SHADER_INDEX)
+		{
+			struct model_shader_reference *reference = &made->shaders[definition->shaders.count + index];
+
+			csmemset(reference, 0, sizeof(*reference));
+			reference->shader.group_tag = tag_get_group_tag(borrowed_shader);
+			reference->shader.name = (char *)tag_get_name(borrowed_shader);
+			reference->shader.name_length = (long)strlen(tag_get_name(borrowed_shader));
+			reference->shader.index = borrowed_shader;
+		}
+		else
+			made->shaders[definition->shaders.count + index] = made->shaders[material_shaders[index]];
 		made->shaders[definition->shaders.count + index].permutation_index = material_permutations[index];
 	}
 	made->model.shaders.count = definition->shaders.count + material_count;
@@ -5096,12 +6571,12 @@ static boolean model_play(
 		if (!material_cutouts[index])
 			continue;
 		shader = (struct shader_model_definition *)shader_definition_get(
-			model_shader_tag(definition, material_shaders[index]));
+			play_shader_tag(definition, borrowed_shader, material_shaders[index]));
 		for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
 		{
 			struct shader_model_definition *plugged_tag = (struct shader_model_definition *)shader_definition_get(plugged->tag_index);
 
-			if (plugged_tag == shader || plugged->tag_index == model_shader_tag(definition, material_shaders[index]))
+			if (plugged_tag == shader || plugged->tag_index == play_shader_tag(definition, borrowed_shader, material_shaders[index]))
 			{
 				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
 				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
@@ -5128,7 +6603,7 @@ static boolean model_play(
 		}
 		for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
 		{
-			if (plugged->tag_index == model_shader_tag(definition, material_shaders[index]))
+			if (plugged->tag_index == play_shader_tag(definition, borrowed_shader, material_shaders[index]))
 			{
 				SET_FLAG(plugged->played.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
 				break;
@@ -5160,11 +6635,11 @@ static boolean model_play(
 
 			if (skinned)
 				platform_log("anniversary: %s drawn by %s, its texture %d of %s",
-					template_.materials[material], tag_get_name(model_shader_tag(definition, material_shaders[index])),
+					template_.materials[material], tag_get_name(play_shader_tag(definition, borrowed_shader, material_shaders[index])),
 					(int)material_permutations[index], tag_get_name(material_bitmaps[index]));
 			saber_texture_mask_baked(banded);
 			saber_texture_mask_plates(skinned && made->rank_count > 1);
-			material_mask_play(pak, model_shader_tag(definition, material_shaders[index]),
+			material_mask_play(pak, play_shader_tag(definition, borrowed_shader, material_shaders[index]),
 				template_.materials[material], material_permutations[index], skinned, base);
 			saber_texture_mask_baked(FALSE);
 			saber_texture_mask_plates(FALSE);
@@ -5180,6 +6655,34 @@ static boolean model_play(
 				made->band_weight = weight;
 				platform_log("anniversary: %s's plates drawn %.2f %.2f %.2f for its least rank, as %s's armour",
 					tag_get_name(tag_index), band[0], band[1], band[2], template_.materials[material]);
+			}
+		}
+	}
+	/* (the cyborg's armour takes the game's colour change whole, as the
+	classic armour's does: each player's colour over it (the campaign's
+	green), no mask. Its _br marks none of it, so masked it took none) */
+	if (!_stricmp(template_name, "cyborg_mp") || !_stricmp(template_name, "cyborg"))
+	{
+		for (index = 0; index < shader_count; index++)
+		{
+			struct shader_model_definition *shader =
+				(struct shader_model_definition *)shader_definition_get(shader_tags[index]);
+			struct saber_shader *plugged;
+
+			for (plugged = saber_models_globals.shaders; plugged; plugged = plugged->next)
+			{
+				if (plugged->tag_index != shader_tags[index] ||
+					plugged->map_shader.model.change_color_source <= 0)
+				{
+					continue;
+				}
+				shader->model.change_color_source = plugged->map_shader.model.change_color_source;
+				shader->model.multipurpose_map.index = NONE;
+				plugged->played.model.change_color_source = plugged->map_shader.model.change_color_source;
+				plugged->played.model.multipurpose_map.index = NONE;
+				platform_log("anniversary: %s takes the game's colour change over the whole armour",
+					tag_get_name(shader_tags[index]));
+				break;
 			}
 		}
 	}
@@ -5263,6 +6766,19 @@ struct saber_level_part
 {
 	struct vertex_buffer vertex_buffer;
 	struct triangle_buffer triangle_buffer;
+	/* the shader it is drawn with, kept here: the renderer keeps a pointer
+	to it past the draw (rasterizer_environment_fog_screen_model_submit, a
+	model drawn in fog). On the stack, crouched in b30's water the fog
+	screen read whatever the stack held there as a shader, and as a
+	transparent chicago one's map, a tag index that is none ("i don't
+	think 01d9005a is a tag index") */
+	struct shader_model_definition shader;
+	/* its compressed vertices and strips while its buffers are made, which
+	copy them: a block of its own, ordinary memory, freed once they are
+	made (b40's 2.4 million vertices, kept in the contiguous memory beside
+	the buffers' own copies, ran Direct3D out of it) */
+	void *memory;
+	boolean memory_contiguous;
 	short texture;
 	boolean cutout;
 	/* a sky mesh (clouds, the sky, stars, a planet): drawn by
@@ -5279,6 +6795,12 @@ struct saber_level_part
 	boolean blend;
 	/* the skydome: the sky is centred on it */
 	boolean dome;
+	/* the daytime sky's colour behind the dome's stars (a copy of the dome,
+	its texture a gradient from the zenith to the horizon): drawn first */
+	boolean gradient;
+	/* its sorting_transparent_group: the sky is drawn in its order, lowest
+	first (NONE with none) */
+	short sort_group;
 	/* the texture's repeat (1 until a mesh says otherwise). Applied as the
 	shader's map scale, so a coordinate kept in -1..1 still tiles */
 	real uv_scale[2];
@@ -5286,6 +6808,16 @@ struct saber_level_part
 	real_point3d centroid;
 	real radius;
 	short lit_bsp;
+	/* ground, a terrain's: lit as the ground is (saber_level_ground_light) */
+	boolean terrain;
+	/* a sky card's fade, its vertices' alpha (a mountain's and a cloud's
+	ends clear): drawn of these, each vertex's alpha times the texture's,
+	in place of its buffers. NULL, none */
+	real (*fade_positions)[3];
+	real (*fade_texcoords)[2];
+	unsigned char *fade_alpha;
+	unsigned short *fade_triangles;
+	long fade_triangle_count;
 	struct render_lighting lighting;
 	/* a terrain's layers over its base (sand, grass, dust over a cliff),
 	drawn blended over it by the weights of its vertices
@@ -5297,9 +6829,17 @@ struct saber_level_part
 	long layer_count;
 	long layer_vertex_count;
 	real (*layer_positions)[3];
-	real (*layer_texcoords)[2];
+	/* (each drawn layer's own: a layer's texture is laid by its own set of
+	the vertex's coordinates) */
+	real (*layer_texcoords[SABER_MAXIMUM_LAYERS])[2];
 	real (*layer_normals)[3];
 	unsigned char (*layer_lit)[3];
+	/* (the light Saber's exporter baked into its vertices, as they are
+	lit: NULL with none, when they are lit by `lighting`) */
+	unsigned char (*layer_baked)[3];
+	/* (the drawn layer that is its base laid whole over it, which covers it,
+	and its fog with it: NONE, none) */
+	long layer_cover;
 	short layer_lit_bsp;
 	short layer_textures[SABER_MAXIMUM_LAYERS];
 	boolean layer_multiply[SABER_MAXIMUM_LAYERS];
@@ -5327,6 +6867,13 @@ static struct
 	struct saber_tag_instance *instances;
 	struct saber_tag_instance *map_instances;
 	long map_instance_count;
+	/* where the sky is seen from: the dome's middle, at the horizon */
+	boolean has_sky_anchor;
+	real_point3d sky_anchor;
+	/* the ground's light, in the structure ground_lit_bsp */
+	boolean ground_lit;
+	short ground_lit_bsp;
+	struct render_lighting ground_lighting;
 } saber_level;
 
 static void saber_level_layers_free(
@@ -5336,10 +6883,10 @@ static void saber_level_layers_free(
 
 	if (part->layer_positions)
 		free(part->layer_positions);
-	if (part->layer_texcoords)
-		free(part->layer_texcoords);
 	if (part->layer_normals)
 		free(part->layer_normals);
+	if (part->layer_baked)
+		free(part->layer_baked);
 	if (part->layer_lit)
 		free(part->layer_lit);
 	for (layer = 0; layer < SABER_MAXIMUM_LAYERS; layer++)
@@ -5348,14 +6895,109 @@ static void saber_level_layers_free(
 			free(part->layer_weights[layer]);
 		if (part->layer_triangles[layer])
 			free(part->layer_triangles[layer]);
+		if (part->layer_texcoords[layer])
+			free(part->layer_texcoords[layer]);
 	}
+	if (part->fade_positions)
+		free(part->fade_positions);
+	if (part->fade_texcoords)
+		free(part->fade_texcoords);
+	if (part->fade_alpha)
+		free(part->fade_alpha);
+	if (part->fade_triangles)
+		free(part->fade_triangles);
+	part->fade_positions = NULL;
+	part->fade_texcoords = NULL;
+	part->fade_alpha = NULL;
+	part->fade_triangles = NULL;
+	part->fade_triangle_count = 0;
 	part->layer_positions = NULL;
-	part->layer_texcoords = NULL;
+	csmemset(part->layer_texcoords, 0, sizeof(part->layer_texcoords));
 	part->layer_normals = NULL;
 	part->layer_lit = NULL;
+	part->layer_baked = NULL;
 	csmemset(part->layer_weights, 0, sizeof(part->layer_weights));
 	csmemset(part->layer_triangles, 0, sizeof(part->layer_triangles));
 	part->layer_count = 0;
+}
+
+/* the largest a level's texture is drawn, its larger levels left out:
+b30's 185 textures, whole, were 160 MB of the texture cache's 256, held
+for the level, and the rest of the map's drawn, an elite's, a covenant
+crate's, had no room and were drawn of the default texture, grey in the
+distance ("YOU GOT STABBED"); and a ground's base, drawn under its own
+layer of the same material and never seen, its least */
+#define SABER_LEVEL_TEXTURE_LARGEST 1024
+#define SABER_LEVEL_GROUND_BASE_LARGEST 64
+
+/* the most of the texture cache a level's textures are held in: all of
+them are drawn each frame, so held there each frame. At 1024 texels b30's
+were 100 MB of its 256, and with the rest of a frame's, its pages taken
+in pieces, an elite's or a grunt's or a tree's texture found no room and
+was drawn white. The largest are halved until they fit */
+#define SABER_LEVEL_TEXTURE_BUDGET (40L * 1024L * 1024L)
+
+/* (its pages in the texture cache, of 16 KB) */
+static long saber_level_texture_pages(
+	struct saber_texture const *texture)
+{
+	return (texture->pixels_size + 16383L) / 16384L;
+}
+
+static void saber_level_textures_fit(
+	void)
+{
+	long total = 0;
+	long halved = 0;
+	long before;
+	long index;
+
+	for (index = 0; index < saber_level.texture_count; index++)
+		total += saber_level_texture_pages(&saber_level.textures[index]);
+	before = total;
+	while (total * 16384L > SABER_LEVEL_TEXTURE_BUDGET)
+	{
+		long largest = NONE;
+		long largest_pages = 0;
+
+		for (index = 0; index < saber_level.texture_count; index++)
+		{
+			struct saber_texture const *texture = &saber_level.textures[index];
+			long pages = saber_level_texture_pages(texture);
+
+			if (texture->pixels && texture->mipmap_count >= 1 && texture->width >= 128 && texture->height >= 128 &&
+				pages > largest_pages)
+			{
+				largest = index;
+				largest_pages = pages;
+			}
+		}
+		if (largest == NONE || !saber_texture_halve(&saber_level.textures[largest]))
+			break;
+		bitmap_describe(&saber_level.textures[largest], saber_level.bitmap_tag, &saber_level.bitmaps[largest]);
+		total += saber_level_texture_pages(&saber_level.textures[largest]) - largest_pages;
+		halved++;
+	}
+	platform_log("anniversary: the structure's textures: %ld MB, %ld halved to %ld MB of the texture cache",
+		before * 16L / 1024L, halved, total * 16L / 1024L);
+}
+
+/* texture_find, its levels larger than `largest` left out */
+static boolean level_texture_find(
+	struct saber_pak *pak,
+	char const *texture_name,
+	struct saber_texture *texture,
+	char const **source,
+	char const **reason,
+	long largest)
+{
+	if (!texture_find(pak, texture_name, texture, source, reason))
+		return FALSE;
+	while ((texture->width > largest || texture->height > largest) && saber_texture_halve(texture))
+	{
+	}
+
+	return TRUE;
 }
 
 /* The layers of a level terrain's part over its base, of the package's
@@ -5373,7 +7015,10 @@ static void saber_level_layers_make(
 	short *layer_slots = slots + level->material_count;
 	long layer;
 	long vertex;
+	/* (each drawn layer's of the part's) */
+	long sources[SABER_MAXIMUM_LAYERS];
 
+	made->layer_cover = NONE;
 	made->layer_count = 0;
 	made->layer_lit_bsp = NONE;
 	if (!part->layer_weights || part->layer_count <= 0)
@@ -5391,10 +7036,15 @@ static void saber_level_layers_make(
 		structures' dirt, dirt_multi_04, darkens them near black. Which
 		weights a multiplying layer has is not known yet) */
 		if (part->layer_multiply[layer] || material < 0 || material >= level->material_count ||
-			channel < 0 || channel > 3)
+			channel < 0 || channel > _saber_layer_channel_whole)
 		{
 			continue;
 		}
+		/* (nor a card's own material laid over it, out of the terrain: an ivy
+		wall's plants_01 over itself, its texture's alpha made its height,
+		drew the leaves' card whole, a dark green plate behind them) */
+		if (part->terrain == 2 && material == part->material_index && !strstr(part->region, "(terrain)"))
+			continue;
 		if (layer_slots[material] == NONE)
 		{
 			struct saber_texture *texture = &saber_level.textures[saber_level.texture_count];
@@ -5402,14 +7052,22 @@ static void saber_level_layers_make(
 			char const *texture_reason = NULL;
 
 			if (saber_level.texture_count >= MAXIMUM_SABER_LEVEL_TEXTURES ||
-				!texture_find(pak, level->materials[material], texture, &source, &texture_reason))
+				!level_texture_find(pak, level->materials[material], texture, &source, &texture_reason,
+					SABER_LEVEL_TEXTURE_LARGEST))
 			{
 				layer_slots[material] = -2;
+				/* (logged: a layer not drawn leaves its base bare where it lies,
+				a plain patch edged as the triangles are) */
+				platform_log("anniversary: the structure's layer %s is not drawn: %s", level->materials[material],
+					saber_level.texture_count >= MAXIMUM_SABER_LEVEL_TEXTURES ? "too many textures" :
+					texture_reason ? texture_reason : "no texture");
 			}
 			else if (!bitmap_describe(texture, saber_level.bitmap_tag, &saber_level.bitmaps[saber_level.texture_count]))
 			{
 				saber_texture_dispose(texture);
 				layer_slots[material] = -2;
+				platform_log("anniversary: the structure's layer %s is not drawn: its texture's format is not described",
+					level->materials[material]);
 			}
 			else
 			{
@@ -5435,7 +7093,7 @@ static void saber_level_layers_make(
 			continue;
 		}
 		for (vertex = 0; vertex < part->vertex_count; vertex++)
-			weights[vertex] = part->layer_weights[vertex][channel];
+			weights[vertex] = channel == _saber_layer_channel_whole ? 255 : part->layer_weights[vertex][channel];
 		made->layer_triangle_counts[drawn] = 0;
 		for (triangle = 0; triangle < part->triangle_count; triangle++)
 		{
@@ -5457,19 +7115,65 @@ static void saber_level_layers_make(
 		made->layer_multiply[drawn] = part->layer_multiply[layer] ? TRUE : FALSE;
 		made->layer_weights[drawn] = weights;
 		made->layer_triangles[drawn] = triangles;
+		sources[drawn] = layer;
+		if (channel == _saber_layer_channel_whole && made->layer_cover == NONE)
+			made->layer_cover = drawn;
 		made->layer_count++;
 	}
 	if (!made->layer_count)
 		return;
 	made->layer_vertex_count = part->vertex_count;
 	made->layer_positions = malloc(sizeof(*made->layer_positions) * (size_t)part->vertex_count);
-	made->layer_texcoords = malloc(sizeof(*made->layer_texcoords) * (size_t)part->vertex_count);
 	made->layer_normals = malloc(sizeof(*made->layer_normals) * (size_t)part->vertex_count);
 	made->layer_lit = malloc(sizeof(*made->layer_lit) * (size_t)part->vertex_count);
-	if (!made->layer_positions || !made->layer_texcoords || !made->layer_normals || !made->layer_lit)
+	if (!made->layer_positions || !made->layer_normals || !made->layer_lit)
 	{
 		saber_level_layers_free(made);
 		return;
+	}
+	/* (the baked light, linear, shown as Saber's tone map shows it: its
+	brightness's 1/2.2 power, the sunlit sand's, about 200, whole. Read
+	as it is, the cliffs in the shade, about 40, were near black) */
+	if (part->vertex_light)
+	{
+		made->layer_baked = malloc(sizeof(*made->layer_baked) * (size_t)part->vertex_count);
+		if (made->layer_baked)
+		{
+			for (vertex = 0; vertex < part->vertex_count; vertex++)
+			{
+				long channel;
+
+				for (channel = 0; channel < 3; channel++)
+				{
+					real value = 255.f * (real)pow((double)part->vertex_light[vertex][channel] / 200.0, 1.0 / 2.2);
+
+					made->layer_baked[vertex][channel] = (unsigned char)(value >= 255.f ? 255.f : value);
+				}
+			}
+		}
+	}
+	for (layer = 0; layer < made->layer_count; layer++)
+	{
+		made->layer_texcoords[layer] = malloc(sizeof(*made->layer_texcoords[layer]) * (size_t)part->vertex_count);
+		if (!made->layer_texcoords[layer])
+		{
+			saber_level_layers_free(made);
+			return;
+		}
+		for (vertex = 0; vertex < part->vertex_count; vertex++)
+		{
+			struct model_vertex_uncompressed const *point = &part->vertices[vertex];
+			real u = point->texcoord.x;
+			real v = point->texcoord.y;
+
+			if (part->layer_texcoords)
+			{
+				u = part->layer_texcoords[vertex][sources[layer]][0];
+				v = part->layer_texcoords[vertex][sources[layer]][1];
+			}
+			made->layer_texcoords[layer][vertex][0] = u * made->uv_scale[0];
+			made->layer_texcoords[layer][vertex][1] = v * made->uv_scale[1];
+		}
 	}
 	for (vertex = 0; vertex < part->vertex_count; vertex++)
 	{
@@ -5478,8 +7182,6 @@ static void saber_level_layers_make(
 		made->layer_positions[vertex][0] = point->position.x;
 		made->layer_positions[vertex][1] = point->position.y;
 		made->layer_positions[vertex][2] = point->position.z;
-		made->layer_texcoords[vertex][0] = point->texcoord.x * made->uv_scale[0];
-		made->layer_texcoords[vertex][1] = point->texcoord.y * made->uv_scale[1];
 		made->layer_normals[vertex][0] = point->normal.i;
 		made->layer_normals[vertex][1] = point->normal.j;
 		made->layer_normals[vertex][2] = point->normal.k;
@@ -5496,6 +7198,13 @@ static void saber_level_free(
 		rasterizer_triangle_buffer_delete(&saber_level.parts[index].triangle_buffer);
 		rasterizer_vertex_buffer_delete(&saber_level.parts[index].vertex_buffer);
 		saber_level_layers_free(&saber_level.parts[index]);
+		if (saber_level.parts[index].memory)
+		{
+			if (saber_level.parts[index].memory_contiguous)
+				XPhysicalFree(saber_level.parts[index].memory);
+			else
+				free(saber_level.parts[index].memory);
+		}
 	}
 	if (saber_level.parts)
 		free(saber_level.parts);
@@ -5567,6 +7276,17 @@ static long saber_level_bitmap_tag_add(
 	return grown[count].tag_index;
 }
 
+/* a level's hard surface, never cut out by its alpha (its shine, or its
+height): a Forerunner's (fr_, forerunner_), the ground's (t_, ter_), a flat
+colour's (sc_), a lifepod's, a light's (lig_), metal, a panel */
+static boolean level_material_hard(
+	char const *material)
+{
+	return !strncmp(material, "fr_", 3) || !strncmp(material, "forerunner", 10) || !strncmp(material, "t_", 2) ||
+		!strncmp(material, "ter_", 4) || !strncmp(material, "sc_", 3) || !strncmp(material, "lig_", 4) ||
+		strstr(material, "lifepod") != NULL || strstr(material, "metal") != NULL || strstr(material, "panel") != NULL;
+}
+
 /* whether a level's material is its sky: the clouds, the sky dome, the
 stars, the planets and the halo ring. Drawn in place of the map's sky,
 not as structure (the ring stands past where structure is drawn) */
@@ -5585,6 +7305,165 @@ static boolean saber_level_material_drawn(
 {
 	return !material_effect(material) && !strstr(material, "farplane") && !strstr(material, "_lm") &&
 		!strstr(material, "water") && !saber_level_material_sky(material);
+}
+
+/* the daytime sky's colour `along` from the zenith (0) to the horizon (1):
+Anniversary's b30, a hazy blue lightening to a pale haze at the horizon */
+static void saber_level_sky_color(
+	real along,
+	long color[3])
+{
+	static real const stops[][4] = {
+		{ 0.f, 72.f, 116.f, 168.f },
+		{ 0.35f, 78.f, 122.f, 172.f },
+		{ 0.6f, 88.f, 130.f, 175.f },
+		{ 0.8f, 112.f, 150.f, 190.f },
+		{ 0.92f, 138.f, 175.f, 212.f },
+		{ 1.f, 150.f, 186.f, 222.f } };
+	long stop;
+
+	if (along <= 0.f)
+		along = 0.f;
+	if (along >= 1.f)
+		along = 1.f;
+	for (stop = 1; stop < (long)NUMBEROF(stops) - 1 && along > stops[stop][0]; stop++)
+		;
+	{
+		real low = stops[stop - 1][0];
+		real span = stops[stop][0] - low;
+		real mix = span > 0.f ? (along - low) / span : 0.f;
+		long channel;
+
+		if (mix < 0.f)
+			mix = 0.f;
+		if (mix > 1.f)
+			mix = 1.f;
+		for (channel = 0; channel < 3; channel++)
+		{
+			color[channel] = (long)(stops[stop - 1][channel + 1] +
+				(stops[stop][channel + 1] - stops[stop - 1][channel + 1]) * mix + 0.5f);
+		}
+	}
+}
+
+/* a 4 by 256 DXT1 texture of the daytime sky's colour, the zenith at its
+top row and the horizon at its bottom: each block shades from its top
+row's colour to its bottom row's */
+static boolean saber_level_sky_gradient(
+	struct saber_texture *texture)
+{
+	long const height = 256;
+	long block;
+
+	csmemset(texture, 0, sizeof(*texture));
+	texture->width = 4;
+	texture->height = (short)height;
+	texture->mipmap_count = 0;
+	texture->format = 14; /* (_bitmap_format_dxt1, bitmap_group.c's) */
+	texture->pixels_size = (height / 4) * 8;
+	texture->pixels = malloc((size_t)texture->pixels_size);
+	if (!texture->pixels)
+		return FALSE;
+	for (block = 0; block < height / 4; block++)
+	{
+		unsigned char *bytes = texture->pixels + block * 8;
+		long top[3];
+		long bottom[3];
+		unsigned long packed0;
+		unsigned long packed1;
+		/* (rows 0..3: c0, 2/3 c0, 1/3 c0, c1) */
+		static unsigned char const forward[4] = { 0, 2, 3, 1 };
+		static unsigned char const backward[4] = { 1, 3, 2, 0 };
+		unsigned char const *rows;
+		unsigned long indices = 0;
+		long row;
+
+		saber_level_sky_color((real)(block * 4) / (real)(height - 1), top);
+		saber_level_sky_color((real)(block * 4 + 3) / (real)(height - 1), bottom);
+		packed0 = ((unsigned long)(top[0] >> 3) << 11) | ((unsigned long)(top[1] >> 2) << 5) | (unsigned long)(top[2] >> 3);
+		packed1 = ((unsigned long)(bottom[0] >> 3) << 11) | ((unsigned long)(bottom[1] >> 2) << 5) |
+			(unsigned long)(bottom[2] >> 3);
+		if (packed0 == packed1)
+		{
+			rows = NULL;
+		}
+		else if (packed0 > packed1)
+		{
+			rows = forward;
+		}
+		else
+		{
+			unsigned long swap = packed0;
+
+			packed0 = packed1;
+			packed1 = swap;
+			rows = backward;
+		}
+		for (row = 0; row < 4; row++)
+		{
+			unsigned long index = rows ? rows[row] : 0;
+
+			indices |= (index | (index << 2) | (index << 4) | (index << 6)) << (8 * row);
+		}
+		bytes[0] = (unsigned char)packed0;
+		bytes[1] = (unsigned char)(packed0 >> 8);
+		bytes[2] = (unsigned char)packed1;
+		bytes[3] = (unsigned char)(packed1 >> 8);
+		bytes[4] = (unsigned char)indices;
+		bytes[5] = (unsigned char)(indices >> 8);
+		bytes[6] = (unsigned char)(indices >> 16);
+		bytes[7] = (unsigned char)(indices >> 24);
+	}
+
+	return TRUE;
+}
+
+/* whether display.remastered_bsp_hide names a level part's node, or its
+material ("t_cliff_04_a"): a list of
+its names' pieces, comma separated ("terrain>1,_terrain_$"), any of which
+in the node's name leaves the part out ("$" its name's end). b30's ground
+is three meshes over one another (".(terrain)_terrain", "_terrain>0",
+"_terrain>1"), within a fraction of a unit; which Anniversary draws is not
+known yet */
+static boolean level_part_hidden(
+	char const *name)
+{
+	char const *list = config_string("display.remastered_bsp_hide");
+	char piece[64];
+
+	while (list && *list && name && *name)
+	{
+		size_t length = 0;
+		boolean at_end = FALSE;
+
+		while (*list == ',' || *list == ' ')
+			list++;
+		while (list[length] && list[length] != ',' && length < sizeof(piece) - 1)
+		{
+			piece[length] = list[length];
+			length++;
+		}
+		list += length;
+		if (length && piece[length - 1] == '$')
+		{
+			at_end = TRUE;
+			length--;
+		}
+		piece[length] = 0;
+		if (!length)
+			continue;
+		if (!at_end && strstr(name, piece))
+			return TRUE;
+		if (at_end)
+		{
+			char const *found = strstr(name, piece);
+
+			if (found && (found[length] == 0 || found[length] == '_' || found[length] == '.'))
+				return TRUE;
+		}
+	}
+
+	return FALSE;
 }
 
 /* Draws the level's structure as the package's level geometry (its
@@ -5611,6 +7490,9 @@ static boolean saber_level_play(
 	long sky_parts = 0;
 	long layered_parts = 0;
 	real_rectangle3d bounds;
+	/* the daytime sky's copy of the dome, and its texture: NONE without */
+	long gradient_part = NONE;
+	short gradient_slot = NONE;
 
 	csmemset(&level, 0, sizeof(level));
 	for (index = 0; index < saber_pak_entry_count(pak); index++)
@@ -5637,21 +7519,141 @@ static boolean saber_level_play(
 	}
 	free(bytes);
 
+	/* (the daytime sky behind the stars: a copy of the skydome, its texture
+	coordinates its height over the horizon, seen from the dome's middle.
+	The package's sky is lit by an atmosphere the dome is drawn over, which
+	Halo has not: its stars' black is clear, and the gradient shows there) */
+	saber_level.has_sky_anchor = FALSE;
+	{
+		long dome = NONE;
+
+		for (index = 0; index < level.part_count; index++)
+		{
+			struct saber_mesh_part const *part = &level.parts[index];
+
+			if (part->sky && part->vertex_count > 0 && part->triangle_count > 0 &&
+				part->material_index >= 0 && part->material_index < level.material_count &&
+				strncmp(level.materials[part->material_index], "stars", 5) == 0)
+			{
+				dome = index;
+				break;
+			}
+		}
+		if (dome != NONE)
+		{
+			struct saber_mesh_part *parts = realloc(level.parts, sizeof(*level.parts) * ((size_t)level.part_count + 1));
+
+			if (parts)
+			{
+				struct saber_mesh_part *copy = &parts[level.part_count];
+				struct saber_mesh_part const *source;
+				real_rectangle3d box;
+				long vertex;
+
+				level.parts = parts;
+				source = &level.parts[dome];
+				box.x0 = box.y0 = box.z0 = REAL_MAX;
+				box.x1 = box.y1 = box.z1 = -REAL_MAX;
+				for (vertex = 0; vertex < source->vertex_count; vertex++)
+				{
+					real_point3d const *at = &source->vertices[vertex].position;
+
+					box.x0 = MIN(box.x0, at->x);
+					box.x1 = MAX(box.x1, at->x);
+					box.y0 = MIN(box.y0, at->y);
+					box.y1 = MAX(box.y1, at->y);
+					box.z0 = MIN(box.z0, at->z);
+					box.z1 = MAX(box.z1, at->z);
+				}
+				/* (the horizon is the level's ground, z 0, where the dome
+				reaches below it; its bottom where it does not) */
+				saber_level.sky_anchor.x = (box.x0 + box.x1) / 2.f;
+				saber_level.sky_anchor.y = (box.y0 + box.y1) / 2.f;
+				saber_level.sky_anchor.z = box.z0 < 0.f && box.z1 > 0.f ? 0.f : box.z0;
+				saber_level.sky_anchor.x *= SABER_LEVEL_UNITS;
+				saber_level.sky_anchor.y *= SABER_LEVEL_UNITS;
+				saber_level.sky_anchor.z *= SABER_LEVEL_UNITS;
+				saber_level.has_sky_anchor = TRUE;
+				*copy = *source;
+				copy->vertices = malloc(sizeof(*copy->vertices) * (size_t)source->vertex_count);
+				copy->triangles = malloc(sizeof(*copy->triangles) * 3 * (size_t)source->triangle_count);
+				copy->layer_count = 0;
+				copy->layer_weights = NULL;
+				if (copy->vertices && copy->triangles)
+				{
+					memcpy(copy->vertices, source->vertices, sizeof(*copy->vertices) * (size_t)source->vertex_count);
+					memcpy(copy->triangles, source->triangles, sizeof(*copy->triangles) * 3 * (size_t)source->triangle_count);
+					for (vertex = 0; vertex < copy->vertex_count; vertex++)
+					{
+						struct model_vertex_uncompressed *point = &copy->vertices[vertex];
+						real across_x = point->position.x - saber_level.sky_anchor.x / SABER_LEVEL_UNITS;
+						real across_y = point->position.y - saber_level.sky_anchor.y / SABER_LEVEL_UNITS;
+						real up = point->position.z - saber_level.sky_anchor.z / SABER_LEVEL_UNITS;
+						real elevation = (real)atan2((double)up, sqrt((double)(across_x * across_x + across_y * across_y)));
+						real along = 1.f - elevation / 1.5707963f;
+
+						if (along > 1.f)
+							along = 1.f;
+						if (along < 0.f)
+							along = 0.f;
+						/* (kept off the texture's edge rows, which wrap) */
+						point->texcoord.x = 0.5f;
+						point->texcoord.y = 0.004f + along * 0.992f;
+					}
+					copy->uv_repeat = 0;
+					copy->uv_scale[0] = 1.f;
+					copy->uv_scale[1] = 1.f;
+					copy->sort_group = NONE;
+					gradient_part = level.part_count;
+					level.part_count++;
+				}
+				else
+				{
+					if (copy->vertices)
+						free(copy->vertices);
+					if (copy->triangles)
+						free(copy->triangles);
+				}
+			}
+		}
+	}
+
 	/* its parts drawn: of a material drawn, not far off (the sky however far
 	it stands); in world units */
 	saber_level.texture_count = 0;
+	saber_level.ground_lit = FALSE;
+	saber_level.ground_lit_bsp = NONE;
 	/* (each material's texture as a base, and after them as a layer: a
 	layer's alpha is its height, saber_texture_height_alpha) */
-	slots = malloc(sizeof(*slots) * (2 * (size_t)level.material_count + 1));
+	slots = malloc(sizeof(*slots) * (4 * (size_t)level.material_count + 1));
 	saber_level.textures = malloc(sizeof(*saber_level.textures) * MAXIMUM_SABER_LEVEL_TEXTURES);
 	saber_level.bitmaps = malloc(sizeof(*saber_level.bitmaps) * MAXIMUM_SABER_LEVEL_TEXTURES);
 	saber_level.parts = malloc(sizeof(*saber_level.parts) * ((size_t)level.part_count + 1));
 	if (!slots || !saber_level.textures || !saber_level.bitmaps || !saber_level.parts)
 		goto refused;
+	csmemset(saber_level.parts, 0, sizeof(*saber_level.parts) * ((size_t)level.part_count + 1));
 	csmemset(saber_level.textures, 0, sizeof(*saber_level.textures) * MAXIMUM_SABER_LEVEL_TEXTURES);
 	csmemset(saber_level.parts, 0, sizeof(*saber_level.parts) * ((size_t)level.part_count + 1));
 	for (index = 0; index < 2 * level.material_count; index++)
 		slots[index] = NONE;
+	/* (and after them whether a material's cut out is logged) */
+	for (index = 2 * level.material_count; index < 4 * level.material_count; index++)
+		slots[index] = FALSE;
+	/* (and after them whether a material is laid over the ground or a cliff
+	as a layer: its alpha its height, never a cutout's. moss_02, cut, holed
+	b30's cliffs wherever it covered them whole) */
+	for (index = 0; index < level.part_count; index++)
+	{
+		long layer;
+
+		for (layer = 0; layer < level.parts[index].layer_count; layer++)
+		{
+			short layered = level.parts[index].layer_materials[layer];
+
+			if (layered >= 0 && layered < level.material_count)
+				slots[3 * level.material_count + layered] = TRUE;
+		}
+	}
 	saber_level.bitmap_tag = saber_level_bitmap_tag_add();
 	reason = "a bitmap of its own cannot be added to the map's tags";
 	if (saber_level.bitmap_tag == NONE)
@@ -5666,20 +7668,26 @@ static boolean saber_level_play(
 		long vertex;
 		boolean sky;
 
-		if (material < 0 || material >= level.material_count || part->vertex_count <= 0 || part->triangle_count <= 0)
+		if (material < 0 || material >= level.material_count || part->vertex_count <= 0 || part->triangle_count <= 0 ||
+			level_part_hidden(part->region) || level_part_hidden(level.materials[material]))
 		{
 			part->vertex_count = 0;
 			continue;
 		}
-		sky = part->sky || saber_level_material_sky(level.materials[material]);
-		made->back = sky && strncmp(level.materials[material], "basis_sky", 9) == 0;
+		sky = part->sky || saber_level_material_sky(level.materials[material]) || index == gradient_part;
+		/* (the package's "basis_sky" is a moon's card, not the daytime sky:
+		the sky is drawn in its objects' sorting_transparent_group order) */
+		made->back = FALSE;
 		made->in_front = sky && strstr(level.materials[material], "planet") != NULL;
 		made->over = sky && strstr(level.materials[material], "ring") != NULL;
-		made->dome = sky && strncmp(level.materials[material], "stars", 5) == 0;
-		/* (a planet is blended: its card is clear and the limb fades. A test
-		would cut the disc off. The ring's card is clear around the band) */
-		made->blend = sky && (strstr(level.materials[material], "planet") != NULL ||
-			strstr(level.materials[material], "ring") != NULL);
+		made->gradient = index == gradient_part;
+		made->dome = sky && !made->gradient && strncmp(level.materials[material], "stars", 5) == 0;
+		made->sort_group = part->sort_group;
+		/* (everything of the sky but the dome and the gradient is blended on
+		its texture's alpha: a planet's card is clear and its limb fades, a
+		cloud's edge is soft, the ring's card is clear around the band. A
+		test would cut them) */
+		made->blend = sky && !made->gradient;
 		if (!sky && !saber_level_material_drawn(level.materials[material]))
 		{
 			part->vertex_count = 0;
@@ -5722,15 +7730,40 @@ static boolean saber_level_play(
 			part->vertex_count = 0;
 			continue;
 		}
+		/* (the daytime sky's texture: made, not read) */
+		if (made->gradient)
+		{
+			if (gradient_slot == NONE && saber_level.texture_count < MAXIMUM_SABER_LEVEL_TEXTURES)
+			{
+				struct saber_texture *texture = &saber_level.textures[saber_level.texture_count];
+
+				if (saber_level_sky_gradient(texture) &&
+					bitmap_describe(texture, saber_level.bitmap_tag, &saber_level.bitmaps[saber_level.texture_count]))
+				{
+					gradient_slot = (short)saber_level.texture_count++;
+				}
+				else
+				{
+					saber_texture_dispose(texture);
+				}
+			}
+			if (gradient_slot == NONE)
+			{
+				part->vertex_count = 0;
+				continue;
+			}
+		}
 		/* (its texture: read as its material is first drawn) */
-		if (slots[material] == NONE)
+		else if (slots[material] == NONE)
 		{
 			struct saber_texture *texture = &saber_level.textures[saber_level.texture_count];
 			char const *source = NULL;
 			char const *texture_reason = NULL;
 
 			if (saber_level.texture_count >= MAXIMUM_SABER_LEVEL_TEXTURES ||
-				!texture_find(pak, level.materials[material], texture, &source, &texture_reason))
+				!level_texture_find(pak, level.materials[material], texture, &source, &texture_reason,
+					!strncmp(level.materials[material], "t_", 2) || !strncmp(level.materials[material], "ter_", 4) ?
+						SABER_LEVEL_GROUND_BASE_LARGEST : SABER_LEVEL_TEXTURE_LARGEST))
 			{
 				slots[material] = -2;
 			}
@@ -5747,34 +7780,150 @@ static boolean saber_level_play(
 				planet's clear card, are stored with no alpha that cuts them) */
 				if (sky && strstr(level.materials[material], "ring") != NULL)
 					saber_texture_ring_contrast(texture);
-				if (sky && (strncmp(level.materials[material], "stars", 5) == 0 ||
-					strstr(level.materials[material], "planet") != NULL))
+				/* (a glow drawn on a card with no alpha, a moon's aura or the
+				sea's haze: its black is the sky behind it, so its brightness
+				is made its alpha. A mountain's card is cut by its own) */
+				/* (a cloud's card: its white and grey kept, the sky's blue
+				painted behind them, and its alpha's hard edge, made clear) */
+				if (sky && strncmp(level.materials[material], "cloud", 5) == 0)
 				{
-					saber_texture_sky_alpha(texture, strncmp(level.materials[material], "stars", 5) == 0);
+					/* (a sheet of cloud with no alpha, clouds_br_02, every
+					texel solid: its brightness first, so its grey thins and
+					the sheet's edge is not a hard line across the sky) */
+					if (saber_texture_alpha_opaque(texture))
+						saber_texture_glow_alpha(texture);
+					saber_texture_cloud_alpha(texture);
+				}
+				else if (sky && strncmp(level.materials[material], "stars", 5) != 0 &&
+					!strstr(level.materials[material], "mountain") && saber_texture_alpha_opaque(texture))
+				{
+					saber_texture_glow_alpha(texture);
+				}
+				/* (a planet's and a moon's own alpha is kept: in Anniversary's
+				sky they are faint through the day's haze, the planet's night
+				side the sky's blue) */
+				else if (sky && (strstr(level.materials[material], "planet") != NULL ||
+					strncmp(level.materials[material], "basis_sky", 9) == 0))
+				{
+				}
+				/* (the stars faint in the day: their brightness their alpha,
+				a third of it, blended over the day's blue) */
+				else if (sky && strncmp(level.materials[material], "stars", 5) == 0)
+				{
+					saber_texture_glow_alpha(texture);
+					saber_texture_scale_alpha(texture, 1, 3);
 				}
 				else if (!sky && !saber_texture_cutout(texture, material_foliage(level.materials[material])) &&
 					!material_card(level.materials[material]))
 				{
 					saber_texture_make_solid(texture);
 				}
+				/* (the cloud layers stack: a dozen of them over one another,
+				each drawn whole, covered the sky. Each is drawn at half its
+				alpha, as the package's atmosphere thins them) */
+				if (sky && strncmp(level.materials[material], "cloud", 5) == 0)
+					saber_texture_scale_alpha(texture, 1, 2);
+				/* (the ring pale in the haze, as Anniversary's) */
+				if (sky && strstr(level.materials[material], "ring") != NULL)
+					saber_texture_scale_alpha(texture, 2, 3);
+				/* (described again: a glow's DXT1 was made a DXT5) */
+				bitmap_describe(texture, saber_level.bitmap_tag, &saber_level.bitmaps[slots[material]]);
 			}
 		}
-		if (slots[material] < 0)
+		if (!made->gradient && slots[material] < 0)
 		{
 			part->vertex_count = 0;
 			continue;
 		}
-		made->texture = slots[material];
+		made->texture = made->gradient ? gradient_slot : slots[material];
 		made->uv_scale[0] = part->uv_scale[0] != 0.f ? part->uv_scale[0] : 1.f;
 		made->uv_scale[1] = part->uv_scale[1] != 0.f ? part->uv_scale[1] : 1.f;
+		/* (a sky mesh's coordinates were packed by its repeat: a moon's card
+		holds 0..0.5, a cloud layer's thirds. Drawn by the shader's map scale) */
+		if (sky && !made->gradient && part->uv_repeat > 1 && made->uv_scale[0] == 1.f && made->uv_scale[1] == 1.f)
+		{
+			made->uv_scale[0] = (real)part->uv_repeat;
+			made->uv_scale[1] = (real)part->uv_repeat;
+		}
 		/* (a cloud, the stars, a planet and a moon are cut out: the card
 		around the planet, and the black of the stars, are clear) */
-		made->cutout = material_card(level.materials[material]) ||
-			(sky && (strncmp(level.materials[material], "cloud", 5) == 0 ||
-				strncmp(level.materials[material], "stars", 5) == 0 ||
-				strstr(level.materials[material], "planet") != NULL)) ||
-			(!sky && saber_texture_cutout(&saber_level.textures[made->texture],
-				material_foliage(level.materials[material]))) ? TRUE : FALSE;
+		/* (ground, or of a cliff's or the ground's layered mesh a material laid
+		as a layer, moss_02: its alpha its height, and lit as the ground) */
+		/* (of the terrain's meshes alone: b30's ivy walls, cards of plants_01
+		with plants_01 laid over them, drawn so were the leaves' dark green
+		plates, whole) */
+		made->terrain = part->terrain == 1 || (part->terrain == 2 && slots[3 * level.material_count + material] &&
+			strstr(part->region, "(terrain)")) ? TRUE : FALSE;
+		/* (a sky card that fades by its vertices: kept to be drawn so) */
+		if (sky && !made->gradient && part->vertex_alpha)
+		{
+			long faded;
+
+			made->fade_positions = malloc(sizeof(*made->fade_positions) * (size_t)part->vertex_count);
+			made->fade_texcoords = malloc(sizeof(*made->fade_texcoords) * (size_t)part->vertex_count);
+			made->fade_alpha = malloc((size_t)part->vertex_count);
+			made->fade_triangles = malloc(sizeof(*made->fade_triangles) * 3 * (size_t)part->triangle_count);
+			if (made->fade_positions && made->fade_texcoords && made->fade_alpha && made->fade_triangles)
+			{
+				for (faded = 0; faded < part->vertex_count; faded++)
+				{
+					made->fade_positions[faded][0] = part->vertices[faded].position.x;
+					made->fade_positions[faded][1] = part->vertices[faded].position.y;
+					made->fade_positions[faded][2] = part->vertices[faded].position.z;
+					made->fade_texcoords[faded][0] = part->vertices[faded].texcoord.x * made->uv_scale[0];
+					made->fade_texcoords[faded][1] = part->vertices[faded].texcoord.y * made->uv_scale[1];
+					made->fade_alpha[faded] = part->vertex_alpha[faded];
+				}
+				memcpy(made->fade_triangles, part->triangles, sizeof(*made->fade_triangles) * 3 * (size_t)part->triangle_count);
+				made->fade_triangle_count = part->triangle_count;
+			}
+			else
+			{
+				saber_level_layers_free(made);
+			}
+		}
+		/* (by its alpha all but a hard surface's: a Forerunner panel's alpha
+		is its shine, and cut by it a30's beam tower was see through, the sky
+		behind its walls. A moss's, a far tree's, a liana's keep their holes) */
+		made->cutout = made->gradient || made->terrain ? FALSE :
+			(material_card(level.materials[material]) && !made->blend) ||
+			(!sky && !level_material_hard(level.materials[material]) &&
+				(!slots[3 * level.material_count + material] || !strstr(part->region, "(terrain)")) &&
+				saber_texture_cutout(&saber_level.textures[made->texture],
+					material_foliage(level.materials[material]))) ? TRUE : FALSE;
+		/* (ground, a terrain's, is never cut out: its texture's alpha is its
+		height, and cut by it, a grass triangle with nothing under it drew the
+		void's black.) (and a structure's root or grass card, its foliage at least a
+		twentieth clear: b30's trees are the structure's, their root cards drawn
+		whole and grey. Not ground, which has layers over it: ter_grass_01's
+		alpha is its height, and cut by it the ground has holes. Logged once a
+		material, as the templates' are) */
+		if (!made->gradient && !sky && !made->blend && material_foliage(level.materials[material]) &&
+			!made->terrain && !part->layer_count && !slots[2 * level.material_count + material])
+		{
+			long clear = 0;
+			long solid = 0;
+			long texels = 0;
+
+			saber_texture_alpha_counts(&saber_level.textures[made->texture], TRUE, &clear, &solid, &texels);
+			if (!made->cutout && texels && clear * 20 >= texels)
+				made->cutout = TRUE;
+			slots[2 * level.material_count + material] = TRUE;
+			platform_log("anniversary: the structure's %s (format %d): %ld%% clear, %ld%% solid, cut out %d",
+				level.materials[material], (int)saber_level.textures[made->texture].format,
+				texels ? clear * 100 / texels : 0, texels ? solid * 100 / texels : 0, (int)made->cutout);
+		}
+		else if (!made->gradient && !sky && !made->blend && material_foliage(level.materials[material]) &&
+			!made->terrain && !part->layer_count && !made->cutout)
+		{
+			long clear = 0;
+			long solid = 0;
+			long texels = 0;
+
+			saber_texture_alpha_counts(&saber_level.textures[made->texture], TRUE, &clear, &solid, &texels);
+			if (texels && clear * 20 >= texels)
+				made->cutout = TRUE;
+		}
 		made->lit_bsp = NONE;
 		vertices_size += (unsigned long)part->vertex_count * (unsigned long)compressed_size +
 			(unsigned long)part->triangle_count * 6 * sizeof(word);
@@ -5873,31 +8022,32 @@ static boolean saber_level_play(
 		SET_FLAG(saber_level.shaders[1].model.flags, SHADER_MODEL_NOT_ALPHA_TESTED_BIT, FALSE);
 	}
 
-	/* its buffers */
-	reason = "out of memory";
-	saber_level.vertices = geometry_allocate(vertices_size + 1, &saber_level.vertices_contiguous);
-	if (!saber_level.vertices)
-		goto refused;
-	vertices = (struct model_vertex_compressed *)saber_level.vertices;
+	/* its buffers: each part's of a block of its own, its uncompressed
+	vertices freed once they are compressed */
+	(void)vertices_size;
 	{
 		long made_index = 0;
 
 		for (index = 0; index < level.part_count; index++)
 		{
-			if (level.parts[index].vertex_count > 0)
-				vertices += level.parts[index].vertex_count;
-		}
-		strips = (word *)vertices;
-		vertices = (struct model_vertex_compressed *)saber_level.vertices;
-		for (index = 0; index < level.part_count; index++)
-		{
-			struct saber_mesh_part const *part = &level.parts[index];
+			struct saber_mesh_part *part = &level.parts[index];
 			struct saber_level_part *made;
 			long strip_count;
 
 			if (part->vertex_count <= 0)
 				continue;
 			made = &saber_level.parts[made_index];
+			reason = "out of memory";
+			made->memory = malloc((size_t)part->vertex_count * (size_t)compressed_size +
+				(size_t)part->triangle_count * 6 * sizeof(word) + 4);
+			made->memory_contiguous = FALSE;
+			if (!made->memory)
+			{
+				saber_level.part_count = made_index;
+				goto refused;
+			}
+			vertices = (struct model_vertex_compressed *)made->memory;
+			strips = (word *)((char *)made->memory + (unsigned long)part->vertex_count * (unsigned long)compressed_size);
 			rasterizer_geometry_compress_vertices(_rasterizer_vertex_type_model_uncompressed, part->vertex_count, vertices,
 				part->vertex_count * compressed_size, part->vertices, part->vertex_count * uncompressed_size);
 			strip_count = part_strip(part, NULL, strips);
@@ -5907,16 +8057,19 @@ static boolean saber_level_play(
 				!rasterizer_triangle_buffer_new(&made->triangle_buffer, _triangle_buffer_type_precompiled_strip,
 					strip_count - 2, strips))
 			{
-				saber_level.part_count = made_index;
+				saber_level.part_count = made_index + 1;
 				goto refused;
 			}
-			vertices += part->vertex_count;
-			strips += strip_count;
 			triangles += part->triangle_count;
+			free(part->vertices);
+			part->vertices = NULL;
+			free(made->memory);
+			made->memory = NULL;
 			made_index++;
 		}
 		drawn = made_index;
 	}
+	saber_level_textures_fit();
 	saber_level.drawn = TRUE;
 	platform_log("anniversary: the structure drawn as %s: %ld parts, %ld of them the sky, %ld with layers blended over "
 		"them, %ld triangles, %ld textures; its bounds %.1f %.1f %.1f to %.1f %.1f %.1f world units",
@@ -6125,6 +8278,7 @@ void saber_models_tags_unloaded(
 {
 	saber_level_free(give_back ? TRUE : FALSE);
 	saber_models_globals.ranked_count = 0;
+	saber_jaw_count = 0;
 	if (saber_models_globals.kept_tags)
 		free(saber_models_globals.kept_tags);
 	saber_models_globals.kept_tags = NULL;
@@ -6199,6 +8353,123 @@ static short object_rank(
 	return _saber_rank_minor;
 }
 
+void saber_models_jaw_pose(
+	long model_tag,
+	long object_index,
+	struct real_matrix4x3 *relative_node_matrices,
+	short *node_count)
+{
+	long at;
+	struct saber_jaw const *jaw = NULL;
+	real aperture = 0.f;
+	real angle;
+	real_matrix4x3 turn;
+	real_point3d moved;
+
+	for (at = 0; at < saber_jaw_count; at++)
+	{
+		if (saber_jaws[at].model_tag == model_tag)
+		{
+			jaw = &saber_jaws[at];
+			break;
+		}
+	}
+	if (!jaw || jaw->jaw_node != *node_count || jaw->head_node < 0 || jaw->head_node >= *node_count ||
+		jaw->jaw_node >= MAXIMUM_NODES_PER_MODEL)
+	{
+		return;
+	}
+	if (object_index != NONE)
+	{
+		struct unit_datum *unit = (struct unit_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_unit);
+
+		if (unit)
+			aperture = unit->unit.mouth_aperture;
+	}
+	if (!(aperture > 0.f))
+		aperture = 0.f;
+	if (aperture > 1.f)
+		aperture = 1.f;
+	angle = aperture * SABER_JAW_OPEN_ANGLE;
+	/* (turned about the hinge: p -> pivot + R (p - pivot)) */
+	matrix4x3_rotation_from_axis_and_angle(&turn, &jaw->axis, (real)sin(angle), (real)cos(angle));
+	matrix4x3_transform_point(&turn, &jaw->pivot, &moved);
+	turn.position.x = jaw->pivot.x - moved.x;
+	turn.position.y = jaw->pivot.y - moved.y;
+	turn.position.z = jaw->pivot.z - moved.z;
+	matrix4x3_multiply(&relative_node_matrices[jaw->head_node], &turn, &relative_node_matrices[jaw->jaw_node]);
+	*node_count = (short)(jaw->jaw_node + 1);
+}
+
+int saber_models_part_solid(
+	unsigned long part_flags)
+{
+	return (part_flags & SABER_PART_SOLID_FLAG) != 0;
+}
+
+int saber_models_part_region_hidden(
+	unsigned long part_flags,
+	void const *model_,
+	char const *region_permutation_indices,
+	short region_permutation_count)
+{
+	struct model const *model = (struct model const *)model_;
+	long region_index;
+	long permutation;
+	boolean damaged;
+
+	if (!model || !region_permutation_indices)
+		return FALSE;
+	/* (one variant of a group: drawn at the permutations of its mask) */
+	if (part_flags & SABER_PART_VARIANT_FLAG)
+	{
+		unsigned long mask = (part_flags >> SABER_PART_VARIANT_SHIFT) & SABER_PART_VARIANT_MASK;
+
+		region_index = (long)((part_flags >> SABER_PART_REGION_SHIFT) & SABER_PART_REGION_MASK);
+		if (region_index >= model->regions.count || region_index >= region_permutation_count)
+			return FALSE;
+		permutation = region_permutation_indices[region_index];
+		if (permutation < 0 || permutation >= 8)
+			return FALSE;
+		return (mask & (1UL << permutation)) == 0;
+	}
+	if (!(part_flags & SABER_PART_REGION_FLAG))
+		return FALSE;
+	region_index = (long)((part_flags >> SABER_PART_REGION_SHIFT) & SABER_PART_REGION_MASK);
+	if (region_index >= model->regions.count || region_index >= region_permutation_count)
+		return FALSE;
+	permutation = region_permutation_indices[region_index];
+	{
+		struct model_region const *region = TAG_BLOCK_GET_ELEMENT(&model->regions, region_index, struct model_region);
+
+		if (permutation < 0 || permutation >= region->permutations.count)
+			return FALSE;
+		/* (the region at its ~damaged (or ~destroyed): the damaged copy, else
+		the whole one) */
+		damaged = TAG_BLOCK_GET_ELEMENT(&region->permutations, permutation,
+			struct model_region_permutation)->name[0] == '~';
+	}
+
+	return damaged != ((part_flags & SABER_PART_DAMAGED_FLAG) != 0);
+}
+
+int saber_models_part_hidden(
+	unsigned long part_flags,
+	long object_index)
+{
+	struct object_datum *object;
+	boolean destroyed;
+
+	if (!(part_flags & (SABER_PART_WRECK_FLAG | SABER_PART_WHOLE_FLAG)))
+		return FALSE;
+	/* (only a vehicle's: anything else is drawn whole) */
+	object = object_index != NONE ?
+		(struct object_datum *)object_try_and_get_and_verify_type(object_index, _object_mask_vehicle) : NULL;
+	destroyed = object && TEST_FLAG(object->object.damage_flags, _object_dead_bit);
+
+	return (part_flags & SABER_PART_WRECK_FLAG) ? !destroyed : destroyed;
+}
+
 int saber_models_part_cutout(
 	long shader_tag,
 	short permutation)
@@ -6218,6 +8489,10 @@ int saber_models_part_cutout(
 	played = bitmap_played_get(((struct shader_model_definition const *)shader)->model.base_map.index);
 	if (!played || permutation >= played->count || permutation >= MAXIMUM_SABER_BITMAP_TEXTURES)
 		return FALSE;
+	/* (a decal sheet's marks are cut out whichever model played it: a
+	marine's UNSC patch drew its dark card) */
+	if (strstr(played->names[permutation], "decal") != NULL)
+		return TRUE;
 
 	return played->cutouts[permutation] ? TRUE : FALSE;
 }
@@ -6309,8 +8584,12 @@ short saber_models_shader_permutation(
 		return forced;
 	for (made = saber_models_globals.models; made; made = made->next)
 	{
+		/* (of a model of ranks alone, an Elite's, whose ranks are its own
+		geometries: a Jackal's forced permutation is its shield's colour, of
+		the map's own shield, which is drawn) */
 		if (made->tag_index == model_tag)
-			return model_definition_get(model_tag)->geometries.address == made->geometries ? 0 : forced;
+			return made->rank_count > 1 && model_definition_get(model_tag)->geometries.address == made->geometries ?
+				0 : forced;
 	}
 
 	return forced;
@@ -6351,7 +8630,7 @@ real_rgb_color const *saber_models_change_colors(
 int saber_models_level_drawn(
 	void)
 {
-	return saber_level.drawn;
+	return saber_level.drawn && !saber_toggle_classic_level();
 }
 
 int saber_models_level_sky_drawn(
@@ -6359,7 +8638,7 @@ int saber_models_level_sky_drawn(
 {
 	long index;
 
-	if (!saber_level.drawn)
+	if (!saber_level.drawn || saber_toggle_classic_level())
 		return FALSE;
 	for (index = 0; index < saber_level.part_count; index++)
 	{
@@ -6368,6 +8647,82 @@ int saber_models_level_sky_drawn(
 	}
 
 	return FALSE;
+}
+
+/* the order a sky part is drawn in, lowest first: the daytime sky, then
+its sorting_transparent_group (a part with none after the dome) */
+static long saber_level_sky_order(
+	struct saber_level_part const *part)
+{
+	if (part->gradient)
+		return -2;
+	if (part->sort_group != NONE)
+		return part->sort_group;
+
+	return part->dome ? 0 : 30;
+}
+
+/* A sky card that fades by its vertices drawn: its texture times its
+vertices' alpha, blended over the sky, unlit (the sky is drawn in white
+light), with no depth; at `origin` + its points times `scale`, as the sky's
+are placed about the camera */
+static void saber_level_sky_fade_draw(
+	struct saber_level_part const *part,
+	real_point3d const *origin,
+	real scale)
+{
+	struct pixel_shader_definition shader;
+	long corner;
+
+	csmemset(&shader, 0, sizeof(shader));
+	shader.texture_modes = 1;
+	shader.combiner_count = 1;
+	/* (r0 the texture's colour times the vertex's, r0.a its alpha times the
+	vertex's; out r0) */
+	shader.rgb_inputs[0] = 0x08040000;
+	shader.rgb_outputs[0] = 0xc00;
+	shader.alpha_inputs[0] = 0x18140000;
+	shader.alpha_outputs[0] = 0xc00;
+	shader.final_combiner_inputs_abcd = 0xc;
+	shader.final_combiner_inputs_efg = 0x1c00;
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_NONE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHABLENDENABLE, TRUE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHATESTENABLE, FALSE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZENABLE, FALSE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, FALSE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZBIAS, 0);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
+		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+	rasterizer_set_framebuffer_blend_function(0);
+	rasterizer_set_vertex_shader_permutation(1, 10, 0);
+	rasterizer_set_pixel_shader(&shader);
+	if (rasterizer_set_texture_bitmap_data(0, &saber_level.bitmaps[part->texture]))
+	{
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+		IDirect3DDevice8_Begin(global_d3d_device, D3DPT_TRIANGLELIST);
+		for (corner = 0; corner < 3 * part->fade_triangle_count; corner++)
+		{
+			unsigned short vertex = part->fade_triangles[corner];
+
+			IDirect3DDevice8_SetVertexData4ub(global_d3d_device, 9, 255, 255, 255, part->fade_alpha[vertex]);
+			IDirect3DDevice8_SetVertexData2f(global_d3d_device, 4, part->fade_texcoords[vertex][0],
+				part->fade_texcoords[vertex][1]);
+			IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0,
+				origin->x + part->fade_positions[vertex][0] * scale,
+				origin->y + part->fade_positions[vertex][1] * scale,
+				origin->z + part->fade_positions[vertex][2] * scale, 1.f);
+		}
+		IDirect3DDevice8_End(global_d3d_device);
+	}
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZENABLE, TRUE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, TRUE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ALPHABLENDENABLE, FALSE);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_ALL);
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_CCW);
 }
 
 /* the package's sky, in the map sky's place: full bright, with no fog and
@@ -6394,7 +8749,7 @@ void saber_models_level_sky_render(
 	real far_distance;
 	real scale;
 
-	if (!saber_level.drawn)
+	if (!saber_level.drawn || saber_toggle_classic_level())
 		return;
 	sky_count = 0;
 	anchor_index = NONE;
@@ -6413,7 +8768,10 @@ void saber_models_level_sky_render(
 	}
 	if (!sky_count || anchor_index == NONE)
 		return;
-	anchor = saber_level.parts[anchor_index].centroid;
+	/* (seen from the dome's middle at the horizon: from its box's middle,
+	half way up, the horizon stood a third of the way up the sky and the
+	mountains and the ring's feet sank under the ground) */
+	anchor = saber_level.has_sky_anchor ? saber_level.sky_anchor : saber_level.parts[anchor_index].centroid;
 	reach = 0.f;
 	for (index = 0; index < sky_count; index++)
 	{
@@ -6437,9 +8795,9 @@ void saber_models_level_sky_render(
 	if (far_distance < 16.f)
 		far_distance = 16.f;
 	scale = reach > far_distance ? far_distance / reach : 1.f;
-	/* the daytime sky, then the stars, then the clouds, then a planet, then
-	the ring: with no depth a later part covers an earlier. Farther first
-	within a group */
+	/* the daytime sky, then the objects in their sorting_transparent_group
+	order (the stars, the moon, the ring, the clouds, the planet): with no
+	depth a later part covers an earlier. Farther first within a group */
 	for (placed = 1; placed < sky_count; placed++)
 	{
 		long item = order[placed];
@@ -6452,9 +8810,7 @@ void saber_models_level_sky_render(
 		offset.j = saber_level.parts[item].centroid.y - anchor.y;
 		offset.k = saber_level.parts[item].centroid.z - anchor.z;
 		item_distance = magnitude3d(&offset);
-		item_layer = saber_level.parts[item].over ? 4 :
-			(saber_level.parts[item].in_front ? 3 : (saber_level.parts[item].back ? 0 :
-			(saber_level.parts[item].dome ? 1 : 2)));
+		item_layer = saber_level_sky_order(&saber_level.parts[item]);
 		while (slot > 0)
 		{
 			long earlier = order[slot - 1];
@@ -6466,9 +8822,7 @@ void saber_models_level_sky_render(
 			offset.j = saber_level.parts[earlier].centroid.y - anchor.y;
 			offset.k = saber_level.parts[earlier].centroid.z - anchor.z;
 			earlier_distance = magnitude3d(&offset);
-			earlier_layer = saber_level.parts[earlier].over ? 4 :
-				(saber_level.parts[earlier].in_front ? 3 : (saber_level.parts[earlier].back ? 0 :
-				(saber_level.parts[earlier].dome ? 1 : 2)));
+			earlier_layer = saber_level_sky_order(&saber_level.parts[earlier]);
 			move = item_layer < earlier_layer ||
 				(item_layer == earlier_layer && earlier_distance < item_distance);
 			if (!move)
@@ -6499,7 +8853,7 @@ void saber_models_level_sky_render(
 	for (placed = 0; placed < sky_count; placed++)
 	{
 		struct saber_level_part *part = &saber_level.parts[order[placed]];
-		struct shader_model_definition shader;
+		struct shader_model_definition *shader = &part->shader;
 		real_rectangle3d scaled;
 
 		/* camera + (point - anchor) * scale */
@@ -6519,15 +8873,22 @@ void saber_models_level_sky_render(
 		parameters.centroid.y = render.camera.position.y + (part->centroid.y - anchor.y) * scale;
 		parameters.centroid.z = render.camera.position.z + (part->centroid.z - anchor.z) * scale;
 		parameters.radius = part->radius * scale;
-		shader = saber_level.shaders[part->cutout ? 1 : 0];
-		shader.model.map_u_scale = part->uv_scale[0];
-		shader.model.map_v_scale = part->uv_scale[1];
-		SET_FLAG(shader.model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
+		*shader = saber_level.shaders[part->cutout ? 1 : 0];
+		shader->model.map_u_scale = part->uv_scale[0];
+		shader->model.map_v_scale = part->uv_scale[1];
+		SET_FLAG(shader->model.flags, SHADER_MODEL_TWO_SIDED_BIT, TRUE);
 		/* (its alpha blended, so the card fades. The test would cut it) */
 		if (part->blend)
-			SET_FLAG(shader.model.flags, SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT, TRUE);
+			SET_FLAG(shader->model.flags, SHADER_MODEL_ALPHA_BLENDED_DECAL_BIT, TRUE);
+		if (part->fade_triangle_count > 0)
+		{
+			rasterizer_models_end();
+			saber_level_sky_fade_draw(part, &node.position, scale);
+			rasterizer_models_begin(TRUE);
+			continue;
+		}
 		rasterizer_model_begin(&parameters, FALSE);
-		rasterizer_model_draw((struct shader *)&shader, part->texture,
+		rasterizer_model_draw((struct shader *)shader, part->texture,
 			&part->triangle_buffer, NONE, part->triangle_buffer.count, &part->vertex_buffer, NONE);
 		rasterizer_model_end();
 	}
@@ -6537,6 +8898,121 @@ void saber_models_level_sky_render(
 /* The light a level part's layers are drawn in at each vertex: of the
 part's lighting (the structure's about it, as its base is drawn in), its
 ambient and each distant light as the vertex faces it, of 255. */
+/* A level part's light, sampled above its middle and above four points
+between its middle and its corners, the brightest kept (above its middle
+alone may be under a cliff or a rock); its brightness, or -1 with none */
+static real saber_level_part_sample_light(
+	struct saber_level_part const *part,
+	struct render_lighting *lighting)
+{
+	real_point3d above;
+	struct render_lighting sampled;
+	real best = -1.f;
+	long sample;
+
+	csmemset(lighting, 0, sizeof(*lighting));
+	for (sample = 0; sample < 5; sample++)
+	{
+		real brightness;
+		long light;
+
+		above = part->centroid;
+		if (sample > 0)
+		{
+			above.x = (part->centroid.x + ((sample & 1) ? part->bounds.x0 : part->bounds.x1)) / 2.f;
+			above.y = (part->centroid.y + ((sample & 2) ? part->bounds.y0 : part->bounds.y1)) / 2.f;
+		}
+		above.z = part->bounds.z1 + 0.1f;
+		csmemset(&sampled, 0, sizeof(sampled));
+		if (!lights_distant_lighting_at_point(0, &above, &sampled))
+			continue;
+		brightness = sampled.ambient_color.red + sampled.ambient_color.green + sampled.ambient_color.blue;
+		for (light = 0; light < sampled.distant_light_count && light < MAXIMUM_RENDERED_DISTANT_LIGHTS; light++)
+		{
+			brightness += sampled.distant_lights[light].color.red + sampled.distant_lights[light].color.green +
+				sampled.distant_lights[light].color.blue;
+		}
+		if (brightness > best)
+		{
+			best = brightness;
+			*lighting = sampled;
+		}
+	}
+
+	return best;
+}
+
+/* The ground's light in the structure `bsp_index`: of all the terrain's
+parts' samples, the one most samples are nearest. A shade in the classic
+structure's light (where its rocks and cliffs stood) is not the remastered
+ground's, and the sunlit light most of the ground is in is drawn over it
+all, as one */
+static void saber_level_ground_light(
+	short bsp_index)
+{
+	struct render_lighting best_lighting;
+	real best = -1.f;
+	long index;
+	long counted = 0;
+	real *brightnesses;
+	struct render_lighting *lightings;
+
+	saber_level.ground_lit = FALSE;
+	saber_level.ground_lit_bsp = bsp_index;
+	brightnesses = malloc(sizeof(*brightnesses) * ((size_t)saber_level.part_count + 1));
+	lightings = malloc(sizeof(*lightings) * ((size_t)saber_level.part_count + 1));
+	if (!brightnesses || !lightings)
+	{
+		if (brightnesses)
+			free(brightnesses);
+		if (lightings)
+			free(lightings);
+		return;
+	}
+	for (index = 0; index < saber_level.part_count; index++)
+	{
+		struct saber_level_part const *part = &saber_level.parts[index];
+		real brightness;
+
+		if (!part->terrain || part->sky)
+			continue;
+		brightness = saber_level_part_sample_light(part, &lightings[counted]);
+		if (brightness < 0.f)
+			continue;
+		brightnesses[counted++] = brightness;
+	}
+	/* (the brightness three quarters of the samples are under: the sunlit
+	ground's, not a lone bright spot's) */
+	if (counted > 0)
+	{
+		long rank;
+		long below;
+
+		for (rank = 0; rank < counted; rank++)
+		{
+			below = 0;
+			for (index = 0; index < counted && below <= (counted * 3) / 4; index++)
+			{
+				if (brightnesses[index] < brightnesses[rank])
+					below++;
+			}
+			if (below <= (counted * 3) / 4 && brightnesses[rank] > best)
+			{
+				best = brightnesses[rank];
+				best_lighting = lightings[rank];
+			}
+		}
+	}
+	if (best >= 0.f)
+	{
+		saber_level.ground_lighting = best_lighting;
+		saber_level.ground_lighting.point_light_count = 0;
+		saber_level.ground_lit = TRUE;
+	}
+	free(brightnesses);
+	free(lightings);
+}
+
 static void saber_level_layers_light(
 	struct saber_level_part *part)
 {
@@ -6565,6 +9041,20 @@ static void saber_level_layers_light(
 			color[1] += distant->color.green * facing;
 			color[2] += distant->color.blue * facing;
 		}
+		/* (in the map's sun and sky, as a model is, darkened where the light
+		Saber's exporter baked into the vertex is in shade: a cliff's shadow
+		under its overhang, a crevice. Its sunlit sand's whole, the shaded
+		cliff's about two thirds) */
+		if (part->layer_baked)
+		{
+			unsigned char const *baked = part->layer_baked[vertex];
+			long brightest = MAX(baked[0], MAX(baked[1], baked[2]));
+			real shade = 0.3f + 0.7f * (real)brightest / 255.f;
+
+			color[0] *= shade;
+			color[1] *= shade;
+			color[2] *= shade;
+		}
 		for (channel = 0; channel < 3; channel++)
 		{
 			real value = color[channel] * 255.f;
@@ -6573,6 +9063,278 @@ static void saber_level_layers_light(
 		}
 	}
 	part->layer_lit_bsp = part->lit_bsp;
+}
+
+/* a point light as its definition gives its cone (rasterizer_xbox.c's) */
+struct point_light_geometry_parameters
+{
+	real radius;
+	real radius_modifier_lower_bound;
+	real radius_modifier_upper_bound;
+	real falloff_angle;
+	real cutoff_angle;
+	real lens_flare_radius;
+	real runtime_cosine_falloff_angle;
+	real runtime_cosine_cutoff_angle;
+	real specular_radius_multiplier;
+	real runtime_sine_cutoff_angle;
+	long unused[2];
+};
+
+struct point_light_definition
+{
+	unsigned long flags;
+	struct point_light_geometry_parameters geometry;
+};
+
+/* whether the frame's point light `light` (a flashlight, a plasma bolt's
+glow) reaches the box `bounds` */
+static boolean saber_level_light_reaches(
+	struct rasterizer_light_submit_parameters const *light,
+	real_rectangle3d const *bounds)
+{
+	real dx = light->position.x < bounds->x0 ? bounds->x0 - light->position.x :
+		light->position.x > bounds->x1 ? light->position.x - bounds->x1 : 0.f;
+	real dy = light->position.y < bounds->y0 ? bounds->y0 - light->position.y :
+		light->position.y > bounds->y1 ? light->position.y - bounds->y1 : 0.f;
+	real dz = light->position.z < bounds->z0 ? bounds->z0 - light->position.z :
+		light->position.z > bounds->z1 ? light->position.z - bounds->z1 : 0.f;
+
+	return light->radius > 0.f && dx * dx + dy * dy + dz * dz < light->radius * light->radius;
+}
+
+/* whether a point light's cone (a flashlight's) can reach the sphere about
+a level part: the angle from its forward to the part's middle within its
+cutoff and the angle the part spans there. A light with no cone reaches
+all about it */
+static boolean saber_level_light_cone_reaches(
+	struct rasterizer_light_submit_parameters const *light,
+	real_point3d const *centroid,
+	real radius)
+{
+	real to[3];
+	real distance;
+	real along;
+	real cutoff;
+	real spread;
+
+	if (!light->definition || light->definition->geometry.runtime_cosine_falloff_angle == -1.0f)
+		return TRUE;
+	to[0] = centroid->x - light->position.x;
+	to[1] = centroid->y - light->position.y;
+	to[2] = centroid->z - light->position.z;
+	distance = square_root(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]);
+	if (distance <= radius)
+		return TRUE;
+	along = (to[0] * light->forward.i + to[1] * light->forward.j + to[2] * light->forward.k) / distance;
+	cutoff = light->definition->geometry.runtime_cosine_cutoff_angle;
+	/* (the part's sine of its half angle there, a little more than the
+	cosine it lowers the cutoff by) */
+	spread = radius / distance;
+
+	return along >= cutoff - spread;
+}
+
+/* the frame's point lights that reach a level part, as a model's lighting
+names them (their rasterizer indices) */
+static void saber_level_point_lights(
+	struct saber_level_part const *part,
+	struct render_lighting *lighting)
+{
+	long index;
+
+	lighting->point_light_count = 0;
+	for (index = 0; index < rasterizer_lights.light_count && lighting->point_light_count < MAXIMUM_RENDERED_POINT_LIGHTS;
+		index++)
+	{
+		if (saber_level_light_reaches(&rasterizer_lights.lights[index], &part->bounds) &&
+			saber_level_light_cone_reaches(&rasterizer_lights.lights[index], &part->centroid, part->radius))
+		{
+			lighting->point_light_indices[lighting->point_light_count++] = index;
+		}
+	}
+}
+
+/* a level part's layers' light this frame: their light (saber_level_layers_light)
+and the frame's point lights' that reach it, a flashlight's cone, as a
+model's vertex shader lights it (falling off to its radius, and from its
+cone's falloff to its cutoff angle); NULL when none reaches it. Only the
+vertices a light reaches are lit again: of a big cliff's thousands, the
+flashlight's cone holds a few, and each one lit cost the frame */
+static unsigned char (*saber_level_layers_lit_dynamic(
+	struct saber_level_part const *part))[3]
+{
+	static unsigned char (*lit)[3] = NULL;
+	static long lit_size = 0;
+	long reaching[MAXIMUM_RENDERED_POINT_LIGHTS];
+	long reaching_count = 0;
+	long index;
+	long vertex;
+
+	for (index = 0; index < rasterizer_lights.light_count && reaching_count < MAXIMUM_RENDERED_POINT_LIGHTS; index++)
+	{
+		struct rasterizer_light_submit_parameters const *light = &rasterizer_lights.lights[index];
+
+		if (saber_level_light_reaches(light, &part->bounds) &&
+			saber_level_light_cone_reaches(light, &part->centroid, part->radius))
+		{
+			reaching[reaching_count++] = index;
+		}
+	}
+	if (!reaching_count)
+		return NULL;
+	if (lit_size < part->layer_vertex_count)
+	{
+		unsigned char (*grown)[3] = realloc(lit, sizeof(*lit) * (size_t)part->layer_vertex_count);
+
+		if (!grown)
+			return NULL;
+		lit = grown;
+		lit_size = part->layer_vertex_count;
+	}
+	memcpy(lit, part->layer_lit, sizeof(*lit) * (size_t)part->layer_vertex_count);
+	for (index = 0; index < reaching_count; index++)
+	{
+		struct rasterizer_light_submit_parameters const *light = &rasterizer_lights.lights[reaching[index]];
+		real radius_squared = light->radius * light->radius;
+		real inverse_radius_squared = 1.f / radius_squared;
+		boolean coned = light->definition && light->definition->geometry.runtime_cosine_falloff_angle != -1.0f &&
+			light->definition->geometry.runtime_cosine_falloff_angle !=
+				light->definition->geometry.runtime_cosine_cutoff_angle;
+		real cutoff = coned ? light->definition->geometry.runtime_cosine_cutoff_angle : -1.f;
+		real cone_scale = coned ? 1.f / (light->definition->geometry.runtime_cosine_falloff_angle - cutoff) : 0.f;
+		real red = light->color.red * 255.f;
+		real green = light->color.green * 255.f;
+		real blue = light->color.blue * 255.f;
+
+		for (vertex = 0; vertex < part->layer_vertex_count; vertex++)
+		{
+			real const *at = part->layer_positions[vertex];
+			real const *normal = part->layer_normals[vertex];
+			real to[3];
+			real distance_squared;
+			real falloff;
+			real facing;
+			real inverse_distance;
+			real strength;
+			long channel;
+			real added[3];
+
+			/* (out of its radius, behind the surface, out of its cone: each
+			tested before the square root) */
+			to[0] = light->position.x - at[0];
+			to[1] = light->position.y - at[1];
+			to[2] = light->position.z - at[2];
+			distance_squared = to[0] * to[0] + to[1] * to[1] + to[2] * to[2];
+			if (distance_squared >= radius_squared || distance_squared <= 0.00000001f)
+				continue;
+			facing = normal[0] * to[0] + normal[1] * to[1] + normal[2] * to[2];
+			if (facing <= 0.f)
+				continue;
+			strength = 1.f;
+			if (coned)
+			{
+				real along = -(to[0] * light->forward.i + to[1] * light->forward.j + to[2] * light->forward.k);
+
+				if (along <= 0.f || (cutoff > 0.f && along * along < cutoff * cutoff * distance_squared))
+					continue;
+				inverse_distance = 1.f / square_root(distance_squared);
+				strength = (along * inverse_distance - cutoff) * cone_scale;
+				if (strength <= 0.f)
+					continue;
+				if (strength > 1.f)
+					strength = 1.f;
+			}
+			else
+			{
+				inverse_distance = 1.f / square_root(distance_squared);
+			}
+			falloff = 1.f - distance_squared * inverse_radius_squared;
+			strength *= falloff * facing * inverse_distance;
+			added[0] = red * strength;
+			added[1] = green * strength;
+			added[2] = blue * strength;
+			for (channel = 0; channel < 3; channel++)
+			{
+				real value = (real)lit[vertex][channel] + added[channel];
+
+				lit[vertex][channel] = (unsigned char)(value >= 255.f ? 255.f : value);
+			}
+		}
+	}
+
+	return lit;
+}
+
+/* The sky's fog over a level part's layers, which cover its base: the
+fog's colour blended over each vertex by its depth in the fog, as the
+map's atmospheric fog is (none to its start, its maximum density at its
+opaque distance), of the triangles of the layer that covers it */
+static void saber_level_layers_fog(
+	struct saber_level_part const *part,
+	struct pixel_shader_definition *shader)
+{
+	struct render_fog const *fog = &render.fog;
+	unsigned short const *triangles = part->layer_triangles[part->layer_cover];
+	real span = fog->atmospheric_maximum_distance - fog->atmospheric_minimum_distance;
+	unsigned char red = (unsigned char)PIN(fog->atmospheric_color.red * 255.f, 0.f, 255.f);
+	unsigned char green = (unsigned char)PIN(fog->atmospheric_color.green * 255.f, 0.f, 255.f);
+	unsigned char blue = (unsigned char)PIN(fog->atmospheric_color.blue * 255.f, 0.f, 255.f);
+	real dx;
+	real dy;
+	real dz;
+	long corner;
+
+	if (fog->atmospheric_maximum_density <= 0.f || fog->atmospheric_maximum_distance <= 0.f || span <= 0.f ||
+		!triangles || part->layer_triangle_counts[part->layer_cover] <= 0)
+	{
+		return;
+	}
+	/* (none where the part is nearer than the fog's start) */
+	dx = render.camera.position.x < part->bounds.x0 ? part->bounds.x0 - render.camera.position.x :
+		render.camera.position.x > part->bounds.x1 ? render.camera.position.x - part->bounds.x1 : 0.f;
+	dy = render.camera.position.y < part->bounds.y0 ? part->bounds.y0 - render.camera.position.y :
+		render.camera.position.y > part->bounds.y1 ? render.camera.position.y - part->bounds.y1 : 0.f;
+	dz = render.camera.position.z < part->bounds.z0 ? part->bounds.z0 - render.camera.position.z :
+		render.camera.position.z > part->bounds.z1 ? render.camera.position.z - part->bounds.z1 : 0.f;
+	if (dx * dx + dy * dy + dz * dz <= fog->atmospheric_minimum_distance * fog->atmospheric_minimum_distance)
+		return;
+	csmemset(shader, 0, sizeof(*shader));
+	shader->texture_modes = 0;
+	shader->combiner_count = 1;
+	/* (the vertex's colour, the fog's, and its alpha, the fog's density) */
+	shader->rgb_inputs[0] = 0x04200000;
+	shader->alpha_inputs[0] = 0x14200000;
+	shader->rgb_outputs[0] = 0xc00;
+	shader->alpha_outputs[0] = 0xc00;
+	shader->final_combiner_inputs_abcd = 0xc;
+	shader->final_combiner_inputs_efg = 0x1c00;
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
+		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+	rasterizer_set_framebuffer_blend_function(0);
+	rasterizer_set_pixel_shader(shader);
+	IDirect3DDevice8_Begin(global_d3d_device, D3DPT_TRIANGLELIST);
+	for (corner = 0; corner < 3 * part->layer_triangle_counts[part->layer_cover]; corner++)
+	{
+		unsigned short vertex = triangles[corner];
+		real const *at = part->layer_positions[vertex];
+		real ox = at[0] - render.camera.position.x;
+		real oy = at[1] - render.camera.position.y;
+		real oz = at[2] - render.camera.position.z;
+		real distance = square_root(ox * ox + oy * oy + oz * oz);
+		real density = (distance - fog->atmospheric_minimum_distance) / span;
+
+		density = PIN(density, 0.f, 1.f) * fog->atmospheric_maximum_density;
+		IDirect3DDevice8_SetVertexData4ub(global_d3d_device, 9, red, green, blue,
+			(unsigned char)PIN(density * 255.f, 0.f, 255.f));
+		IDirect3DDevice8_SetVertexData2f(global_d3d_device, 4, 0.f, 0.f);
+		IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0,
+			at[0] + (render.camera.position.x - at[0]) * 0.005f,
+			at[1] + (render.camera.position.y - at[1]) * 0.005f,
+			at[2] + (render.camera.position.z - at[2]) * 0.005f,
+			1.f);
+	}
+	IDirect3DDevice8_End(global_d3d_device);
 }
 
 /* Draws the level's terrains' layers over their bases (sand over a
@@ -6587,12 +9349,26 @@ static void saber_level_layers_render(
 	boolean begun = FALSE;
 	/* (the kind of layer the state is set for: NONE, none yet) */
 	long multiplying = NONE;
+	/* (logged the first frame: what of the layers is drawn) */
+	static boolean logged = FALSE;
+	long parts_layered = 0;
+	long parts_unlit = 0;
+	long layers_drawn = 0;
+	long layers_untextured = 0;
+	long triangles_drawn = 0;
 
 	for (index = 0; index < saber_level.part_count; index++)
 	{
 		struct saber_level_part *part = &saber_level.parts[index];
+		unsigned char (*frame_lit)[3];
 		long layer;
 
+		if (part->layer_count && !part->sky)
+		{
+			parts_layered++;
+			if (part->lit_bsp == NONE)
+				parts_unlit++;
+		}
 		if (!part->layer_count || part->sky || part->lit_bsp == NONE ||
 			!render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
 		{
@@ -6612,6 +9388,10 @@ static void saber_level_layers_render(
 		}
 		if (part->layer_lit_bsp != part->lit_bsp)
 			saber_level_layers_light(part);
+		/* (and the frame's point lights', the flashlight's, where they reach) */
+		frame_lit = saber_level_layers_lit_dynamic(part);
+		if (!frame_lit)
+			frame_lit = part->layer_lit;
 		for (layer = 0; layer < part->layer_count; layer++)
 		{
 			unsigned char const *weights = part->layer_weights[layer];
@@ -6660,8 +9440,13 @@ static void saber_level_layers_render(
 					shader.constant_0[0] = 0x80000000;
 					shader.alpha_inputs[0] = 0x34201811;
 					shader.alpha_outputs[0] = 0x18c00;
-					shader.alpha_inputs[1] = 0xdc20dc20;
-					shader.alpha_outputs[1] = 0x8c00;
+					/* (and no more: clamp(2w + h - 1), half as steep. Doubled
+					again, a layer was whole a third of the way into a triangle
+					and nothing short of it, and the base where no layer weighs
+					stood out of the layers as a flat slab, edged nearly as the
+					triangles are) */
+					shader.alpha_inputs[1] = 0x1c200000;
+					shader.alpha_outputs[1] = 0xc00;
 					IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
 						D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
 					/* (0: the shader tags' alpha blend, as hud_draw.c names it) */
@@ -6670,7 +9455,12 @@ static void saber_level_layers_render(
 				rasterizer_set_pixel_shader(&shader);
 			}
 			if (!rasterizer_set_texture_bitmap_data(0, &saber_level.bitmaps[part->layer_textures[layer]]))
+			{
+				layers_untextured++;
 				continue;
+			}
+			layers_drawn++;
+			triangles_drawn += part->layer_triangle_counts[layer];
 			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
 			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
 			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
@@ -6680,7 +9470,7 @@ static void saber_level_layers_render(
 			for (corner = 0; corner < 3 * part->layer_triangle_counts[layer]; corner++)
 			{
 				unsigned short vertex = triangles[corner];
-				unsigned char const *lit = part->layer_lit[vertex];
+				unsigned char const *lit = frame_lit[vertex];
 
 				/* (a multiplying layer unlit: it scales the lit colour under it) */
 				if (multiply)
@@ -6693,13 +9483,35 @@ static void saber_level_layers_render(
 					IDirect3DDevice8_SetVertexData4ub(global_d3d_device, 9, lit[0], lit[1], lit[2],
 						(unsigned char)(255 - weights[vertex]));
 				}
-				IDirect3DDevice8_SetVertexData2f(global_d3d_device, 4, part->layer_texcoords[vertex][0],
-					part->layer_texcoords[vertex][1]);
-				IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0, part->layer_positions[vertex][0],
-					part->layer_positions[vertex][1], part->layer_positions[vertex][2], 1.f);
+				IDirect3DDevice8_SetVertexData2f(global_d3d_device, 4, part->layer_texcoords[layer][vertex][0],
+					part->layer_texcoords[layer][vertex][1]);
+				/* (drawn a two-hundredth of the way toward the camera: the base
+				is drawn of compressed vertices by the model shader, the layer of
+				these by another, and the depth they come to differs by more than
+				the bias. Each layer failed the test against its own base and none
+				was seen: the ground's triangles stood out one texture each) */
+				IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0,
+					part->layer_positions[vertex][0] + (render.camera.position.x - part->layer_positions[vertex][0]) * 0.005f,
+					part->layer_positions[vertex][1] + (render.camera.position.y - part->layer_positions[vertex][1]) * 0.005f,
+					part->layer_positions[vertex][2] + (render.camera.position.z - part->layer_positions[vertex][2]) * 0.005f,
+					1.f);
 			}
 			IDirect3DDevice8_End(global_d3d_device);
 		}
+		/* (and the sky's fog over it: its base, drawn by the model shader, is
+		fogged, but its layers cover it whole and are not. The ground stood
+		dark and clear in the distance among the map's trees and rocks, pale
+		in the fog) */
+		if (part->layer_cover != NONE)
+			saber_level_layers_fog(part, &shader);
+		multiplying = NONE;
+	}
+	if (!logged && parts_layered)
+	{
+		logged = TRUE;
+		platform_log("anniversary: the structure's layers: %ld parts with layers (%ld unlit), %ld layers drawn of %ld "
+			"triangles, %ld whose texture could not be set", parts_layered, parts_unlit, layers_drawn, triangles_drawn,
+			layers_untextured);
 	}
 	if (begun)
 	{
@@ -6721,7 +9533,7 @@ void saber_models_level_render(
 	short bsp_index = global_structure_bsp_index_get();
 	long index;
 
-	if (!saber_level.drawn)
+	if (!saber_level.drawn || saber_toggle_classic_level())
 		return;
 	csmemset(&node, 0, sizeof(node));
 	node.scale = 1.f;
@@ -6736,10 +9548,12 @@ void saber_models_level_render(
 	parameters.animation.values = values;
 	parameters.base_map_scale.i = 1.f;
 	parameters.base_map_scale.j = 1.f;
+	if (saber_level.ground_lit_bsp != bsp_index)
+		saber_level_ground_light(bsp_index);
 	for (index = 0; index < saber_level.part_count; index++)
 	{
 		struct saber_level_part *part = &saber_level.parts[index];
-		struct shader_model_definition shader;
+		struct shader_model_definition *shader = &part->shader;
 
 		/* (the sky is drawn in the map sky's place) */
 		if (part->sky || !render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
@@ -6748,11 +9562,22 @@ void saber_models_level_render(
 		drawn in a structure) */
 		if (part->lit_bsp != bsp_index)
 		{
-			real_point3d above = part->centroid;
+			real best = -1.f;
 
-			above.z = part->bounds.z1 + 0.1f;
-			csmemset(&part->lighting, 0, sizeof(part->lighting));
-			if (!lights_distant_lighting_at_point(0, &above, &part->lighting))
+			/* (ground, a terrain's part, in the ground's light: each of a
+			chunk's layers is a part of its own, and each lit by its own place
+			drew neighbouring triangles light and dark, in patches with their
+			edges) */
+			if (part->terrain && saber_level.ground_lit)
+			{
+				part->lighting = saber_level.ground_lighting;
+				best = 0.f;
+			}
+			else
+			{
+				best = saber_level_part_sample_light(part, &part->lighting);
+			}
+			if (best < 0.f)
 			{
 				csmemset(&part->lighting, 0, sizeof(part->lighting));
 				part->lighting.ambient_color.red = 0.5f;
@@ -6769,13 +9594,15 @@ void saber_models_level_render(
 			part->lit_bsp = bsp_index;
 		}
 		parameters.lighting = part->lighting;
+		/* (and the frame's point lights that reach it, the flashlight's) */
+		saber_level_point_lights(part, &parameters.lighting);
 		parameters.centroid = part->centroid;
 		parameters.radius = part->radius;
-		shader = saber_level.shaders[part->cutout ? 1 : 0];
-		shader.model.map_u_scale = part->uv_scale[0];
-		shader.model.map_v_scale = part->uv_scale[1];
+		*shader = saber_level.shaders[part->cutout ? 1 : 0];
+		shader->model.map_u_scale = part->uv_scale[0];
+		shader->model.map_v_scale = part->uv_scale[1];
 		rasterizer_model_begin(&parameters, FALSE);
-		rasterizer_model_draw((struct shader *)&shader, part->texture,
+		rasterizer_model_draw((struct shader *)shader, part->texture,
 			&part->triangle_buffer, NONE, part->triangle_buffer.count, &part->vertex_buffer, NONE);
 		rasterizer_model_end();
 	}

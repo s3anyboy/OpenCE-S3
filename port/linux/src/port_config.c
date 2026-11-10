@@ -308,6 +308,11 @@ static const struct config_setting config_settings[] =
 		"lightmapped surfaces. Collision, water and fog stay the map's; the\n"
 		"geometry is lit as objects are, by the map's lightmaps.\n"
 		"Read as a map loads." },
+	{ "display.remastered_bsp_hide", _config_string, "\"\"", "HALO_REMASTERED_BSP_HIDE", _environment_value, _platform_all,
+		"Pieces of the remastered level geometry's mesh or material names, comma separated,\n"
+		"whose meshes are left out (\"terrain>1\"; a piece ending in $ matches\n"
+		"only at a name's end, \"_terrain$\"). For finding which of a level's\n"
+		"overlapping ground meshes Anniversary draws. Read as a map loads." },
 	{ "display.remastered_ui", _config_boolean, "false", "HALO_REMASTERED_UI", _environment_value, _platform_all,
 		"Draw the main menu (ui.map) with anniversary_models and\n"
 		"remastered_bsp. false: the main menu stays the map's own graphics,\n"

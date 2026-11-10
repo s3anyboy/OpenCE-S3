@@ -348,6 +348,17 @@ static void render_model_parts(
 							model_data_error(model, "shader");
 							continue;
 						}
+						/* port: an Anniversary vehicle's wreck while it lives,
+						its whole hull once it is destroyed
+						(port/linux/game/saber_models.c) */
+						if (saber_models_part_hidden(part->flags, object_index))
+							continue;
+						/* port: an Anniversary part of a group its region
+						permutes (a Flood combat form's arm): its damaged copy
+						only at the region's ~damaged */
+						if (saber_models_part_region_hidden(part->flags, model,
+								region_permutation_indices, region_permutation_count))
+							continue;
 						shader_reference = TAG_BLOCK_GET_ELEMENT(
 							&model->shaders,
 							part->shader_index,
@@ -471,7 +482,10 @@ static void render_model_parts(
 									long tested_was = TEST_FLAG(model_shader->flags, _shader_model_not_alpha_tested_bit) ? 1 : 0;
 									long sided_was = TEST_FLAG(model_shader->flags, _shader_model_two_sided_bit) ? 1 : 0;
 
+									/* port: the rest of a sheet whose cards are
+									cut from its corner drawn solid */
 									if (shader->base.type==_shader_type_model &&
+										!saber_models_part_solid(part->flags) &&
 										saber_models_part_cutout(
 											shader_reference->shader.index,
 											forced_shader_permutation_index ?
@@ -1108,6 +1122,10 @@ void render_model(
 					&node->runtime_default_inverse_matrix,
 					&relative_node_matrices[node_index]);
 			}
+			/* port: an Anniversary template's jaw, the node after the model's
+			last, its head's turned by the unit's mouth aperture
+			(port/linux/game/saber_models.c) */
+			saber_models_jaw_pose(model_index, unique_identifier, relative_node_matrices, &node_count);
 		}
 		else
 		{

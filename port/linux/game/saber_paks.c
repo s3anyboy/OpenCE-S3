@@ -152,6 +152,10 @@ enum
 	_block_blend = 0x1601,
 	_block_blend_indices = 0x3301,
 	_block_blend_weights = 0x1A01,
+	/* a mesh's texture coordinates' range: two shorts, then the repeat
+	its coordinates were packed by (the -1..1 of a short stands for
+	-repeat..repeat). Of a mesh with no __export_uv_compr_params */
+	_block_mesh_uv_range = 0x2F01,
 };
 
 enum
@@ -266,6 +270,10 @@ struct template_node
 	boolean hidden;
 	real uv_shift[2];
 	real uv_tile[2];
+	/* the repeat its coordinates were packed by (0x2F01's), 0 with none */
+	short uv_repeat;
+	/* its sorting_transparent_group (a sky object's order), NONE with none */
+	short sort_group;
 };
 
 struct template_walk
@@ -278,6 +286,10 @@ struct template_walk
 	/* whether it is a level's geometry (whose collision meshes are not
 	drawn) */
 	boolean level;
+	/* a level's placed object: where its instance stands (its "SNIA"
+	matrix, rows of four, the last its place), applied after its nodes' */
+	boolean has_instance;
+	real instance[16];
 };
 
 /* ---------- private code */
@@ -882,11 +894,15 @@ static void submesh_layers_read(
 	short *count,
 	short *layer_materials,
 	short *layer_channels,
-	short *layer_multiply)
+	short *layer_multiply,
+	short *layer_uv_sets)
 {
 	unsigned long position = materials->start + 4;
 	struct block block;
 	long material = NONE;
+	/* (each "lm" layer, of a material or none, the next of the vertices'
+	sets of texture coordinates: the base's the first) */
+	short uv_set = 1;
 
 	*count = 0;
 	while (position < materials->end && block_at(bytes, position, materials->end, &block))
@@ -899,8 +915,9 @@ static void submesh_layers_read(
 		{
 			char value[16];
 
-			if (layer_property(bytes, &block, "name", value, sizeof(value)) && !strcmp(value, "lm") &&
-				material >= 0 && material < 0x7fff && *count < SABER_MAXIMUM_LAYERS)
+			boolean layer = layer_property(bytes, &block, "name", value, sizeof(value)) && !strcmp(value, "lm");
+
+			if (layer && material >= 0 && material < 0x7fff && *count < SABER_MAXIMUM_LAYERS)
 			{
 				short channel = _saber_layer_channel_alpha;
 
@@ -917,8 +934,11 @@ static void submesh_layers_read(
 				layer_channels[*count] = channel;
 				layer_multiply[*count] = (short)(layer_property(bytes, &block, "blend", value, sizeof(value)) &&
 					!strcmp(value, "mult"));
+				layer_uv_sets[*count] = uv_set;
 				(*count)++;
 			}
+			if (layer)
+				uv_set++;
 			material = NONE;
 		}
 		position = block.end;
@@ -1043,12 +1063,14 @@ static void node_read(
 		node->name_start = block.start;
 		node->name_length = name_end - block.start;
 		node->bone_index = NONE;
-		/* (".lod1.w", or a name that is the level alone, "lod2") */
+		/* (".lod1.w", ".trunk_lod1.w" (a tree's coarser trunk and leaves, drawn
+over the full ones they showed through as grey shells), or a name that is
+the level alone, "lod2") */
 		for (index = (long)block.start; index + 4 <= (long)name_end; index++)
 		{
-			if ((index == (long)block.start || bytes[index] == '.') && index + 4 < (long)name_end)
+			if ((index == (long)block.start || bytes[index] == '.' || bytes[index] == '_') && index + 4 <= (long)name_end)
 			{
-				unsigned long at = bytes[index] == '.' ? (unsigned long)index + 1 : (unsigned long)index;
+				unsigned long at = bytes[index] == '.' || bytes[index] == '_' ? (unsigned long)index + 1 : (unsigned long)index;
 
 				if (at + 3 < name_end && bytes[at] == 'l' && bytes[at + 1] == 'o' && bytes[at + 2] == 'd' &&
 					bytes[at + 3] >= '0' && bytes[at + 3] <= '9')
@@ -1113,6 +1135,33 @@ static void node_read(
 		block_find(bytes, node_block->start, node_block->end, _block_vertex_data, &node->vertex_data);
 		block_find(bytes, node_block->start, node_block->end, _block_triangles, &node->triangles);
 		block_find(bytes, node_block->start, node_block->end, _block_submeshes, &node->submeshes);
+		node->uv_repeat = 0;
+		if (block_find(bytes, node_block->start, node_block->end, _block_mesh_uv_range, &block) &&
+			block.end - block.start >= 4)
+		{
+			short repeat = read_short(bytes + block.start + 2);
+
+			node->uv_repeat = repeat > 0 && repeat < 4096 ? repeat : 0;
+		}
+		/* (a mesh exported with __export_uv_compr_params names its tile
+		there, and its 0x2F01 holds that tile; marked uncompressed, it is not
+		a repeat of these coordinates at all: grass's 1088) */
+		if (block_find(bytes, node_block->start, node_block->end, _block_properties, &block) &&
+			block_contains(bytes, &block, "__export_uv_compr_params"))
+		{
+			node->uv_repeat = 0;
+		}
+		node->sort_group = NONE;
+		{
+			real group;
+
+			if (block_find(bytes, node_block->start, node_block->end, _block_properties, &block) &&
+				block_contains(bytes, &block, "sorting_transparent_group") &&
+				property_real(bytes, &block, "group_number", &group) && group >= 0.f && group < 32000.f)
+			{
+				node->sort_group = (short)group;
+			}
+		}
 		/* (its texture coordinates, packed into the vertex's unit range:
 		unit * tile + shift. A mesh marked uncompressed already holds them) */
 		if (block_find(bytes, node_block->start, node_block->end, _block_properties, &block) &&
@@ -1182,6 +1231,121 @@ static void node_world_transform(
 		if (!node)
 			break;
 		matrix_multiply(transform, node->transform);
+	}
+}
+
+/* the group a node is the whole ("__base") or the damaged ("_damaged") copy
+of: the name of the node over that one, lower case, a Flood combat form's
+"left_arm". Empty when it is under neither */
+static void node_region(
+	struct template_walk const *walk,
+	struct template_node const *node,
+	char *region,
+	long region_size)
+{
+	long depth;
+
+	region[0] = 0;
+	for (depth = 0; node && depth < MAXIMUM_NODE_DEPTH; depth++)
+	{
+		struct template_node const *parent = node->parent_id == NONE ? NULL : node_of_id(walk, node->parent_id);
+		char name[64];
+		unsigned long length = MIN(node->name_length, sizeof(name) - 1);
+
+		memcpy(name, walk->bytes + node->name_start, length);
+		name[length] = 0;
+		if ((!strcmp(name, "__base") || !strcmp(name, "_damaged")) && parent)
+		{
+			unsigned long copy = MIN(parent->name_length, (unsigned long)region_size - 1);
+			long at;
+
+			memcpy(region, walk->bytes + parent->name_start, copy);
+			region[copy] = 0;
+			for (at = 0; region[at]; at++)
+			{
+				if (region[at] >= 'A' && region[at] <= 'Z')
+					region[at] = (char)(region[at] - 'A' + 'a');
+			}
+			return;
+		}
+		node = parent;
+	}
+}
+
+/* the group and the variant of it a node is (a marine's "arms" and its
+"arms_full_sleeve_100", or its "__base"): the node under a group's node
+that has a "__base" among its own, other than the head's (whose variants
+node_variant names) and a damaged copy's ("_damaged", node_region's). Both
+empty when it is under none */
+static void node_group_variant(
+	struct template_walk const *walk,
+	struct template_node const *node,
+	char *group,
+	long group_size,
+	char *variant,
+	long variant_size)
+{
+	long depth;
+
+	group[0] = 0;
+	variant[0] = 0;
+	for (depth = 0; node && depth < MAXIMUM_NODE_DEPTH; depth++)
+	{
+		struct template_node const *parent = node->parent_id == NONE ? NULL : node_of_id(walk, node->parent_id);
+		char name[64];
+		char parent_name[64];
+		unsigned long length;
+		long index;
+		boolean has_base = FALSE;
+
+		if (!parent)
+			return;
+		length = MIN(node->name_length, sizeof(name) - 1);
+		memcpy(name, walk->bytes + node->name_start, length);
+		name[length] = 0;
+		length = MIN(parent->name_length, sizeof(parent_name) - 1);
+		memcpy(parent_name, walk->bytes + parent->name_start, length);
+		parent_name[length] = 0;
+		for (index = 0; parent_name[index]; index++)
+		{
+			if (parent_name[index] >= 'A' && parent_name[index] <= 'Z')
+				parent_name[index] = (char)(parent_name[index] - 'A' + 'a');
+		}
+		if (!strcmp(parent_name, "head") || name[0] == '.' || parent_name[0] == '.')
+		{
+			node = parent;
+			continue;
+		}
+		for (index = 0; index < walk->node_count && !has_base; index++)
+		{
+			struct template_node const *sibling = &walk->nodes[index];
+
+			if (sibling->parent_id == parent->id && sibling->name_length == 6 &&
+				!memcmp(walk->bytes + sibling->name_start, "__base", 6))
+			{
+				has_base = TRUE;
+			}
+		}
+		if (has_base && strcmp(name, "_damaged") != 0)
+		{
+			unsigned long copy;
+
+			copy = MIN(strlen(parent_name), (unsigned long)group_size - 1);
+			memcpy(group, parent_name, copy);
+			group[copy] = 0;
+			copy = MIN(strlen(name), (unsigned long)variant_size - 1);
+			memcpy(variant, name, copy);
+			variant[copy] = 0;
+			for (index = 0; variant[index]; index++)
+			{
+				if (variant[index] >= 'A' && variant[index] <= 'Z')
+					variant[index] = (char)(variant[index] - 'A' + 'a');
+				else if (variant[index] == '-' || variant[index] == ' ')
+					variant[index] = '_';
+			}
+			return;
+		}
+		node = parent;
 	}
 }
 
@@ -1583,7 +1747,18 @@ static long texcoord_offset(
 	long size,
 	unsigned long format)
 {
-	(void)format;
+	/* (a 24-byte vertex of 0x2001CE0E, a destroyed Ghost's hull, has three
+	packed vectors before its texture coordinates, not four: read at 16,
+	its coordinates were a vector's, and the wreck's texture scattered) */
+	if (size == 24 && format == 0x2001CE0EUL)
+		return 12;
+	/* (and a 28-byte one of 0x2001CE4E, a Flood combat form's head and
+torso, a lifepod's body, a crashed Pelican's hull: its coordinates at 16,
+then two packed vectors. Read at 20, a vector's, the head's face was
+drawn of a speck of its texture. A mesh whose two are the same, a Flood's
+legs, is either; no structure's mesh is of this format) */
+	if (size == 28 && format == 0x2001CE4EUL)
+		return 16;
 	switch (size)
 	{
 	case 8:
@@ -1679,6 +1854,9 @@ static boolean mesh_read(
 	real normals[9];
 	real_point3d translation = { 0.f, 0.f, 0.f };
 	real_point3d scale = { 1.f, 1.f, 1.f };
+	/* (its coordinates rewritten here, by a rule of the stored half range:
+	its packed repeat then not applied again, template_repeats_apply) */
+	boolean uv_rewritten = FALSE;
 	boolean global_indices = FALSE;
 	long agree = 0;
 	boolean flip;
@@ -1691,6 +1869,7 @@ static boolean mesh_read(
 	short submesh_layer_materials[MAXIMUM_SUBMESHES][SABER_MAXIMUM_LAYERS];
 	short submesh_layer_channels[MAXIMUM_SUBMESHES][SABER_MAXIMUM_LAYERS];
 	short submesh_layer_multiply[MAXIMUM_SUBMESHES][SABER_MAXIMUM_LAYERS];
+	short submesh_layer_uv_sets[MAXIMUM_SUBMESHES][SABER_MAXIMUM_LAYERS];
 	unsigned char (*colors)[4] = NULL;
 	long submesh_total = 0;
 	/* (a beach patch names no tile, so its coordinates cover the patch
@@ -1699,6 +1878,15 @@ static boolean mesh_read(
 	raw density, and an edge many times the median is a wedge) */
 	real beach_repeat = 0.f;
 	real beach_median = 0.f;
+	/* (a terrain patch given coordinates of where it lies: each triangle
+	seen along the axis it faces itself) */
+	boolean planar = FALSE;
+	/* (a level terrain's vertex's sets of texture coordinates, its base's
+	and then each layer's: one for each four-byte vector after its
+	position, of 20, 28, 36 and 44 bytes) */
+	long layer_sets = 1;
+	/* (and the light baked into it, after its layers' weights: 0, none) */
+	long light_offset = 0;
 	long rigid_slot;
 	unsigned char const *blend_indices = NULL;
 	unsigned char const *blend_weights = NULL;
@@ -1729,7 +1917,9 @@ static boolean mesh_read(
 	vertex_count = (long)read_u32(bytes + source->positions.start);
 	triangle_count = (long)read_u32(bytes + source->triangles.start);
 	source_vertex_count = vertex_count;
-	if (vertex_count <= 0 || triangle_count <= 0 || node_damaged(walk, node))
+	/* (a template's wreck is read, its parts marked: drawn in the whole
+	one's place once it is destroyed. A level's is not drawn) */
+	if (vertex_count <= 0 || triangle_count <= 0 || (walk->level && node_damaged(walk, node)))
 		return TRUE;
 	if (vertex_count > 0x100000 || triangle_count > 0x100000 ||
 		(unsigned long)triangle_count * 6 > source->triangles.end - source->triangles.start - 4)
@@ -1785,6 +1975,13 @@ static boolean mesh_read(
 		vertex_size = bytes[source->vertex_data.start + 12];
 		uv_offset = texcoord_offset(vertex_size, read_u32(bytes + source->vertex_data.start + 8));
 		vertex_data_start = source->vertex_data.start + 13 + (unsigned long)vertex_size * base_vertex;
+		if (walk->level && (vertex_size == 20 || vertex_size == 28 || vertex_size == 36 || vertex_size == 44) &&
+			uv_offset == texcoord_offset(vertex_size, read_u32(bytes + source->vertex_data.start + 8)) &&
+			uv_offset == 4 * ((vertex_size - 12) / 8) + 12)
+		{
+			layer_sets = (vertex_size - 12) / 8;
+			light_offset = 4 * layer_sets + 4;
+		}
 		if (uv_offset < 0 || (unsigned long)source_vertex_count * (unsigned long)vertex_size >
 			source->vertex_data.end - source->vertex_data.start - 13)
 		{
@@ -1956,7 +2153,7 @@ static boolean mesh_read(
 					if (walk->level)
 						submesh_layers_read(bytes, &block, &submesh_layer_count[submesh_total - 1],
 							submesh_layer_materials[submesh_total - 1], submesh_layer_channels[submesh_total - 1],
-							submesh_layer_multiply[submesh_total - 1]);
+							submesh_layer_multiply[submesh_total - 1], submesh_layer_uv_sets[submesh_total - 1]);
 				}
 				position = block.end;
 			}
@@ -1984,8 +2181,10 @@ static boolean mesh_read(
 	vertices = malloc(sizeof(*vertices) * (size_t)vertex_count);
 	triangles = malloc(sizeof(*triangles) * 3 * (size_t)triangle_count);
 	tangents = malloc(sizeof(*tangents) * (size_t)vertex_count);
-	remap = malloc(sizeof(*remap) * (size_t)vertex_count);
-	empty = malloc((size_t)vertex_count);
+	/* (a vertex once for each axis a planar patch's triangles are seen along) */
+	remap = malloc(sizeof(*remap) * 3 * (size_t)vertex_count);
+	/* (and after its flags each vertex's alpha, a level card's: 255, none) */
+	empty = malloc(2 * (size_t)vertex_count);
 	/* (a level terrain's vertices' colour: n four-byte groups, then the
 	colour (alpha, red, green, blue), then the rest, n = (size - 12) / 8) */
 	if (walk->level && uv_offset >= 0 &&
@@ -2003,9 +2202,20 @@ static boolean mesh_read(
 			{
 				long color_offset = 4 * ((vertex_size - 12) / 8);
 
+				/* (a layer's channel n is the colour's byte 3 - n: the
+				layers' weights read as their file numbers them, the first
+				layer read the alpha, always none, and was never drawn, and a
+				triangle was the grass or the rock whole, its edges hard. b30's
+				rocks' layer, channel 2, is byte 1, the only one that varies) */
 				for (index = 0; index < vertex_count; index++)
-					memcpy(colors[index], bytes + vertex_data_start + (unsigned long)vertex_size * (unsigned long)index +
-						(unsigned long)color_offset, 4);
+				{
+					unsigned char const *color = bytes + vertex_data_start +
+						(unsigned long)vertex_size * (unsigned long)index + (unsigned long)color_offset;
+					long channel;
+
+					for (channel = 0; channel < 4; channel++)
+						colors[index][channel] = color[3 - channel];
+				}
 			}
 		}
 	}
@@ -2026,6 +2236,7 @@ static boolean mesh_read(
 		return FALSE;
 	}
 	csmemset(empty, 0, (size_t)vertex_count);
+	csmemset(empty + vertex_count, 255, (size_t)vertex_count);
 
 	/* its vertices, in Halo's axes */
 	node_world_transform(walk, node, transform);
@@ -2099,6 +2310,21 @@ static boolean mesh_read(
 		world_normal.i = normal.i * normals[0] + normal.j * normals[3] + normal.k * normals[6];
 		world_normal.j = normal.i * normals[1] + normal.j * normals[4] + normal.k * normals[7];
 		world_normal.k = normal.i * normals[2] + normal.j * normals[5] + normal.k * normals[8];
+		if (walk->has_instance)
+		{
+			real const *m = walk->instance;
+			real_point3d placed;
+			real_vector3d turned;
+
+			placed.x = world.x * m[0] + world.y * m[4] + world.z * m[8] + m[12];
+			placed.y = world.x * m[1] + world.y * m[5] + world.z * m[9] + m[13];
+			placed.z = world.x * m[2] + world.y * m[6] + world.z * m[10] + m[14];
+			turned.i = world_normal.i * m[0] + world_normal.j * m[4] + world_normal.k * m[8];
+			turned.j = world_normal.i * m[1] + world_normal.j * m[5] + world_normal.k * m[9];
+			turned.k = world_normal.i * m[2] + world_normal.j * m[6] + world_normal.k * m[10];
+			world = placed;
+			world_normal = turned;
+		}
 		csmemset(vertex, 0, sizeof(*vertex));
 		vertex->position.x = world.x;
 		vertex->position.y = -world.z;
@@ -2129,6 +2355,10 @@ static boolean mesh_read(
 			texture. A triangle there stretches the sand into a wedge) */
 			if (walk->level && blank_corner && vertex->texcoord.x == 0.f && vertex->texcoord.y == 0.f)
 				empty[index] = 1;
+			/* (a level card's vertex's colour, its alpha the card's fade: a
+			mountain's and a cloud's ends clear, drawn solid a hard edge) */
+			if (walk->level && vertex_size == 12 && uv_offset == 8)
+				empty[vertex_count + index] = bytes[vertex_data_start + vertex_size * index + 7];
 			/* (a level mesh's repeat is the shader's map scale, applied as
 			the texture is sampled. Folded in here, a beach's tile of a few
 			hundred is clamped to -1..1 by the renderer and every triangle
@@ -2199,6 +2429,8 @@ static boolean mesh_read(
 		long inside = 0;
 		real max_u = -1.f;
 		real max_v = -1.f;
+		real inside_u = -1.f;
+		real inside_v = -1.f;
 
 		for (index = 0; index < vertex_count; index++)
 		{
@@ -2210,15 +2442,29 @@ static boolean mesh_read(
 			if (v > max_v)
 				max_v = v;
 			if (u >= -0.02f && u <= 0.51f && v >= -0.02f && v <= 0.51f)
+			{
 				inside++;
+				inside_u = MAX(inside_u, u);
+				inside_v = MAX(inside_v, v);
+			}
 		}
-		if (inside * 10 >= vertex_count * 9 && max_u > 0.35f && max_v > 0.35f &&
-			max_u <= 0.56f && max_v <= 0.56f)
+		/* (or all but a stray triangle or two in the half: a Ghost's, a
+		Banshee's, a few points past it) */
+		if ((inside * 10 >= vertex_count * 9 && max_u > 0.35f && max_v > 0.35f &&
+				max_u <= 0.56f && max_v <= 0.56f) ||
+			(inside * 1000 >= vertex_count * 995 && inside_u > 0.35f && inside_v > 0.35f))
 		{
+			uv_rewritten = TRUE;
 			for (index = 0; index < vertex_count; index++)
 			{
 				vertices[index].texcoord.x *= 2.f;
 				vertices[index].texcoord.y *= 2.f;
+				/* (a stray past the half then past 1, taken back by 1, where
+				the texture repeats) */
+				if (vertices[index].texcoord.x > 1.02f)
+					vertices[index].texcoord.x -= 1.f;
+				if (vertices[index].texcoord.y > 1.02f)
+					vertices[index].texcoord.y -= 1.f;
 			}
 		}
 	}
@@ -2226,6 +2472,48 @@ static boolean mesh_read(
 	left half and the foliage its right. Cards unwrapped on the left, a
 	sapling's, show the bark. Half a texture across, they show the foliage.
 	The trunk, which wraps the bark, is left) */
+	/* (a near tree's leaf cards, its branch's and its twigs', are unwrapped
+on one sheet, the twigs its left half and the branch its right, full
+height: each material is its own texture, the whole of it the half's.
+Drawn as stored, a card showed half its branch, stretched. Twice across
+from the half's edge, the whole branch; down as it is) */
+	if (uv_offset >= 0 && vertex_count > 0 && !walk->level &&
+		memmem_name(bytes + node->name_start, node->name_length, "leave"))
+	{
+		boolean branches = submesh_total > 0;
+		real low_u = 1e9f;
+		real high_u = -1e9f;
+		real low_v = 1e9f;
+		real high_v = -1e9f;
+		long scan;
+
+		for (scan = 0; scan < submesh_total; scan++)
+		{
+			short material = submesh_material[scan];
+
+			if (material < 0 || material >= template_->material_count ||
+				!strstr(template_->materials[material], "branches"))
+			{
+				branches = FALSE;
+			}
+		}
+		for (scan = 0; branches && scan < vertex_count; scan++)
+		{
+			low_u = MIN(low_u, vertices[scan].texcoord.x);
+			high_u = MAX(high_u, vertices[scan].texcoord.x);
+			low_v = MIN(low_v, vertices[scan].texcoord.y);
+			high_v = MAX(high_v, vertices[scan].texcoord.y);
+		}
+		if (branches && high_v - low_v > 0.6f &&
+			((low_u >= -0.02f && high_u <= 0.52f) || (low_u >= 0.48f && high_u <= 1.02f)))
+		{
+			real edge = low_u >= 0.48f ? 0.5f : 0.f;
+
+			uv_rewritten = TRUE;
+			for (scan = 0; scan < vertex_count; scan++)
+				vertices[scan].texcoord.x = (vertices[scan].texcoord.x - edge) * 2.f;
+		}
+	}
 	if (uv_offset >= 0 && vertex_count > 0 &&
 		memmem_name(bytes + node->name_start, node->name_length, "leave"))
 	{
@@ -2245,10 +2533,34 @@ static boolean mesh_read(
 		}
 		if (farplane)
 		{
+			/* (cards in the texture's top right sixteenth, a sapling's, are
+			stored at half the range, as other meshes are: twice, the texture
+			repeating, they are the foliage's top right quarter, its frond
+			whole, upright as the card is; drawn as they were, the frond's
+			corner, lying sideways) */
+			boolean corner = TRUE;
+
+			for (scan = 0; scan < vertex_count && corner; scan++)
+			{
+				real u = vertices[scan].texcoord.x < 0.5f ? vertices[scan].texcoord.x + 0.5f :
+					vertices[scan].texcoord.x;
+
+				if (u < 0.74f || u > 1.01f ||
+					vertices[scan].texcoord.y < -0.02f || vertices[scan].texcoord.y > 0.26f)
+				{
+					corner = FALSE;
+				}
+			}
+			uv_rewritten = TRUE;
 			for (scan = 0; scan < vertex_count; scan++)
 			{
 				if (vertices[scan].texcoord.x < 0.5f)
 					vertices[scan].texcoord.x += 0.5f;
+				if (corner)
+				{
+					vertices[scan].texcoord.x = vertices[scan].texcoord.x * 2.f - 1.f;
+					vertices[scan].texcoord.y *= 2.f;
+				}
 			}
 		}
 	}
@@ -2453,6 +2765,7 @@ static boolean mesh_read(
 					}
 					else
 						continue;
+					uv_rewritten = TRUE;
 					vertices[index].texcoord.y = along_span > 0.02f ?
 						0.22f + (along - along_min) / along_span * 0.70f : 0.55f;
 					vertices[index].texcoord.x = around_span > 0.01f ?
@@ -2574,6 +2887,11 @@ static boolean mesh_read(
 				vertices[index].texcoord.y = (axis == 2 ? at->y : at->z) / SABER_TERRAIN_SPAN;
 			}
 			beach_repeat = SABER_TERRAIN_SPAN * SABER_TERRAIN_GRAIN;
+			/* (and each triangle along its own axis when its parts are made:
+			seen along the patch's, a cliff's face in a patch mostly of ground
+			was its texture's one row drawn out across it, a pale or dark slab
+			edged as the triangle is) */
+			planar = TRUE;
 		}
 	}
 	if (walk->level && !node->has_uv_decompress && uv_offset >= 0 && triangle_count > 0 && beach_repeat == 0.f &&
@@ -2628,7 +2946,12 @@ static boolean mesh_read(
 	*reason = "out of memory";
 	for (index = 0; index < submesh_total; index++)
 	{
-		long passes = colors && submesh_layer_count[index] > 0 ? submesh_layer_count[index] + 1 : 1;
+		/* (one: every triangle its base's, each layer blended over it by its
+		weights. A triangle a layer covered whole had been drawn of that layer
+		as a base, by the model shader and its light, beside triangles the
+		layer was blended over in the layers' light: b30's cliffs had flat pale
+		slabs, edged by the triangles) */
+		long passes = 1;
 		long pass;
 
 		for (pass = 0; pass < passes; pass++)
@@ -2644,6 +2967,8 @@ static boolean mesh_read(
 				struct saber_mesh_part *parts = realloc(template_->parts,
 					sizeof(*template_->parts) * ((size_t)template_->part_count + 1));
 				struct saber_mesh_part *part;
+				/* (each layer's set of the vertices' texture coordinates) */
+				short layer_uv_sets[SABER_MAXIMUM_LAYERS] = { 0, 0, 0, 0 };
 				long triangle;
 
 				if (!parts)
@@ -2659,6 +2984,40 @@ static boolean mesh_read(
 				memcpy(part->anchor, anchor, sizeof(anchor));
 				part->uv_scale[0] = 1.f;
 				part->uv_scale[1] = 1.f;
+				part->uv_repeat = node->has_uv_decompress || uv_rewritten ? 0 : node->uv_repeat;
+				part->sort_group = node->sort_group;
+				part->wreck = !walk->level && node_damaged(walk, node) ? TRUE : FALSE;
+				/* (of a ground material, t_grass_01, ter_sand_01, with layers or
+				none: a cliff's patch with no layers, lit by its own place and not
+				as the ground about it, was a pale or dark slab, edged as the
+				patch is. A tree's root card's submesh has layers too) */
+				part->terrain = walk->level &&
+					part->material_index >= 0 && part->material_index < template_->material_count &&
+					(!strncmp(template_->materials[part->material_index], "t_", 2) ||
+						!strncmp(template_->materials[part->material_index], "ter_", 4)) ? 1 : walk->level && submesh_layer_count[index] > 0 ? 2 : 0;
+				if (!walk->level)
+				{
+					char group[32];
+
+					node_region(walk, node, part->region, (long)sizeof(part->region));
+					node_group_variant(walk, node, group, (long)sizeof(group), part->group_variant,
+						(long)sizeof(part->group_variant));
+					/* (its group's name the region's, the variant's own being
+					compared: a marine's arms) */
+					if (part->group_variant[0] && !part->region[0])
+						memcpy(part->region, group, sizeof(part->region));
+					else if (part->group_variant[0] && strcmp(part->region, group) != 0)
+						part->group_variant[0] = 0;
+				}
+				/* (a level's: its node's name, ".(terrain)_terrain>1_$p3_o#0.k",
+				by which display.remastered_bsp_hide leaves it out) */
+				else
+				{
+					unsigned long length = MIN(node->name_length, sizeof(part->region) - 1);
+
+					memcpy(part->region, walk->bytes + node->name_start, length);
+					part->region[length] = 0;
+				}
 				if (walk->level && node->has_uv_decompress)
 				{
 					if (node->uv_tile[0] != 0.f)
@@ -2673,11 +3032,29 @@ static boolean mesh_read(
 					part->uv_scale[0] = beach_repeat;
 					part->uv_scale[1] = beach_repeat;
 				}
+				/* (a level mesh with no __export_uv_compr_params keeps its
+				coordinates packed by the repeat its 0x2F01 names: a short's
+				-1..1 stands for -repeat..repeat. Read as 1, a rock's texture
+				was stretched over it that many times too large) */
+				else if (walk->level && node->uv_repeat > 1 && !uv_rewritten)
+				{
+					part->uv_scale[0] = (real)node->uv_repeat;
+					part->uv_scale[1] = (real)node->uv_repeat;
+				}
 				part->vertices = malloc(sizeof(*part->vertices) * 3 * (size_t)part_triangles);
 				part->triangles = malloc(sizeof(*part->triangles) * 3 * (size_t)part_triangles);
 				template_->part_count++;
 				if (!part->vertices || !part->triangles)
 					goto failed;
+				{
+					long faded;
+
+					for (faded = 0; faded < vertex_count && empty[vertex_count + faded] == 255; faded++)
+					{
+					}
+					if (walk->level && faded < vertex_count)
+						part->vertex_alpha = malloc(3 * (size_t)part_triangles);
+				}
 				if (colors && submesh_layer_count[index] > pass)
 				{
 					part->layer_weights = malloc(sizeof(*part->layer_weights) * 3 * (size_t)part_triangles);
@@ -2691,17 +3068,61 @@ static boolean mesh_read(
 							part->layer_materials[part->layer_count] = submesh_layer_materials[index][layer];
 							part->layer_channels[part->layer_count] = submesh_layer_channels[index][layer];
 							part->layer_multiply[part->layer_count] = submesh_layer_multiply[index][layer];
+							layer_uv_sets[part->layer_count] = submesh_layer_uv_sets[index][layer];
 							part->layer_count++;
 						}
 					}
 				}
-				for (triangle = 0; triangle < vertex_count; triangle++)
+				/* (ground's base laid first as a layer of its own, weighing whole:
+				the ground then all drawn in its layers' light, the light Saber's
+				exporter baked into its vertices. Saber parts a terrain by the
+				layer its triangles show whole: b30's cliff, t_cliff_01 with
+				t_cliff_04 laid over it, has t_cliff_04's whole triangles a
+				submesh of their own, t_cliff_04 its base and no layers. Drawn
+				as a base, by the model shader and its light, beside the same
+				texture drawn as its neighbours' layer in the layers' light, they
+				were pale slabs among the rock, edged as the triangles are) */
+				if (walk->level && part->terrain == 1 && part->material_index >= 0 &&
+					part->layer_count < SABER_MAXIMUM_LAYERS)
+				{
+					long layer;
+
+					if (!part->layer_weights)
+						part->layer_weights = malloc(sizeof(*part->layer_weights) * 3 * (size_t)part_triangles);
+					if (part->layer_weights)
+					{
+						for (layer = part->layer_count; layer > 0; layer--)
+						{
+							part->layer_materials[layer] = part->layer_materials[layer - 1];
+							part->layer_channels[layer] = part->layer_channels[layer - 1];
+							part->layer_multiply[layer] = part->layer_multiply[layer - 1];
+							layer_uv_sets[layer] = layer_uv_sets[layer - 1];
+						}
+						part->layer_materials[0] = part->material_index;
+						part->layer_channels[0] = _saber_layer_channel_whole;
+						part->layer_multiply[0] = FALSE;
+						layer_uv_sets[0] = 0;
+						part->layer_count++;
+					}
+				}
+				/* (and the light baked into its vertices, after their weights) */
+				if (walk->level && part->terrain == 1 && layer_sets > 0 && light_offset > 0 && !xbox360)
+					part->vertex_light = malloc(sizeof(*part->vertex_light) * 3 * (size_t)part_triangles);
+				/* (each layer's own texture coordinates, its set of the vertex's:
+				drawn by the base's, b30's cliff's layers were smeared over it
+				out of place, and each patch of rock a layer covered whole, drawn
+				by its own, met its neighbours' drawing of the same rock where
+				their coordinates broke) */
+				if (part->layer_count > 0 && layer_sets > 1 && !planar)
+					part->layer_texcoords = malloc(sizeof(*part->layer_texcoords) * 3 * (size_t)part_triangles);
+				for (triangle = 0; triangle < 3 * vertex_count; triangle++)
 					remap[triangle] = NONE;
 				part->triangle_count = 0;
 				for (triangle = 0; triangle < part_triangles; triangle++)
 				{
 					long corner;
 					long vertex[3];
+					long axis;
 					boolean drop = FALSE;
 
 					for (corner = 0; corner < 3; corner++)
@@ -2757,16 +3178,83 @@ static boolean mesh_read(
 					}
 					if (drop)
 						continue;
+					/* (the axis a planar patch's triangle faces most) */
+					axis = 0;
+					if (planar)
+					{
+						real_vector3d ab;
+						real_vector3d ac;
+						real_vector3d across;
+						real x;
+						real y;
+						real z;
+
+						vector_from_points3d(&vertices[vertex[0]].position, &vertices[vertex[1]].position, &ab);
+						vector_from_points3d(&vertices[vertex[0]].position, &vertices[vertex[2]].position, &ac);
+						cross_product3d(&ab, &ac, &across);
+						x = across.i < 0.f ? -across.i : across.i;
+						y = across.j < 0.f ? -across.j : across.j;
+						z = across.k < 0.f ? -across.k : across.k;
+						axis = z >= x && z >= y ? 2 : (x >= y ? 0 : 1);
+					}
 					for (corner = 0; corner < 3; corner++)
 					{
-						if (remap[vertex[corner]] == NONE)
+						long key = planar ? 3 * vertex[corner] + axis : vertex[corner];
+
+						if (remap[key] == NONE)
 						{
-							remap[vertex[corner]] = part->vertex_count;
-							if (part->layer_weights)
+							struct model_vertex_uncompressed *made_vertex = &part->vertices[part->vertex_count];
+
+							remap[key] = part->vertex_count;
+							if (part->layer_weights && colors)
 								memcpy(part->layer_weights[part->vertex_count], colors[vertex[corner]], 4);
-							part->vertices[part->vertex_count++] = vertices[vertex[corner]];
+							else if (part->layer_weights)
+								memset(part->layer_weights[part->vertex_count], 0, 4);
+							if (part->vertex_light)
+							{
+								unsigned char const *light = bytes + vertex_data_start +
+									(unsigned long)vertex_size * (unsigned long)vertex[corner] + (unsigned long)light_offset;
+
+								part->vertex_light[part->vertex_count][0] = light[0];
+								part->vertex_light[part->vertex_count][1] = light[1];
+								part->vertex_light[part->vertex_count][2] = light[2];
+							}
+							if (part->vertex_alpha)
+								part->vertex_alpha[part->vertex_count] = empty[vertex_count + vertex[corner]];
+							*made_vertex = vertices[vertex[corner]];
+							if (part->layer_texcoords)
+							{
+								long layer;
+
+								for (layer = 0; layer < SABER_MAXIMUM_LAYERS; layer++)
+								{
+									long set = layer < part->layer_count ? layer_uv_sets[layer] : 0;
+									unsigned char const *uv = bytes + vertex_data_start +
+										(unsigned long)vertex_size * (unsigned long)vertex[corner] +
+										(unsigned long)uv_offset + 4 * (unsigned long)set;
+
+									if (set <= 0 || set >= layer_sets)
+									{
+										part->layer_texcoords[part->vertex_count][layer][0] = made_vertex->texcoord.x;
+										part->layer_texcoords[part->vertex_count][layer][1] = made_vertex->texcoord.y;
+										continue;
+									}
+									part->layer_texcoords[part->vertex_count][layer][0] =
+										unit_short(xbox360 ? read_short_big(uv) : read_short(uv));
+									part->layer_texcoords[part->vertex_count][layer][1] =
+										unit_short(xbox360 ? read_short_big(uv + 2) : read_short(uv + 2));
+								}
+							}
+							if (planar)
+							{
+								real_point3d const *at = &made_vertex->position;
+
+								made_vertex->texcoord.x = (axis == 0 ? at->y : at->x) / SABER_TERRAIN_SPAN;
+								made_vertex->texcoord.y = (axis == 2 ? at->y : at->z) / SABER_TERRAIN_SPAN;
+							}
+							part->vertex_count++;
 						}
-						part->triangles[3 * part->triangle_count + corner] = (unsigned short)remap[vertex[corner]];
+						part->triangles[3 * part->triangle_count + corner] = (unsigned short)remap[key];
 					}
 					part->triangle_count++;
 				}
@@ -2776,6 +3264,12 @@ static boolean mesh_read(
 					free(part->triangles);
 					if (part->layer_weights)
 						free(part->layer_weights);
+					if (part->layer_texcoords)
+						free(part->layer_texcoords);
+					if (part->vertex_light)
+						free(part->vertex_light);
+					if (part->vertex_alpha)
+						free(part->vertex_alpha);
 					template_->part_count--;
 					first += part_triangles;
 					count -= part_triangles;
@@ -3024,6 +3518,62 @@ static boolean object_template_name(
 	return length > 0;
 }
 
+/* where a level's placed object `name` stands: the matrix of the instance
+("SNIA": its name, its template's, its class, then sixteen floats, rows of
+four) naming it. The scrolling clouds are placed six and a half times their
+template's size, the dome lifted and turned: read where the template left
+them, the clouds hung small inside the ring. FALSE with none */
+static boolean level_object_instance(
+	unsigned char const *bytes,
+	unsigned long size,
+	char const *name,
+	real matrix[16])
+{
+	unsigned long length = (unsigned long)strlen(name);
+	unsigned long at;
+
+	if (!length || size < 80)
+		return FALSE;
+	for (at = 0; at + 4 + 64 < size; at++)
+	{
+		unsigned long cursor;
+		unsigned long string;
+		long index;
+		boolean sane = TRUE;
+
+		if (bytes[at] != 'S' || bytes[at + 1] != 'N' || bytes[at + 2] != 'I' || bytes[at + 3] != 'A')
+			continue;
+		/* (its own name, then its template's) */
+		cursor = at + 4;
+		while (cursor < size && bytes[cursor])
+			cursor++;
+		string = ++cursor;
+		while (cursor < size && bytes[cursor])
+			cursor++;
+		if (cursor >= size || cursor - string != length || memcmp(bytes + string, name, length) != 0)
+			continue;
+		/* (its class, then a byte, then the matrix) */
+		cursor++;
+		while (cursor < size && bytes[cursor])
+			cursor++;
+		cursor += 2;
+		if (cursor + 64 > size)
+			return FALSE;
+		for (index = 0; index < 16; index++)
+		{
+			matrix[index] = read_real(bytes + cursor + 4 * index);
+			if (!real_finite(matrix[index]) || matrix[index] > 1.0e6f || matrix[index] < -1.0e6f)
+				sane = FALSE;
+		}
+		if (!sane || matrix[15] < 0.999f || matrix[15] > 1.001f)
+			return FALSE;
+
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
 /* one placed object of a level: its nodes read on their own (their ids are
 not the level's) and its meshes added to the level. A sky object's parts
 are marked so. A mesh that cannot be read leaves the object there */
@@ -3046,6 +3596,7 @@ static void level_object_read(
 	walk.bytes = bytes;
 	walk.size = size;
 	walk.level = TRUE;
+	walk.has_instance = !xbox360 && level_object_instance(bytes, size, name, walk.instance);
 	walk.nodes = malloc(sizeof(*walk.nodes) * MAXIMUM_NODES);
 	if (!walk.nodes)
 		return;
@@ -3101,6 +3652,443 @@ static void level_objects_read(
 	}
 }
 
+/* (a skin compound's mesh is of no level by its node's name, its own
+being the compound's: its level is its vertices' bone's, a needler's
+needles of its next level all of bone `lod1`. Of the most detailed, they
+are drawn with those, where they stay as the needles are fired) */
+static void template_compound_levels(
+	struct saber_template *template_)
+{
+	long part_index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[part_index];
+		long index;
+		long bone = NONE;
+		boolean one = TRUE;
+
+		if (part->lod != 0 || !part->compound || part->vertex_count <= 0)
+			continue;
+		for (index = 0; index < part->vertex_count && one; index++)
+		{
+			long slot = part->vertices[index].nodes[0];
+
+			if (bone == NONE)
+				bone = slot;
+			else if (slot != bone)
+				one = FALSE;
+		}
+		if (one && bone >= 0 && bone < template_->bone_count &&
+			!strncmp(template_->bones[bone], "lod", 3) &&
+			template_->bones[bone][3] >= '1' && template_->bones[bone][3] <= '9' && !template_->bones[bone][4])
+		{
+			part->lod = (short)(template_->bones[bone][3] - '0');
+		}
+	}
+}
+
+/* how many of a part's triangles span more than half the texture, with
+its coordinates as they are or, `wrapped`, those past three quarters taken
+back by 1; and, wrapped, how many of its vertices are then in the half
+square (from a quarter before it) */
+static long part_long_triangles(
+	struct saber_mesh_part const *part,
+	boolean wrapped,
+	long *inside)
+{
+	long triangle;
+	long count = 0;
+	long index;
+
+	if (inside)
+	{
+		*inside = 0;
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			real u = part->vertices[index].texcoord.x;
+			real v = part->vertices[index].texcoord.y;
+
+			if (wrapped)
+			{
+				u = u > 0.75f ? u - 1.f : u;
+				v = v > 0.75f ? v - 1.f : v;
+			}
+			if (u >= -0.26f && u <= 0.51f && v >= -0.26f && v <= 0.51f)
+				(*inside)++;
+		}
+	}
+	for (triangle = 0; triangle < part->triangle_count; triangle++)
+	{
+		real low[2] = { 1e9f, 1e9f };
+		real high[2] = { -1e9f, -1e9f };
+		long corner;
+
+		for (corner = 0; corner < 3; corner++)
+		{
+			long vertex = part->triangles[3 * triangle + corner];
+			real u;
+			real v;
+
+			if (vertex >= part->vertex_count)
+				continue;
+			u = part->vertices[vertex].texcoord.x;
+			v = part->vertices[vertex].texcoord.y;
+			if (wrapped)
+			{
+				u = u > 0.75f ? u - 1.f : u;
+				v = v > 0.75f ? v - 1.f : v;
+			}
+			low[0] = MIN(low[0], u);
+			low[1] = MIN(low[1], v);
+			high[0] = MAX(high[0], u);
+			high[1] = MAX(high[1], v);
+		}
+		if (high[0] - low[0] > 0.5f || high[1] - low[1] > 0.5f)
+			count++;
+	}
+
+	return count;
+}
+
+/* (a texture's meshes stored at half the range, the texture repeating, a
+little before 0 kept as a little before 1: a rocket launcher's, whose
+seams' triangles then span the texture. Taken back by 1 past three
+quarters, the seams close and the mesh is in the half square: twice its
+coordinates, of every mesh of that texture) */
+static void template_wrapped_halves(
+	struct saber_template *template_)
+{
+	long part_index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part const *part = &template_->parts[part_index];
+		long raw_long;
+		long wrapped_long;
+		long inside;
+		short material = part->material_index;
+		long other_index;
+
+		if (material < 0 || part->triangle_count < 100 || part->vertex_count <= 0)
+			continue;
+		raw_long = part_long_triangles(part, FALSE, NULL);
+		if (raw_long * 50 < part->triangle_count)
+			continue;
+		wrapped_long = part_long_triangles(part, TRUE, &inside);
+		if (wrapped_long * 3 > raw_long || inside * 100 < part->vertex_count * 85)
+			continue;
+		for (other_index = 0; other_index < template_->part_count; other_index++)
+		{
+			struct saber_mesh_part *other = &template_->parts[other_index];
+			long index;
+
+			if (other->material_index != material)
+				continue;
+			for (index = 0; index < other->vertex_count; index++)
+			{
+				struct model_vertex_uncompressed *vertex = &other->vertices[index];
+				real u = vertex->texcoord.x > 0.75f ? vertex->texcoord.x - 1.f : vertex->texcoord.x;
+				real v = vertex->texcoord.y > 0.75f ? vertex->texcoord.y - 1.f : vertex->texcoord.y;
+
+				u *= 2.f;
+				v *= 2.f;
+				vertex->texcoord.x = u > 1.02f ? u - 1.f : u;
+				vertex->texcoord.y = v > 1.02f ? v - 1.f : v;
+			}
+			other->uv_repeat = 0;
+		}
+		/* (the material's meshes done: none of it again) */
+		for (other_index = 0; other_index < template_->part_count; other_index++)
+		{
+			if (template_->parts[other_index].material_index == material)
+				template_->parts[other_index].material_index = (short)(-2 - material);
+		}
+	}
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		if (template_->parts[part_index].material_index <= -2)
+			template_->parts[part_index].material_index = (short)(-2 - template_->parts[part_index].material_index);
+	}
+}
+
+/* a part's texture coordinates' box: of them all, or of those in the
+half square alone; how many are in it */
+static long part_uv_box(
+	struct saber_mesh_part const *part,
+	boolean half,
+	real *low,
+	real *high)
+{
+	long index;
+	long inside = 0;
+
+	low[0] = low[1] = 1e9f;
+	high[0] = high[1] = -1e9f;
+	for (index = 0; index < part->vertex_count; index++)
+	{
+		real u = part->vertices[index].texcoord.x;
+		real v = part->vertices[index].texcoord.y;
+		boolean in_half = u >= -0.02f && u <= 0.51f && v >= -0.02f && v <= 0.51f;
+
+		if (in_half)
+			inside++;
+		if (half && !in_half)
+			continue;
+		low[0] = MIN(low[0], u);
+		low[1] = MIN(low[1], v);
+		high[0] = MAX(high[0], u);
+		high[1] = MAX(high[1], v);
+	}
+
+	return inside;
+}
+
+/* (a mesh stored at half the range, as the half square check of
+mesh_read finds, but for an island or a stray triangle past the half: a
+needler's body, a few of its pieces at 0.6 to 0.9, a Jackal's, one
+triangle at 0.85. Twice the coordinates, when another level's mesh of
+the same texture spans what twice its half does; an island then past 1
+taken back by 1, where the texture repeats) */
+static void template_half_meshes_double(
+	struct saber_template *template_)
+{
+	long part_index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[part_index];
+		real low[2];
+		real high[2];
+		long inside;
+		long other_index;
+		boolean matched = FALSE;
+
+		real all_low[2];
+		real all_high[2];
+		long triangle;
+		boolean seam = FALSE;
+
+		if (part->vertex_count <= 0)
+			continue;
+		inside = part_uv_box(part, TRUE, low, high);
+		part_uv_box(part, FALSE, all_low, all_high);
+		/* (most of it in the half, all of it in the half along one axis (a
+		needler's and a Jackal's islands go past it across, not down), and
+		no triangle across a seam, whose coordinates wrap (a rocket
+		launcher's tube)) */
+		/* (and some of it past the half: a mesh wholly in it that its node's
+		check left, a rocket launcher's, is of a node that spans the square,
+		and drawn as it is) */
+		if (inside * 10 < part->vertex_count * 9 || inside == part->vertex_count || high[0] <= 0.35f ||
+			high[1] <= 0.35f || (all_high[0] > 0.52f && all_high[1] > 0.52f))
+		{
+			continue;
+		}
+		for (triangle = 0; triangle < part->triangle_count && !seam; triangle++)
+		{
+			long corner;
+			real tri_low[2] = { 1e9f, 1e9f };
+			real tri_high[2] = { -1e9f, -1e9f };
+
+			for (corner = 0; corner < 3; corner++)
+			{
+				long vertex = part->triangles[3 * triangle + corner];
+
+				if (vertex >= part->vertex_count)
+					continue;
+				tri_low[0] = MIN(tri_low[0], part->vertices[vertex].texcoord.x);
+				tri_low[1] = MIN(tri_low[1], part->vertices[vertex].texcoord.y);
+				tri_high[0] = MAX(tri_high[0], part->vertices[vertex].texcoord.x);
+				tri_high[1] = MAX(tri_high[1], part->vertices[vertex].texcoord.y);
+			}
+			if (tri_high[0] - tri_low[0] > 0.45f || tri_high[1] - tri_low[1] > 0.45f)
+				seam = TRUE;
+		}
+		if (seam)
+			continue;
+		for (other_index = 0; other_index < template_->part_count && !matched; other_index++)
+		{
+			struct saber_mesh_part const *other = &template_->parts[other_index];
+			real other_low[2];
+			real other_high[2];
+			long axis;
+			long other_inside;
+
+			if (other_index == part_index || other->material_index != part->material_index ||
+				other->lod == part->lod || other->vertex_count <= 0)
+			{
+				continue;
+			}
+			other_inside = part_uv_box(other, FALSE, other_low, other_high);
+			if (other_inside * 10 >= other->vertex_count * 9)
+				continue;
+			matched = TRUE;
+			/* (its far edges twice the half's; its near ones its own) */
+			for (axis = 0; axis < 2; axis++)
+			{
+				real near_high = other_high[axis] - high[axis] * 2.f;
+
+				if (near_high > 0.08f || near_high < -0.08f || other_low[axis] > low[axis] * 2.f + 0.08f)
+					matched = FALSE;
+			}
+		}
+		if (matched)
+		{
+			long index;
+
+			part->uv_repeat = 0;
+			for (index = 0; index < part->vertex_count; index++)
+			{
+				struct model_vertex_uncompressed *vertex = &part->vertices[index];
+
+				vertex->texcoord.x *= 2.f;
+				vertex->texcoord.y *= 2.f;
+				if (vertex->texcoord.x > 1.02f)
+					vertex->texcoord.x -= 1.f;
+				if (vertex->texcoord.y > 1.02f)
+					vertex->texcoord.y -= 1.f;
+			}
+		}
+	}
+}
+
+/* (a mesh with no compression parameters keeps its coordinates packed by
+the repeat its 0x2F01 names: a short's -1..1 stands for -repeat..repeat. A
+small door's frame, 0..1 stored, is 0..2: drawn as stored its texture was
+twice too large. Those the half range rules above did not take are
+multiplied by it, then moved by whole repeats, which the texture does not
+show, into the -1..1 a compressed coordinate holds) */
+static long repeat_island_root(
+	long *parents,
+	long index)
+{
+	while (parents[index] != index)
+	{
+		parents[index] = parents[parents[index]];
+		index = parents[index];
+	}
+
+	return index;
+}
+
+static void template_repeats_apply(
+	struct saber_template *template_)
+{
+	long part_index;
+
+	for (part_index = 0; part_index < template_->part_count; part_index++)
+	{
+		struct saber_mesh_part *part = &template_->parts[part_index];
+		real repeat = (real)part->uv_repeat;
+		long *parents;
+		real *bounds;
+		long index;
+		long triangle;
+
+		if (part->uv_repeat <= 1 || part->vertex_count <= 0)
+			continue;
+		part->uv_repeat = 0;
+		parents = malloc(sizeof(*parents) * (size_t)part->vertex_count);
+		bounds = malloc(sizeof(*bounds) * 4 * (size_t)part->vertex_count);
+		if (!parents || !bounds)
+		{
+			if (parents)
+				free(parents);
+			if (bounds)
+				free(bounds);
+			continue;
+		}
+		/* (its islands: vertices joined by a triangle move together) */
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			parents[index] = index;
+			bounds[4 * index] = bounds[4 * index + 1] = 1e9f;
+			bounds[4 * index + 2] = bounds[4 * index + 3] = -1e9f;
+		}
+		for (triangle = 0; triangle < part->triangle_count; triangle++)
+		{
+			long corner;
+			long first = part->triangles[3 * triangle];
+
+			if (first >= part->vertex_count)
+				continue;
+			for (corner = 1; corner < 3; corner++)
+			{
+				long other = part->triangles[3 * triangle + corner];
+
+				if (other < part->vertex_count)
+					parents[repeat_island_root(parents, other)] = repeat_island_root(parents, first);
+			}
+		}
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			struct model_vertex_uncompressed const *vertex = &part->vertices[index];
+			long root = repeat_island_root(parents, index);
+			real u = vertex->texcoord.x * repeat;
+			real v = vertex->texcoord.y * repeat;
+
+			bounds[4 * root] = MIN(bounds[4 * root], u);
+			bounds[4 * root + 1] = MIN(bounds[4 * root + 1], v);
+			bounds[4 * root + 2] = MAX(bounds[4 * root + 2], u);
+			bounds[4 * root + 3] = MAX(bounds[4 * root + 3], v);
+		}
+		/* (an island wider than two repeats, a boulder's tiled rock, would
+		be clamped and smeared: such a part is left as it was) */
+		{
+			boolean fits = TRUE;
+
+			for (index = 0; index < part->vertex_count && fits; index++)
+			{
+				if (repeat_island_root(parents, index) != index)
+					continue;
+				if (bounds[4 * index + 2] - bounds[4 * index] > 2.04f ||
+					bounds[4 * index + 3] - bounds[4 * index + 1] > 2.04f)
+				{
+					fits = FALSE;
+				}
+			}
+			if (!fits)
+			{
+				free(parents);
+				free(bounds);
+				continue;
+			}
+		}
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			part->vertices[index].texcoord.x *= repeat;
+			part->vertices[index].texcoord.y *= repeat;
+		}
+		/* (each island moved by whole repeats, which the texture does not
+		show, to the middle of the -1..1 a compressed coordinate holds. A
+		Wraith's hull, -0.14..2 over the part, fits island by island) */
+		for (index = 0; index < part->vertex_count; index++)
+		{
+			struct model_vertex_uncompressed *vertex = &part->vertices[index];
+			long root = repeat_island_root(parents, index);
+			long axis;
+
+			for (axis = 0; axis < 2; axis++)
+			{
+				real low = bounds[4 * root + axis];
+				real high = bounds[4 * root + 2 + axis];
+				real middle = (low + high) / 2.f;
+				real shift = (real)(long)(middle + (middle >= 0.f ? 0.5f : -0.5f));
+
+				if (low >= -1.f && high <= 1.f)
+					shift = 0.f;
+				if (axis == 0)
+					vertex->texcoord.x -= shift;
+				else
+					vertex->texcoord.y -= shift;
+			}
+		}
+		free(parents);
+		free(bounds);
+	}
+}
+
 int saber_template_read(
 	struct saber_template *template_,
 	unsigned char const *bytes,
@@ -3115,7 +4103,14 @@ int saber_template_read(
 	if (!block_at(bytes, 0, size, &root) || root.type != _block_template)
 		return FALSE;
 
-	return template_blocks_read(template_, bytes, size, &root, xbox360, FALSE, reason);
+	if (!template_blocks_read(template_, bytes, size, &root, xbox360, FALSE, reason))
+		return FALSE;
+	template_compound_levels(template_);
+	template_wrapped_halves(template_);
+	template_half_meshes_double(template_);
+	template_repeats_apply(template_);
+
+	return TRUE;
 }
 
 int saber_level_geometry_read(
@@ -3391,6 +4386,12 @@ void saber_template_dispose(
 			free(template_->parts[index].triangles);
 		if (template_->parts[index].layer_weights)
 			free(template_->parts[index].layer_weights);
+		if (template_->parts[index].layer_texcoords)
+			free(template_->parts[index].layer_texcoords);
+		if (template_->parts[index].vertex_light)
+			free(template_->parts[index].vertex_light);
+		if (template_->parts[index].vertex_alpha)
+			free(template_->parts[index].vertex_alpha);
 	}
 	if (template_->parts)
 		free(template_->parts);
@@ -3598,6 +4599,30 @@ static void texture_texel(struct saber_texture const *texture, long x, long y, l
 
 static long block_texel_alpha(unsigned char const *block, long format, long texel);
 
+/* A DXT texture without its largest level: its next mipmap its first, of
+half the width and height, a quarter of the memory. FALSE, unchanged, when
+it has no mipmap after the first */
+boolean saber_texture_halve(
+	struct saber_texture *texture)
+{
+	long block_size;
+	long first;
+
+	if (!texture || !texture->pixels || texture->mipmap_count < 1 || texture->width < 8 || texture->height < 8)
+		return FALSE;
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	first = (texture->width / 4) * (texture->height / 4) * block_size;
+	if (first >= texture->pixels_size)
+		return FALSE;
+	memmove(texture->pixels, texture->pixels + first, (size_t)(texture->pixels_size - first));
+	texture->pixels_size -= first;
+	texture->width = (short)(texture->width / 2);
+	texture->height = (short)(texture->height / 2);
+	texture->mipmap_count--;
+
+	return TRUE;
+}
+
 /* how much of each level of a DXT3 or DXT5 texture is clear (alpha under
 32), in hundredths, into `levels`; how many levels */
 long saber_texture_alpha_levels(
@@ -3704,6 +4729,99 @@ int saber_texture_alpha_glyph(
 	return MAX(high[0], MAX(high[1], high[2])) > 32;
 }
 
+/* the rectangle of a texture's first level its clear texels (alpha below
+64) are in, as fractions of its width and height. FALSE with none */
+int saber_texture_clear_bounds(
+	struct saber_texture const *texture,
+	real *u0,
+	real *v0,
+	real *u1,
+	real *v1)
+{
+	long block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	long across = texture->width / 4;
+	long blocks = (long)(texture->width / 4) * (long)(texture->height / 4);
+	long min_x = texture->width;
+	long min_y = texture->height;
+	long max_x = -1;
+	long max_y = -1;
+	long block;
+
+	if (!texture->pixels || blocks <= 0 || across <= 0 || blocks * block_size > texture->pixels_size ||
+		(texture->format != _bitmap_format_dxt5 && texture->format != _bitmap_format_dxt3))
+	{
+		return FALSE;
+	}
+	for (block = 0; block < blocks; block++)
+	{
+		unsigned char const *bytes = texture->pixels + block * block_size;
+		long texel;
+
+		for (texel = 0; texel < 16; texel++)
+		{
+			long alpha;
+
+			if (texture->format == _bitmap_format_dxt3)
+			{
+				alpha = ((bytes[texel / 2] >> (4 * (texel % 2))) & 15) * 17;
+			}
+			else
+			{
+				long alpha0 = bytes[0];
+				long alpha1 = bytes[1];
+				unsigned long low = (unsigned long)bytes[2] | ((unsigned long)bytes[3] << 8) | ((unsigned long)bytes[4] << 16);
+				unsigned long high = (unsigned long)bytes[5] | ((unsigned long)bytes[6] << 8) | ((unsigned long)bytes[7] << 16);
+				long index = (long)(((texel < 8 ? low : high) >> (3 * (texel % 8))) & 7);
+
+				if (index == 0)
+					alpha = alpha0;
+				else if (index == 1)
+					alpha = alpha1;
+				else if (alpha0 > alpha1)
+					alpha = ((8 - index) * alpha0 + (index - 1) * alpha1) / 7;
+				else if (index < 6)
+					alpha = ((6 - index) * alpha0 + (index - 1) * alpha1) / 5;
+				else
+					alpha = index == 6 ? 0 : 255;
+			}
+			if (alpha < 64)
+			{
+				long x = (block % across) * 4 + texel % 4;
+				long y = (block / across) * 4 + texel / 4;
+
+				if (x < min_x)
+					min_x = x;
+				if (x > max_x)
+					max_x = x;
+				if (y < min_y)
+					min_y = y;
+				if (y > max_y)
+					max_y = y;
+			}
+		}
+	}
+	if (max_x < 0)
+		return FALSE;
+	*u0 = (real)min_x / (real)texture->width;
+	*v0 = (real)min_y / (real)texture->height;
+	*u1 = (real)(max_x + 1) / (real)texture->width;
+	*v1 = (real)(max_y + 1) / (real)texture->height;
+
+	return TRUE;
+}
+
+int saber_texture_alpha_counts(
+	struct saber_texture const *texture,
+	int foliage,
+	long *clear,
+	long *solid,
+	long *texels)
+{
+	*clear = *solid = *texels = 0;
+
+	return texture_alpha_counts(texture, foliage, clear, solid, texels);
+}
+
 int saber_texture_cutout(
 	struct saber_texture const *texture,
 	int foliage)
@@ -3716,6 +4834,10 @@ int saber_texture_cutout(
 	more than half solid, its leaves' edges soft) */
 	if (!texture_alpha_counts(texture, foliage, &clear, &solid, &texels))
 		return FALSE;
+	/* (not a sheet solid but for a few hard-edged holes: a marine's body,
+	ch_marine_01, has its corner's eagle and UNSC clear, a mask the patch's
+	own card is drawn by, not holes. Cut, the sleeves showed the bare arms
+	under them through the lettering) */
 
 	return clear * 20 >= texels && solid * (foliage ? 10 : 5) >= texels;
 }
@@ -4087,8 +5209,9 @@ int saber_texture_read_mask(
 	}
 
 	/* (a banded mask: its background, its most common value, none; else
-	whole, and a ranked character's whole one with its plates too) */
-	if (banded || (mask_takes_plates && base))
+	whole, as it is: a Grunt's, its plates added to it unsmoothed, was
+	speckled) */
+	if (banded)
 	{
 		long counts[256];
 		long background = 0;
@@ -4097,10 +5220,17 @@ int saber_texture_read_mask(
 		csmemset(counts, 0, sizeof(counts));
 		for (texel = 0; texel < width * height; texel++)
 			counts[mask[texel]]++;
+		long marked = 0;
+
 		for (texel = 1; texel < 256; texel++)
 		{
 			if (counts[texel] > counts[background])
 				background = texel;
+		}
+		for (texel = 0; texel < 256; texel++)
+		{
+			if (texel - background > 8 || texel - background < -8)
+				marked += counts[texel];
 		}
 		for (texel = 0; texel < width * height; texel++)
 		{
@@ -4108,6 +5238,13 @@ int saber_texture_read_mask(
 
 			if (banded)
 				mask[texel] = (unsigned char)(apart > 8 || apart < -8 ? 255 : 0);
+			/* (a band of next to nothing, a twentieth, a Jackal's: it changes no colour, and
+			its texture's bright skin is not plates) */
+			if (banded && marked * 20 < width * height)
+			{
+				mask[texel] = 0;
+				continue;
+			}
 			/* (but not where the texture is coloured already: an Elite's
 			armour baked blue, which colour change would darken; its grey
 			plates take it, and the band marks only some of them: the legs'
@@ -4570,8 +5707,9 @@ static long card_alpha_index(
 	return best;
 }
 
-static void texture_card_alpha(
-	struct saber_texture *texture)
+static void texture_alpha_lifted(
+	struct saber_texture *texture,
+	long (*lift)(long alpha))
 {
 	long offset;
 
@@ -4589,7 +5727,7 @@ static void texture_card_alpha(
 			memset(alpha, 0, sizeof(alpha));
 			for (texel = 0; texel < 16; texel++)
 			{
-				long lifted = card_alpha_lift(block_texel_alpha(block, texture->format, texel));
+				long lifted = lift(block_texel_alpha(block, texture->format, texel));
 
 				alpha[texel / 2] |= (unsigned char)(((lifted * 15 + 127) / 255) << (4 * (texel % 2)));
 			}
@@ -4602,7 +5740,7 @@ static void texture_card_alpha(
 
 			for (texel = 0; texel < 16; texel++)
 			{
-				long index = card_alpha_index(card_alpha_lift(
+				long index = card_alpha_index(lift(
 					block_texel_alpha(block, texture->format, texel)));
 
 				if (texel < 8)
@@ -4620,6 +5758,32 @@ static void texture_card_alpha(
 			block[7] = (unsigned char)(high >> 16);
 		}
 	}
+}
+
+static void texture_card_alpha(
+	struct saber_texture *texture)
+{
+	texture_alpha_lifted(texture, card_alpha_lift);
+}
+
+/* a planet's alpha lifted to its disc: all but its faintest is solid. The
+package's alpha shades the disc (the night side's is a third), which its
+shader lights by; drawn as coverage, the clouds showed through the planet */
+static long disc_alpha_lift(
+	long alpha)
+{
+	if (alpha < 6)
+		return 0;
+	if (alpha >= 22)
+		return 255;
+
+	return (alpha - 6) * 255 / 16;
+}
+
+void saber_texture_disc_alpha(
+	struct saber_texture *texture)
+{
+	texture_alpha_lifted(texture, disc_alpha_lift);
 }
 
 /* the halo ring's colour sits a few shades off one blue. Spread those
@@ -4779,6 +5943,63 @@ void saber_texture_band_grey(
 	texture_recolour(texture, band, FALSE);
 }
 
+/* a DXT3 or DXT5 texture's alpha scaled by numer / denom: a pane drawn
+clearer (the Pelican's cockpit glass, two panes deep from inside) */
+void saber_texture_scale_alpha(
+	struct saber_texture *texture,
+	long numer,
+	long denom)
+{
+	long offset;
+
+	if (!texture || !texture->pixels || denom <= 0 || numer < 0 ||
+		(texture->format != _bitmap_format_dxt3 && texture->format != _bitmap_format_dxt5))
+	{
+		return;
+	}
+	for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+	{
+		unsigned char *block = texture->pixels + offset;
+
+		if (texture->format == _bitmap_format_dxt3)
+		{
+			long index;
+
+			for (index = 0; index < 8; index++)
+			{
+				long low = (block[index] & 15) * numer / denom;
+				long high = (block[index] >> 4) * numer / denom;
+
+				block[index] = (unsigned char)(MIN(15, low) | (MIN(15, high) << 4));
+			}
+		}
+		else
+		{
+			/* (both ends scaled alike keep their order, so the block's mode;
+			ends made equal by it lose nothing, both the same alpha) */
+			long first = MIN(255, block[0] * numer / denom);
+			long second = MIN(255, block[1] * numer / denom);
+
+			if ((block[0] > block[1]) && first == second && first > 0)
+				second = first - 1;
+			if ((block[0] <= block[1]) && first > second)
+				first = second;
+			block[0] = (unsigned char)first;
+			block[1] = (unsigned char)second;
+		}
+	}
+}
+
+/* a grey texture's greys turned the colour `hue` (each channel's share of
+a grey, which may be over 1): the needler's needles, grey in their
+texture, pink as the remastered game's shader draws them */
+void saber_texture_tint(
+	struct saber_texture *texture,
+	real const hue[3])
+{
+	texture_recolour(texture, hue, TRUE);
+}
+
 /* a rank's own texture's grey trim turned the colour its armour is baked
 (an Elite major's silver strips, of ch_elite_officer_01, his red): each
 block's grey ends, by their brightness, in the hue of the texture's most
@@ -4887,8 +6108,8 @@ static void texture_recolour(
 				if (high < 40 || (high - low) * 5 > high * 2)
 					continue;
 				shade = (red + green + blue) / 3;
-				packed[end] = pack565((long)(shade * band[0] + 0.5f), (long)(shade * band[1] + 0.5f),
-					(long)(shade * band[2] + 0.5f));
+				packed[end] = pack565(MIN(255, (long)(shade * band[0] + 0.5f)), MIN(255, (long)(shade * band[1] + 0.5f)),
+					MIN(255, (long)(shade * band[2] + 0.5f)));
 				changed = TRUE;
 				continue;
 			}
@@ -4943,6 +6164,75 @@ static void texture_recolour(
 		block[1] = (unsigned char)(packed[0] >> 8);
 		block[2] = (unsigned char)packed[1];
 		block[3] = (unsigned char)(packed[1] >> 8);
+	}
+}
+
+/* a texture all one colour: `*color` (a 565 colour), or, when it is
+negative, its most common (a display's background), put there. Its alpha
+kept */
+void saber_texture_flatten(
+	struct saber_texture *texture,
+	long *color)
+{
+	long *counts;
+	long block_size;
+	long color_at;
+	long offset;
+	long x;
+	long y;
+	long best = 0;
+	long step_x;
+	long step_y;
+
+	if (!texture || !texture->pixels || texture->width < 4 || texture->height < 4 ||
+		(texture->format != _bitmap_format_dxt1 && texture->format != _bitmap_format_dxt3 &&
+			texture->format != _bitmap_format_dxt5))
+	{
+		return;
+	}
+	if (*color >= 0)
+	{
+		best = *color;
+		goto fill;
+	}
+	counts = malloc(sizeof(*counts) * 65536);
+	if (!counts)
+		return;
+	memset(counts, 0, sizeof(*counts) * 65536);
+	step_x = MAX(1, texture->width / 128);
+	step_y = MAX(1, texture->height / 128);
+	for (y = 0; y < texture->height; y += step_y)
+	{
+		for (x = 0; x < texture->width; x += step_x)
+		{
+			long red;
+			long green;
+			long blue;
+			unsigned long color;
+
+			texture_texel(texture, x, y, &red, &green, &blue);
+			color = pack565(red, green, blue);
+			counts[color]++;
+			if (counts[color] > counts[best])
+				best = (long)color;
+		}
+	}
+	free(counts);
+	*color = best;
+fill:
+	block_size = texture->format == _bitmap_format_dxt1 ? 8 : 16;
+	color_at = block_size == 8 ? 0 : 8;
+	for (offset = 0; offset + block_size <= texture->pixels_size; offset += block_size)
+	{
+		unsigned char *block = texture->pixels + offset + color_at;
+
+		/* (both ends the colour, every texel the first: DXT1's three colours
+		then, its first not clear) */
+		block[0] = (unsigned char)best;
+		block[1] = (unsigned char)(best >> 8);
+		block[2] = (unsigned char)best;
+		block[3] = (unsigned char)(best >> 8);
+		block[4] = block[5] = block[6] = block[7] = 0;
 	}
 }
 
@@ -5107,6 +6397,234 @@ void saber_texture_sky_alpha(
 		texture_punch_black(texture);
 	else
 		texture_card_alpha(texture);
+}
+
+int saber_texture_alpha_opaque(
+	struct saber_texture const *texture)
+{
+	long offset;
+
+	if (!texture->pixels || texture->format == _bitmap_format_dxt1)
+		return TRUE;
+	if (texture->format != _bitmap_format_dxt3 && texture->format != _bitmap_format_dxt5)
+		return TRUE;
+	for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+	{
+		unsigned char const *block = texture->pixels + offset;
+		long index;
+
+		if (texture->format == _bitmap_format_dxt3)
+		{
+			for (index = 0; index < 8; index++)
+			{
+				if (block[index] != 0xFF)
+					return FALSE;
+			}
+		}
+		else if (block[0] < 250 || block[1] < 250)
+		{
+			/* (both ends opaque, every texel is) */
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
+/* a DXT1 made a DXT5 of the same colour, opaque, so its alpha can fade */
+static void texture_dxt1_to_dxt5(
+	struct saber_texture *texture)
+{
+	/* (a DXT1's alpha is one bit: punched, a cloud was cut into hard grey
+	blobs. Made a DXT5, its colour blocks kept, its alpha can fade) */
+	if (texture->pixels && texture->format == _bitmap_format_dxt1 && texture->pixels_size >= 8)
+	{
+		long blocks = texture->pixels_size / 8;
+		unsigned char *pixels = malloc((size_t)blocks * 16);
+
+		if (pixels)
+		{
+			long block;
+
+			for (block = 0; block < blocks; block++)
+			{
+				unsigned char *to = pixels + block * 16;
+				unsigned char const *from = texture->pixels + block * 8;
+				unsigned long color0 = (unsigned long)from[0] | ((unsigned long)from[1] << 8);
+				unsigned long color1 = (unsigned long)from[2] | ((unsigned long)from[3] << 8);
+
+				/* (alpha: both ends opaque) */
+				csmemset(to, 0, 8);
+				to[0] = 255;
+				to[1] = 255;
+				memcpy(to + 8, from, 8);
+				/* (a DXT5's colour is always four colours: a three-colour
+				block's third, half way, and its fourth, black, are kept as
+				near as the order allows by ordering its ends as four) */
+				if (color0 <= color1)
+				{
+					unsigned long indices = (unsigned long)from[4] | ((unsigned long)from[5] << 8) |
+						((unsigned long)from[6] << 16) | ((unsigned long)from[7] << 24);
+					unsigned long remapped = 0;
+					long texel;
+
+					/* (ends swapped, so 0 <-> 1; the half way index 2 becomes
+					2 (2/3 of the new first), black 3 becomes the darker end) */
+					to[8] = from[2];
+					to[9] = from[3];
+					to[10] = from[0];
+					to[11] = from[1];
+					for (texel = 0; texel < 16; texel++)
+					{
+						unsigned long index = (indices >> (2 * texel)) & 3;
+						unsigned long code;
+
+						if (index == 0)
+							code = 1;
+						else if (index == 1)
+							code = 0;
+						else if (index == 2)
+							code = 2;
+						else
+							code = color0 <= color1 ? 1 : 0;
+						remapped |= code << (2 * texel);
+					}
+					if (color0 == color1)
+						remapped = 0;
+					to[12] = (unsigned char)remapped;
+					to[13] = (unsigned char)(remapped >> 8);
+					to[14] = (unsigned char)(remapped >> 16);
+					to[15] = (unsigned char)(remapped >> 24);
+				}
+			}
+			free(texture->pixels);
+			texture->pixels = pixels;
+			texture->pixels_size = blocks * 16;
+			texture->format = _bitmap_format_dxt5;
+		}
+	}
+}
+
+void saber_texture_glow_alpha(
+	struct saber_texture *texture)
+{
+	texture_dxt1_to_dxt5(texture);
+	texture_punch_black(texture);
+}
+
+/* the alpha of a DXT5 block's sixteen texels written as its best end
+points and indices */
+static void dxt5_alpha_write(
+	unsigned char *block,
+	long const *alpha)
+{
+	long high = 0;
+	long low = 255;
+	long texel;
+	unsigned long first = 0;
+	unsigned long second = 0;
+
+	for (texel = 0; texel < 16; texel++)
+	{
+		high = MAX(high, alpha[texel]);
+		low = MIN(low, alpha[texel]);
+	}
+	if (high == low)
+	{
+		/* (one alpha: both ends it) */
+		block[0] = (unsigned char)high;
+		block[1] = (unsigned char)low;
+		memset(block + 2, 0, 6);
+		return;
+	}
+	for (texel = 0; texel < 16; texel++)
+	{
+		long best = 0;
+		long distance = 1000;
+		long index;
+
+		for (index = 0; index < 8; index++)
+		{
+			long value = index == 0 ? high : index == 1 ? low :
+				((8 - index) * high + (index - 1) * low) / 7;
+			long delta = value > alpha[texel] ? value - alpha[texel] : alpha[texel] - value;
+
+			if (delta < distance)
+			{
+				distance = delta;
+				best = index;
+			}
+		}
+		if (texel < 8)
+			first |= (unsigned long)best << (3 * texel);
+		else
+			second |= (unsigned long)best << (3 * (texel - 8));
+	}
+	block[0] = (unsigned char)high;
+	block[1] = (unsigned char)low;
+	block[2] = (unsigned char)first;
+	block[3] = (unsigned char)(first >> 8);
+	block[4] = (unsigned char)(first >> 16);
+	block[5] = (unsigned char)second;
+	block[6] = (unsigned char)(second >> 8);
+	block[7] = (unsigned char)(second >> 16);
+}
+
+void saber_texture_cloud_alpha(
+	struct saber_texture *texture)
+{
+	long offset;
+
+	texture_dxt1_to_dxt5(texture);
+	if (!texture->pixels || texture->format != _bitmap_format_dxt5)
+		return;
+	for (offset = 0; offset + 16 <= texture->pixels_size; offset += 16)
+	{
+		unsigned char *block = texture->pixels + offset;
+		unsigned long color0 = (unsigned long)block[8] | ((unsigned long)block[9] << 8);
+		unsigned long color1 = (unsigned long)block[10] | ((unsigned long)block[11] << 8);
+		long red[4];
+		long green[4];
+		long blue[4];
+		long alpha[16];
+		long channel;
+		long texel;
+
+		for (channel = 0; channel < 2; channel++)
+		{
+			unsigned long color = channel == 0 ? color0 : color1;
+
+			red[channel] = unpack565(color, 0);
+			green[channel] = unpack565(color, 1);
+			blue[channel] = unpack565(color, 2);
+		}
+		red[2] = (2 * red[0] + red[1]) / 3;
+		green[2] = (2 * green[0] + green[1]) / 3;
+		blue[2] = (2 * blue[0] + blue[1]) / 3;
+		red[3] = (red[0] + 2 * red[1]) / 3;
+		green[3] = (green[0] + 2 * green[1]) / 3;
+		blue[3] = (blue[0] + 2 * blue[1]) / 3;
+		for (texel = 0; texel < 16; texel++)
+		{
+			long index = (block[12 + texel / 4] >> (2 * (texel % 4))) & 3;
+			long most = MAX(red[index], MAX(green[index], blue[index]));
+			long least = MIN(red[index], MIN(green[index], blue[index]));
+			/* (white or grey: cloud; the sky's blue behind it: clear) */
+			real whiteness = most > 0 ? (real)least / (real)most : 0.f;
+			real kept = (whiteness - 0.6f) / 0.3f;
+
+			if (kept < 0.f)
+				kept = 0.f;
+			if (kept > 1.f)
+				kept = 1.f;
+			kept = kept * kept * (3.f - 2.f * kept);
+			/* (and a dark texel is the black around a card's cloud) */
+			if (most < 24)
+				kept = 0.f;
+			alpha[texel] = (long)(block_texel_alpha(block, texture->format, texel) * kept + 0.5f);
+		}
+		dxt5_alpha_write(block, alpha);
+	}
 }
 
 /* the rear meter's white plate. Luminance becomes blue; black stays black */
