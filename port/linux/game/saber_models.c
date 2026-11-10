@@ -8574,6 +8574,42 @@ short saber_models_geometry_index(
 forced one (an Elite major's 1, a commander's 2: the map's bitmaps of the
 rank), but none while the template is drawn, whose shaders' permutations
 are its own textures' places, the same for every rank */
+/* the map's lights an Anniversary model has none of: hidden on an object
+while its model is drawn as the template (a Banshee's wingtip lights,
+glowing in the air off the remastered wings' tips) */
+static char const *const saber_hidden_lights[] = {
+	"vehicles\\banshee\\banshee wing",
+};
+
+int saber_models_light_hidden(
+	long light_tag,
+	long model_tag)
+{
+	struct saber_model const *made;
+	char const *name;
+	long index;
+
+	if (light_tag == NONE || model_tag == NONE)
+		return FALSE;
+	name = tag_get_name(light_tag);
+	if (!name)
+		return FALSE;
+	for (index = 0; index < NUMBEROF(saber_hidden_lights); index++)
+	{
+		if (!strcmp(name, saber_hidden_lights[index]))
+			break;
+	}
+	if (index == NUMBEROF(saber_hidden_lights))
+		return FALSE;
+	for (made = saber_models_globals.models; made; made = made->next)
+	{
+		if (made->tag_index == model_tag)
+			return model_definition_get(model_tag)->geometries.address == made->geometries;
+	}
+
+	return FALSE;
+}
+
 short saber_models_shader_permutation(
 	long model_tag,
 	short forced)

@@ -184,6 +184,7 @@ symbols in this file:
 #include "tag_files/tag_groups.h"
 #include "units/units.h"
 #include "cache/cache_files.h" /* port: (tag_iterator: light_port_glow_definition_get) */
+#include "saber.h" /* port: port/linux/game/saber_models.c */
 void shield_glow_update(void); /* port: port/linux/game/shield_glow.c */
 
 /* port: port/linux/src (halo.log) */
@@ -1045,6 +1046,13 @@ void lights_preprocess_scene(
 		object = light->object_index != NONE
 			? object_try_and_get(light->object_index)
 			: NULL;
+		/* port: not a light the Anniversary model drawn in its object's place
+		has none of, a Banshee's wingtip lights (saber_models_light_hidden) */
+		if (object && saber_models_light_hidden(light->definition_index,
+				object_definition_get(object->definition_index)->object.model.index))
+		{
+			continue;
+		}
 		if (TEST_FLAG(light->flags, _point_light_port_glow_bit))
 		{
 			/* port: a glow's color is as set (light_port_glow_set) */

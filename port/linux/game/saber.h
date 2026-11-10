@@ -350,6 +350,10 @@ union real_rgb_color;
 union real_rgb_color const *saber_models_change_colors(long model_tag, long object_index,
 	union real_rgb_color const *colors);
 short saber_models_shader_permutation(long model_tag, short forced);
+/* whether the map's light `light_tag` on an object of the model
+`model_tag` is not drawn: the Anniversary model drawn in its place has
+none (a Banshee's wingtip lights) */
+int saber_models_light_hidden(long light_tag, long model_tag);
 /* (render_model) whether a part of a model the package draws is not drawn
 for the object: a vehicle's wreck while it lives, its whole hull once it
 is destroyed (the part's flags, saber_models.c's) */
