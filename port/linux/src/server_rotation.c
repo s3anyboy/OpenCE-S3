@@ -67,6 +67,7 @@ const struct server_rule_definition server_rule_definitions[] =
 	RULE_BOOLEAN("no_shields", NULL, "universal", ALL, "Players have no shields"),
 	RULE_BOOLEAN("invisible", NULL, "universal", ALL, "Players are always camouflaged"),
 	RULE_BOOLEAN("generic_equipment", NULL, "universal", ALL, "Every map starts players with the same weapons"),
+	RULE_BOOLEAN("vehicle_riding", "riding", "universal", ALL, "Players standing on a vehicle are carried by it"),
 	RULE_CHOICE("weapon_set", "weapons", "universal", ALL, weapon_set_words, "The weapons on the map"),
 	RULE_CHOICE("vehicle_set", "vehicles", "universal", ALL, vehicle_set_words, "The vehicles on the map"),
 	RULE_CHOICE("goal_radar", NULL, "universal", ALL, goal_radar_words,
@@ -586,6 +587,8 @@ first of its spellings found, into path */
 static int map_file(const char *folder, const char *name, char *path, int size)
 {
 	char xbox_path[512];
+	char file_name[300];
+	char on_disk[300];
 	long version, type;
 
 	if (folder[0] == 'd' && folder[1] == ':')
@@ -596,6 +599,15 @@ static int map_file(const char *folder, const char *name, char *path, int size)
 	else
 	{
 		snprintf(path, (size_t)size, "%s/%s.map", folder, name);
+		/* (a file named in other letters' case, cmt_Snow_Grove.map: the maps'
+		list names each in lower case, and the game finds it in any case, as
+		platform_translate_path does) */
+		snprintf(file_name, sizeof(file_name), "%s.map", name);
+		if (!server_map_header(path, &version, &type) &&
+			posix_find_entry_case_insensitive(folder, file_name, on_disk, sizeof(on_disk)))
+		{
+			snprintf(path, (size_t)size, "%s/%s", folder, on_disk);
+		}
 	}
 	return server_map_header(path, &version, &type);
 }

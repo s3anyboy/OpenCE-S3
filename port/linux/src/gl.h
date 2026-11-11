@@ -235,6 +235,7 @@ context has the extension, never required (gl_functions.c). On ES 3.0 and
 	X(glDrawArrays) \
 	X(glDrawElements) \
 	X(glDrawElementsBaseVertex) \
+	X(glMultiDrawElements) \
 	X(glCreateShader) \
 	X(glShaderSource) \
 	X(glCompileShader) \

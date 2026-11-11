@@ -32,6 +32,7 @@ back until mods_enable true, or until the map changes.
 #include "cseries.h"
 #include "main/console.h"
 #include "mods.h"
+#include "mcc_cache.h"
 #include "saber.h"
 #include "saber_toggle.h" /* port: Back's switch of the models, port/linux/game/saber_toggle.c */
 
@@ -245,6 +246,10 @@ void mods_tags_loaded(
 	goes, and nothing of it is written over the new map's tags) */
 	if (mods_globals.map_loaded)
 		mods_let_go(FALSE);
+	/* MCC owns its converted tags. Leave mods inactive, including console
+	and menu reapplication, until an Xbox or Custom Edition map loads. */
+	if (mcc_level_name(map_name))
+		return;
 	mods_globals.map_loaded = TRUE;
 	mods_globals.enabled = TRUE;
 	csstrncpy(mods_globals.map_name, map_name ? map_name : "", sizeof(mods_globals.map_name) - 1);

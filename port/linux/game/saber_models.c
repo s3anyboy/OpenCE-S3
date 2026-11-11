@@ -84,6 +84,21 @@ goes.
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_console_vars.h"
 #include "rasterizer/rasterizer_lights.h"
+
+/* port/linux/src/d3d8_gl.c: vertices kept on the card */
+void *d3d8_gl_static_vertices_new(unsigned long written, float const *packed, unsigned long vertex_count,
+	unsigned short const *indices, unsigned long index_count);
+void d3d8_gl_static_vertices_update(void *handle, float const *packed);
+void d3d8_gl_static_vertices_free(void *handle);
+int d3d8_gl_static_vertices_draw(void *handle, unsigned long used);
+void *d3d8_gl_static_vertices_new32(unsigned long written, float const *packed, unsigned long vertex_count,
+	unsigned long const *indices, unsigned long index_count);
+void d3d8_gl_static_vertices_update_range(void *handle, float const *packed, unsigned long first,
+	unsigned long count);
+int d3d8_gl_static_vertices_draw_ranges(void *handle, unsigned long used, unsigned long const *firsts,
+	unsigned long const *counts, unsigned long range_count);
+static void saber_level_batches_free(void);
+
 #include "render/render.h"
 #include "render/render_cameras_internal.h"
 #include "objects/object_lights_rendering.h"
@@ -6840,6 +6855,25 @@ struct saber_level_part
 	/* (the drawn layer that is its base laid whole over it, which covers it,
 	and its fog with it: NONE, none) */
 	long layer_cover;
+	/* (its layers' vertices kept on the card, each drawn layer's, and its
+	fog's: NULL, not yet, or none (d3d8_gl_static_vertices_new); each as of
+	which of its lights, layer_lit_version's, or -1 a frame's point lights';
+	and its fog as of where the camera was) */
+	void *layer_vertices[SABER_MAXIMUM_LAYERS];
+	long layer_vertices_version[SABER_MAXIMUM_LAYERS];
+	boolean layer_vertices_failed;
+	void *fog_vertices;
+	/* (its layers' places in the level's batches, saber_level_batches: each
+	layer's batch, its first vertex there and its first index; and its
+	fog's) */
+	long batch[SABER_MAXIMUM_LAYERS];
+	unsigned long batch_vertex[SABER_MAXIMUM_LAYERS];
+	unsigned long batch_index[SABER_MAXIMUM_LAYERS];
+	unsigned long fog_batch_vertex;
+	unsigned long fog_batch_index;
+	boolean fog_batched;
+	real_point3d fog_camera;
+	long layer_lit_version;
 	short layer_lit_bsp;
 	short layer_textures[SABER_MAXIMUM_LAYERS];
 	boolean layer_multiply[SABER_MAXIMUM_LAYERS];
@@ -6891,6 +6925,9 @@ static void saber_level_layers_free(
 		free(part->layer_lit);
 	for (layer = 0; layer < SABER_MAXIMUM_LAYERS; layer++)
 	{
+		if (part->layer_vertices[layer])
+			d3d8_gl_static_vertices_free(part->layer_vertices[layer]);
+		part->layer_vertices[layer] = NULL;
 		if (part->layer_weights[layer])
 			free(part->layer_weights[layer]);
 		if (part->layer_triangles[layer])
@@ -6898,6 +6935,10 @@ static void saber_level_layers_free(
 		if (part->layer_texcoords[layer])
 			free(part->layer_texcoords[layer]);
 	}
+	if (part->fog_vertices)
+		d3d8_gl_static_vertices_free(part->fog_vertices);
+	part->fog_vertices = NULL;
+	part->layer_vertices_failed = FALSE;
 	if (part->fade_positions)
 		free(part->fade_positions);
 	if (part->fade_texcoords)
@@ -7116,7 +7157,7 @@ static void saber_level_layers_make(
 		made->layer_weights[drawn] = weights;
 		made->layer_triangles[drawn] = triangles;
 		sources[drawn] = layer;
-		if (channel == _saber_layer_channel_whole && made->layer_cover == NONE)
+		if (channel == _saber_layer_channel_whole && made->layer_cover == NONE && drawn == 0)
 			made->layer_cover = drawn;
 		made->layer_count++;
 	}
@@ -7193,6 +7234,7 @@ static void saber_level_free(
 {
 	long index;
 
+	saber_level_batches_free();
 	for (index = 0; saber_level.parts && index < saber_level.part_count; index++)
 	{
 		rasterizer_triangle_buffer_delete(&saber_level.parts[index].triangle_buffer);
@@ -9099,6 +9141,7 @@ static void saber_level_layers_light(
 		}
 	}
 	part->layer_lit_bsp = part->lit_bsp;
+	part->layer_lit_version++;
 }
 
 /* a point light as its definition gives its cone (rasterizer_xbox.c's) */
@@ -9302,6 +9345,462 @@ static unsigned char (*saber_level_layers_lit_dynamic(
 	return lit;
 }
 
+/* room for `floats` floats, the vertices of a part's layer or fog as they
+are sent to the card; NULL, none */
+static float *saber_level_static_scratch(
+	long floats)
+{
+	static float *scratch = NULL;
+	static long scratch_size = 0;
+
+	if (floats > scratch_size)
+	{
+		float *grown = realloc(scratch, sizeof(*scratch) * (size_t)floats);
+
+		if (!grown)
+			return NULL;
+		scratch = grown;
+		scratch_size = floats;
+	}
+
+	return scratch;
+}
+
+/* The level's covered parts' layers in batches, each the layers of one
+place in their parts' layers (the first, the second...), one texture and
+one blend, in one buffer on the card, and each frame the visible parts'
+ranges of each drawn in one call; and their fog in one more. Drawn a part
+and a layer at a time, b30 was some five thousand draws a frame, each its
+state set again */
+struct saber_level_batch
+{
+	short slot;
+	short texture;
+	boolean multiply;
+	void *vertices;
+	unsigned long vertex_count;
+	unsigned long index_count;
+	/* (this frame's ranges) */
+	unsigned long *firsts;
+	unsigned long *counts;
+	long range_count;
+	long range_capacity;
+};
+
+static struct
+{
+	boolean made;
+	boolean failed;
+	struct saber_level_batch *batches;
+	long batch_count;
+	struct saber_level_batch fog;
+} saber_level_batches;
+
+static boolean saber_level_batch_range(
+	struct saber_level_batch *batch,
+	unsigned long first,
+	unsigned long count)
+{
+	if (batch->range_count == batch->range_capacity)
+	{
+		long capacity = batch->range_capacity ? 2 * batch->range_capacity : 64;
+		unsigned long *firsts = realloc(batch->firsts, sizeof(*firsts) * (size_t)capacity);
+		unsigned long *counts;
+
+		if (!firsts)
+			return FALSE;
+		batch->firsts = firsts;
+		counts = realloc(batch->counts, sizeof(*counts) * (size_t)capacity);
+		if (!counts)
+			return FALSE;
+		batch->counts = counts;
+		batch->range_capacity = capacity;
+	}
+	batch->firsts[batch->range_count] = first;
+	batch->counts[batch->range_count] = count;
+	batch->range_count++;
+
+	return TRUE;
+}
+
+static void saber_level_batch_dispose(
+	struct saber_level_batch *batch)
+{
+	if (batch->vertices)
+		d3d8_gl_static_vertices_free(batch->vertices);
+	if (batch->firsts)
+		free(batch->firsts);
+	if (batch->counts)
+		free(batch->counts);
+	csmemset(batch, 0, sizeof(*batch));
+}
+
+static void saber_level_batches_free(
+	void)
+{
+	long index;
+
+	for (index = 0; index < saber_level_batches.batch_count; index++)
+		saber_level_batch_dispose(&saber_level_batches.batches[index]);
+	if (saber_level_batches.batches)
+		free(saber_level_batches.batches);
+	saber_level_batch_dispose(&saber_level_batches.fog);
+	csmemset(&saber_level_batches, 0, sizeof(saber_level_batches));
+}
+
+/* whether a part's layers are batched: its first covers it */
+static boolean saber_level_part_batched(
+	struct saber_level_part const *part)
+{
+	return part->layer_count > 0 && part->layer_cover == 0 && !part->sky && part->layer_positions &&
+		part->layer_vertex_count > 0;
+}
+
+/* a part's layer's vertices as the card is sent them (12 floats each: its
+position, texture coordinates and colour, its light (white, multiplying)
+and its weight inverted) */
+static void saber_level_layer_pack(
+	struct saber_level_part const *part,
+	long layer,
+	unsigned char (*lit)[3],
+	float *packed)
+{
+	unsigned char const *weights = part->layer_weights[layer];
+	boolean multiply = part->layer_multiply[layer];
+	long vertex;
+
+	for (vertex = 0; vertex < part->layer_vertex_count; vertex++)
+	{
+		float *out = packed + vertex * 12;
+
+		out[0] = part->layer_positions[vertex][0];
+		out[1] = part->layer_positions[vertex][1];
+		out[2] = part->layer_positions[vertex][2];
+		out[3] = 1.f;
+		out[4] = part->layer_texcoords[layer][vertex][0];
+		out[5] = part->layer_texcoords[layer][vertex][1];
+		out[6] = 0.f;
+		out[7] = 1.f;
+		out[8] = multiply || !lit ? 1.f : (float)lit[vertex][0] / 255.f;
+		out[9] = multiply || !lit ? 1.f : (float)lit[vertex][1] / 255.f;
+		out[10] = multiply || !lit ? 1.f : (float)lit[vertex][2] / 255.f;
+		out[11] = (float)(255 - weights[vertex]) / 255.f;
+	}
+}
+
+/* makes the batches, the first time the layers are drawn; FALSE, none */
+static boolean saber_level_batches_make(
+	void)
+{
+	long index;
+	long batch_index;
+	unsigned long fog_vertices = 0;
+	unsigned long fog_indices = 0;
+
+	if (saber_level_batches.made)
+		return !saber_level_batches.failed;
+	saber_level_batches.made = TRUE;
+	saber_level_batches.failed = TRUE;
+	/* (each part's layers counted into their batches) */
+	for (index = 0; index < saber_level.part_count; index++)
+	{
+		struct saber_level_part *part = &saber_level.parts[index];
+		long layer;
+
+		if (!saber_level_part_batched(part))
+			continue;
+		for (layer = 0; layer < part->layer_count; layer++)
+		{
+			struct saber_level_batch *batch = NULL;
+
+			for (batch_index = 0; batch_index < saber_level_batches.batch_count; batch_index++)
+			{
+				batch = &saber_level_batches.batches[batch_index];
+				if (batch->slot == layer && batch->texture == part->layer_textures[layer] &&
+					batch->multiply == part->layer_multiply[layer])
+				{
+					break;
+				}
+			}
+			if (batch_index == saber_level_batches.batch_count)
+			{
+				struct saber_level_batch *grown = realloc(saber_level_batches.batches,
+					sizeof(*grown) * (size_t)(saber_level_batches.batch_count + 1));
+
+				if (!grown)
+					return FALSE;
+				saber_level_batches.batches = grown;
+				batch = &grown[saber_level_batches.batch_count++];
+				csmemset(batch, 0, sizeof(*batch));
+				batch->slot = (short)layer;
+				batch->texture = part->layer_textures[layer];
+				batch->multiply = part->layer_multiply[layer];
+			}
+			part->batch[layer] = batch_index;
+			part->batch_vertex[layer] = batch->vertex_count;
+			part->batch_index[layer] = batch->index_count;
+			batch->vertex_count += (unsigned long)part->layer_vertex_count;
+			batch->index_count += 3 * (unsigned long)part->layer_triangle_counts[layer];
+			part->layer_vertices_version[layer] = -2;
+		}
+		part->fog_batch_vertex = fog_vertices;
+		part->fog_batch_index = fog_indices;
+		fog_vertices += (unsigned long)part->layer_vertex_count;
+		fog_indices += 3 * (unsigned long)part->layer_triangle_counts[0];
+	}
+	/* (each batch's vertices and indices sent, one at a time) */
+	for (batch_index = 0; batch_index < saber_level_batches.batch_count; batch_index++)
+	{
+		struct saber_level_batch *batch = &saber_level_batches.batches[batch_index];
+		float *packed = malloc(sizeof(*packed) * 12 * (size_t)batch->vertex_count);
+		unsigned long *indices = malloc(sizeof(*indices) * (size_t)batch->index_count);
+
+		if (packed && indices)
+		{
+			for (index = 0; index < saber_level.part_count; index++)
+			{
+				struct saber_level_part *part = &saber_level.parts[index];
+				long layer;
+				long corner;
+
+				if (!saber_level_part_batched(part))
+					continue;
+				for (layer = 0; layer < part->layer_count; layer++)
+				{
+					if (part->batch[layer] != batch_index)
+						continue;
+					saber_level_layer_pack(part, layer, NULL, packed + 12 * part->batch_vertex[layer]);
+					for (corner = 0; corner < 3 * part->layer_triangle_counts[layer]; corner++)
+					{
+						indices[part->batch_index[layer] + corner] =
+							part->batch_vertex[layer] + part->layer_triangles[layer][corner];
+					}
+				}
+			}
+			batch->vertices = d3d8_gl_static_vertices_new32(FLAG(0) | FLAG(4) | FLAG(9), packed, batch->vertex_count,
+				indices, batch->index_count);
+		}
+		if (packed)
+			free(packed);
+		if (indices)
+			free(indices);
+		if (!batch->vertices)
+		{
+			saber_level_batches_free();
+			saber_level_batches.made = TRUE;
+			saber_level_batches.failed = TRUE;
+			return FALSE;
+		}
+	}
+	/* (and the fog's: positions, and the fog's colour and density, sent as
+	the camera moves) */
+	if (fog_vertices > 0)
+	{
+		float *packed = calloc((size_t)fog_vertices * 8, sizeof(*packed));
+		unsigned long *indices = malloc(sizeof(*indices) * (size_t)fog_indices);
+
+		if (packed && indices)
+		{
+			for (index = 0; index < saber_level.part_count; index++)
+			{
+				struct saber_level_part *part = &saber_level.parts[index];
+				long vertex;
+				long corner;
+
+				if (!saber_level_part_batched(part))
+					continue;
+				for (vertex = 0; vertex < part->layer_vertex_count; vertex++)
+				{
+					float *out = packed + 8 * (part->fog_batch_vertex + (unsigned long)vertex);
+
+					out[0] = part->layer_positions[vertex][0];
+					out[1] = part->layer_positions[vertex][1];
+					out[2] = part->layer_positions[vertex][2];
+					out[3] = 1.f;
+				}
+				for (corner = 0; corner < 3 * part->layer_triangle_counts[0]; corner++)
+					indices[part->fog_batch_index + corner] = part->fog_batch_vertex + part->layer_triangles[0][corner];
+				part->fog_batched = FALSE;
+			}
+			saber_level_batches.fog.vertices = d3d8_gl_static_vertices_new32(FLAG(0) | FLAG(9), packed, fog_vertices,
+				indices, fog_indices);
+			saber_level_batches.fog.vertex_count = fog_vertices;
+			saber_level_batches.fog.index_count = fog_indices;
+		}
+		if (packed)
+			free(packed);
+		if (indices)
+			free(indices);
+	}
+	saber_level_batches.failed = FALSE;
+	platform_log("anniversary: the structure's layers in %ld batches (%s fog)", saber_level_batches.batch_count,
+		saber_level_batches.fog.vertices ? "and their" : "without");
+
+	return TRUE;
+}
+
+/* a part's layers this frame into their batches, their light sent again
+where it changed (lit, this frame's) */
+static void saber_level_layers_batch(
+	struct saber_level_part *part,
+	unsigned char (*lit)[3])
+{
+	long version = lit == part->layer_lit ? part->layer_lit_version : -1;
+	long layer;
+
+	for (layer = 0; layer < part->layer_count; layer++)
+	{
+		struct saber_level_batch *batch = &saber_level_batches.batches[part->batch[layer]];
+
+		if (part->layer_vertices_version[layer] != version || version == -1)
+		{
+			float *packed = saber_level_static_scratch(part->layer_vertex_count * 12);
+
+			if (packed)
+			{
+				saber_level_layer_pack(part, layer, lit, packed);
+				d3d8_gl_static_vertices_update_range(batch->vertices, packed, part->batch_vertex[layer],
+					(unsigned long)part->layer_vertex_count);
+				part->layer_vertices_version[layer] = version;
+			}
+		}
+		saber_level_batch_range(batch, part->batch_index[layer], 3 * (unsigned long)part->layer_triangle_counts[layer]);
+	}
+}
+
+/* a part's fog this frame into its batch, sent again as the camera moves */
+static void saber_level_fog_batch(
+	struct saber_level_part *part)
+{
+	struct render_fog const *fog = &render.fog;
+	real span = fog->atmospheric_maximum_distance - fog->atmospheric_minimum_distance;
+	real dx;
+	real dy;
+	real dz;
+	real mx = render.camera.position.x - part->fog_camera.x;
+	real my = render.camera.position.y - part->fog_camera.y;
+	real mz = render.camera.position.z - part->fog_camera.z;
+
+	if (!saber_level_batches.fog.vertices || fog->atmospheric_maximum_density <= 0.f ||
+		fog->atmospheric_maximum_distance <= 0.f || span <= 0.f)
+	{
+		return;
+	}
+	dx = render.camera.position.x < part->bounds.x0 ? part->bounds.x0 - render.camera.position.x :
+		render.camera.position.x > part->bounds.x1 ? render.camera.position.x - part->bounds.x1 : 0.f;
+	dy = render.camera.position.y < part->bounds.y0 ? part->bounds.y0 - render.camera.position.y :
+		render.camera.position.y > part->bounds.y1 ? render.camera.position.y - part->bounds.y1 : 0.f;
+	dz = render.camera.position.z < part->bounds.z0 ? part->bounds.z0 - render.camera.position.z :
+		render.camera.position.z > part->bounds.z1 ? render.camera.position.z - part->bounds.z1 : 0.f;
+	if (dx * dx + dy * dy + dz * dz <= fog->atmospheric_minimum_distance * fog->atmospheric_minimum_distance)
+		return;
+	if (!part->fog_batched || mx * mx + my * my + mz * mz > 0.01f)
+	{
+		float *packed = saber_level_static_scratch(part->layer_vertex_count * 8);
+		float red = PIN(fog->atmospheric_color.red, 0.f, 1.f);
+		float green = PIN(fog->atmospheric_color.green, 0.f, 1.f);
+		float blue = PIN(fog->atmospheric_color.blue, 0.f, 1.f);
+		long vertex;
+
+		if (!packed)
+			return;
+		for (vertex = 0; vertex < part->layer_vertex_count; vertex++)
+		{
+			real const *at = part->layer_positions[vertex];
+			real ox = at[0] - render.camera.position.x;
+			real oy = at[1] - render.camera.position.y;
+			real oz = at[2] - render.camera.position.z;
+			real density = (square_root(ox * ox + oy * oy + oz * oz) - fog->atmospheric_minimum_distance) / span;
+			float *out = packed + vertex * 8;
+
+			density = PIN(density, 0.f, 1.f) * fog->atmospheric_maximum_density;
+			out[0] = at[0];
+			out[1] = at[1];
+			out[2] = at[2];
+			out[3] = 1.f;
+			out[4] = red;
+			out[5] = green;
+			out[6] = blue;
+			out[7] = PIN(density, 0.f, 1.f);
+		}
+		d3d8_gl_static_vertices_update_range(saber_level_batches.fog.vertices, packed, part->fog_batch_vertex,
+			(unsigned long)part->layer_vertex_count);
+		part->fog_batched = TRUE;
+		part->fog_camera = render.camera.position;
+	}
+	saber_level_batch_range(&saber_level_batches.fog, part->fog_batch_index,
+		3 * (unsigned long)part->layer_triangle_counts[0]);
+}
+
+/* the layer shader: a multiplying layer's or a blended one's (see
+saber_level_layers_render) */
+static void saber_level_layer_shader_set(
+	struct pixel_shader_definition *shader,
+	boolean multiply);
+
+/* Draws a level part's layer of its vertices kept on the card, made the
+first time and sent again as its light changes (lit, this frame's: its
+own, or its own and the frame's point lights'): its position, texture
+coordinates and colour (its light, or white for a multiplying layer; its
+alpha its weight inverted), as the immediate-mode draw gives them. FALSE,
+not drawn: the caller draws it in immediate mode */
+static boolean saber_level_layer_static_draw(
+	struct saber_level_part *part,
+	long layer,
+	unsigned char (*lit)[3])
+{
+	unsigned long const used = FLAG(0) | FLAG(4) | FLAG(9);
+	long version = lit == part->layer_lit ? part->layer_lit_version : -1;
+
+	if (part->layer_vertices_failed)
+		return FALSE;
+	if (!part->layer_vertices[layer] || version == -1 || part->layer_vertices_version[layer] != version)
+	{
+		float *packed = saber_level_static_scratch(part->layer_vertex_count * 12);
+		unsigned char const *weights = part->layer_weights[layer];
+		boolean multiply = part->layer_multiply[layer];
+		long vertex;
+
+		if (!packed)
+			return FALSE;
+		for (vertex = 0; vertex < part->layer_vertex_count; vertex++)
+		{
+			float *out = packed + vertex * 12;
+
+			out[0] = part->layer_positions[vertex][0];
+			out[1] = part->layer_positions[vertex][1];
+			out[2] = part->layer_positions[vertex][2];
+			out[3] = 1.f;
+			out[4] = part->layer_texcoords[layer][vertex][0];
+			out[5] = part->layer_texcoords[layer][vertex][1];
+			out[6] = 0.f;
+			out[7] = 1.f;
+			out[8] = multiply ? 1.f : (float)lit[vertex][0] / 255.f;
+			out[9] = multiply ? 1.f : (float)lit[vertex][1] / 255.f;
+			out[10] = multiply ? 1.f : (float)lit[vertex][2] / 255.f;
+			out[11] = (float)(255 - weights[vertex]) / 255.f;
+		}
+		if (!part->layer_vertices[layer])
+		{
+			part->layer_vertices[layer] = d3d8_gl_static_vertices_new(used, packed,
+				(unsigned long)part->layer_vertex_count, part->layer_triangles[layer],
+				3 * (unsigned long)part->layer_triangle_counts[layer]);
+			if (!part->layer_vertices[layer])
+			{
+				part->layer_vertices_failed = TRUE;
+				return FALSE;
+			}
+		}
+		else
+		{
+			d3d8_gl_static_vertices_update(part->layer_vertices[layer], packed);
+		}
+		part->layer_vertices_version[layer] = version;
+	}
+
+	return d3d8_gl_static_vertices_draw(part->layer_vertices[layer], used) ? TRUE : FALSE;
+}
+
 /* The sky's fog over a level part's layers, which cover its base: the
 fog's colour blended over each vertex by its depth in the fog, as the
 map's atmospheric fog is (none to its start, its maximum density at its
@@ -9349,6 +9848,57 @@ static void saber_level_layers_fog(
 		D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
 	rasterizer_set_framebuffer_blend_function(0);
 	rasterizer_set_pixel_shader(shader);
+	/* (kept on the card, made again as the camera moves a tenth of a unit:
+	the fog changes little in that) */
+	{
+		struct saber_level_part *changed = (struct saber_level_part *)part;
+		real mx = render.camera.position.x - part->fog_camera.x;
+		real my = render.camera.position.y - part->fog_camera.y;
+		real mz = render.camera.position.z - part->fog_camera.z;
+		boolean moved = !part->fog_vertices || mx * mx + my * my + mz * mz > 0.01f;
+		float *packed = NULL;
+		long vertex;
+
+		if (moved && !part->layer_vertices_failed)
+			packed = saber_level_static_scratch(part->layer_vertex_count * 8);
+		if (packed)
+		{
+			for (vertex = 0; vertex < part->layer_vertex_count; vertex++)
+			{
+				real const *at = part->layer_positions[vertex];
+				real ox = at[0] - render.camera.position.x;
+				real oy = at[1] - render.camera.position.y;
+				real oz = at[2] - render.camera.position.z;
+				real density = (square_root(ox * ox + oy * oy + oz * oz) - fog->atmospheric_minimum_distance) / span;
+				float *out = packed + vertex * 8;
+
+				density = PIN(density, 0.f, 1.f) * fog->atmospheric_maximum_density;
+				out[0] = at[0];
+				out[1] = at[1];
+				out[2] = at[2];
+				out[3] = 1.f;
+				out[4] = (float)red / 255.f;
+				out[5] = (float)green / 255.f;
+				out[6] = (float)blue / 255.f;
+				out[7] = PIN(density, 0.f, 1.f);
+			}
+			if (!part->fog_vertices)
+			{
+				changed->fog_vertices = d3d8_gl_static_vertices_new(FLAG(0) | FLAG(9), packed,
+					(unsigned long)part->layer_vertex_count, triangles,
+					3 * (unsigned long)part->layer_triangle_counts[part->layer_cover]);
+				if (!changed->fog_vertices)
+					changed->layer_vertices_failed = TRUE;
+			}
+			else
+			{
+				d3d8_gl_static_vertices_update(part->fog_vertices, packed);
+			}
+			changed->fog_camera = render.camera.position;
+		}
+		if (part->fog_vertices && d3d8_gl_static_vertices_draw(part->fog_vertices, FLAG(0) | FLAG(9)))
+			return;
+	}
 	IDirect3DDevice8_Begin(global_d3d_device, D3DPT_TRIANGLELIST);
 	for (corner = 0; corner < 3 * part->layer_triangle_counts[part->layer_cover]; corner++)
 	{
@@ -9364,13 +9914,66 @@ static void saber_level_layers_fog(
 		IDirect3DDevice8_SetVertexData4ub(global_d3d_device, 9, red, green, blue,
 			(unsigned char)PIN(density * 255.f, 0.f, 255.f));
 		IDirect3DDevice8_SetVertexData2f(global_d3d_device, 4, 0.f, 0.f);
-		IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0,
-			at[0] + (render.camera.position.x - at[0]) * 0.005f,
-			at[1] + (render.camera.position.y - at[1]) * 0.005f,
-			at[2] + (render.camera.position.z - at[2]) * 0.005f,
-			1.f);
+		IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0, at[0], at[1], at[2], 1.f);
 	}
 	IDirect3DDevice8_End(global_d3d_device);
+}
+
+static void saber_level_layer_shader_set(
+	struct pixel_shader_definition *shader,
+	boolean multiply)
+{
+	csmemset(shader, 0, sizeof(*shader));
+	shader->texture_modes = 1;
+	shader->combiner_count = 2;
+	shader->rgb_outputs[0] = 0xc00;
+	shader->rgb_outputs[1] = 0xc00;
+	shader->alpha_outputs[1] = 0xc00;
+	shader->final_combiner_inputs_abcd = 0xc;
+	shader->final_combiner_inputs_efg = 0x1c00;
+	if (multiply)
+	{
+		/* (as a decal's multiply: white where it weighs nothing,
+		the texture where it weighs fully, the framebuffer times
+		it) */
+		shader->rgb_inputs[0] = 0x28240820;
+		shader->rgb_inputs[1] = 0x340c1420;
+		shader->alpha_inputs[1] = 0x341c1420;
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
+			D3DCOLORWRITEENABLE_ALL);
+		/* (1: the shader tags' multiply) */
+		rasterizer_set_framebuffer_blend_function(1);
+	}
+	else
+	{
+		/* (as a decal's alpha blend: the colour the texture's times
+		the vertex's, the alpha the texture's times the vertex's
+		inverted) */
+		shader->rgb_inputs[0] = 0x08040000;
+		shader->rgb_inputs[1] = 0x200c0000;
+		/* (its cover by its weight w and the texture's height h,
+		a height blend: clamp(4w + 2h - 2.5). Nothing where it weighs
+		nothing, whole where it weighs fully, and between them the
+		texture's high places first, so the edge between two layers
+		follows the rock and sand rather than the triangles. Of
+		(1 - v0.a) w, t0.a h and c0.a a half: first 2w + h - 1,
+		of w + h/2 biased and doubled; then twice that, biased) */
+		shader->constant_0[0] = 0x80000000;
+		shader->alpha_inputs[0] = 0x34201811;
+		shader->alpha_outputs[0] = 0x18c00;
+		/* (and no more: clamp(2w + h - 1), half as steep. Doubled
+		again, a layer was whole a third of the way into a triangle
+		and nothing short of it, and the base where no layer weighs
+		stood out of the layers as a flat slab, edged nearly as the
+		triangles are) */
+		shader->alpha_inputs[1] = 0x1c200000;
+		shader->alpha_outputs[1] = 0xc00;
+		IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
+			D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+		/* (0: the shader tags' alpha blend, as hud_draw.c names it) */
+		rasterizer_set_framebuffer_blend_function(0);
+	}
+	rasterizer_set_pixel_shader(shader);
 }
 
 /* Draws the level's terrains' layers over their bases (sand over a
@@ -9392,11 +9995,16 @@ static void saber_level_layers_render(
 	long layers_drawn = 0;
 	long layers_untextured = 0;
 	long triangles_drawn = 0;
+	/* (whether the layer drawn writes the depth: a covering layer's does) */
+	boolean depth_written = FALSE;
+	/* (whether the covered parts' layers are drawn in batches) */
+	boolean batched = FALSE;
 
 	for (index = 0; index < saber_level.part_count; index++)
 	{
 		struct saber_level_part *part = &saber_level.parts[index];
 		unsigned char (*frame_lit)[3];
+		boolean covered;
 		long layer;
 
 		if (part->layer_count && !part->sky)
@@ -9421,6 +10029,7 @@ static void saber_level_layers_render(
 			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
 			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZBIAS, rasterizer_debug_options.zbias);
 			rasterizer_set_vertex_shader_permutation(1, 10, 0);
+			batched = saber_level_batches_make();
 		}
 		if (part->layer_lit_bsp != part->lit_bsp)
 			saber_level_layers_light(part);
@@ -9428,6 +10037,13 @@ static void saber_level_layers_render(
 		frame_lit = saber_level_layers_lit_dynamic(part);
 		if (!frame_lit)
 			frame_lit = part->layer_lit;
+		covered = part->layer_cover == 0;
+		if (covered && batched && saber_level_part_batched(part))
+		{
+			saber_level_layers_batch(part, frame_lit);
+			saber_level_fog_batch(part);
+			continue;
+		}
 		for (layer = 0; layer < part->layer_count; layer++)
 		{
 			unsigned char const *weights = part->layer_weights[layer];
@@ -9438,57 +10054,7 @@ static void saber_level_layers_render(
 			if (multiplying != (long)multiply)
 			{
 				multiplying = (long)multiply;
-				csmemset(&shader, 0, sizeof(shader));
-				shader.texture_modes = 1;
-				shader.combiner_count = 2;
-				shader.rgb_outputs[0] = 0xc00;
-				shader.rgb_outputs[1] = 0xc00;
-				shader.alpha_outputs[1] = 0xc00;
-				shader.final_combiner_inputs_abcd = 0xc;
-				shader.final_combiner_inputs_efg = 0x1c00;
-				if (multiply)
-				{
-					/* (as a decal's multiply: white where it weighs nothing,
-					the texture where it weighs fully, the framebuffer times
-					it) */
-					shader.rgb_inputs[0] = 0x28240820;
-					shader.rgb_inputs[1] = 0x340c1420;
-					shader.alpha_inputs[1] = 0x341c1420;
-					IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
-						D3DCOLORWRITEENABLE_ALL);
-					/* (1: the shader tags' multiply) */
-					rasterizer_set_framebuffer_blend_function(1);
-				}
-				else
-				{
-					/* (as a decal's alpha blend: the colour the texture's times
-					the vertex's, the alpha the texture's times the vertex's
-					inverted) */
-					shader.rgb_inputs[0] = 0x08040000;
-					shader.rgb_inputs[1] = 0x200c0000;
-					/* (its cover by its weight w and the texture's height h,
-					a height blend: clamp(4w + 2h - 2.5). Nothing where it weighs
-					nothing, whole where it weighs fully, and between them the
-					texture's high places first, so the edge between two layers
-					follows the rock and sand rather than the triangles. Of
-					(1 - v0.a) w, t0.a h and c0.a a half: first 2w + h - 1,
-					of w + h/2 biased and doubled; then twice that, biased) */
-					shader.constant_0[0] = 0x80000000;
-					shader.alpha_inputs[0] = 0x34201811;
-					shader.alpha_outputs[0] = 0x18c00;
-					/* (and no more: clamp(2w + h - 1), half as steep. Doubled
-					again, a layer was whole a third of the way into a triangle
-					and nothing short of it, and the base where no layer weighs
-					stood out of the layers as a flat slab, edged nearly as the
-					triangles are) */
-					shader.alpha_inputs[1] = 0x1c200000;
-					shader.alpha_outputs[1] = 0xc00;
-					IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
-						D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
-					/* (0: the shader tags' alpha blend, as hud_draw.c names it) */
-					rasterizer_set_framebuffer_blend_function(0);
-				}
-				rasterizer_set_pixel_shader(&shader);
+				saber_level_layer_shader_set(&shader, multiply);
 			}
 			if (!rasterizer_set_texture_bitmap_data(0, &saber_level.bitmaps[part->layer_textures[layer]]))
 			{
@@ -9502,6 +10068,21 @@ static void saber_level_layers_render(
 			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
 			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
 			IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+			/* (a part its first layer covers whole, its base not drawn: that
+			layer writes the depth, and the rest are drawn at it, all of the
+			same vertices by the same shader; kept on the card) */
+			if (covered)
+			{
+				boolean writes = layer == part->layer_cover;
+
+				if (writes != depth_written)
+				{
+					depth_written = writes;
+					IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, writes);
+				}
+				if (saber_level_layer_static_draw(part, layer, frame_lit))
+					continue;
+			}
 			IDirect3DDevice8_Begin(global_d3d_device, D3DPT_TRIANGLELIST);
 			for (corner = 0; corner < 3 * part->layer_triangle_counts[layer]; corner++)
 			{
@@ -9521,6 +10102,12 @@ static void saber_level_layers_render(
 				}
 				IDirect3DDevice8_SetVertexData2f(global_d3d_device, 4, part->layer_texcoords[layer][vertex][0],
 					part->layer_texcoords[layer][vertex][1]);
+				if (covered)
+				{
+					IDirect3DDevice8_SetVertexData4f(global_d3d_device, 0, part->layer_positions[vertex][0],
+						part->layer_positions[vertex][1], part->layer_positions[vertex][2], 1.f);
+					continue;
+				}
 				/* (drawn a two-hundredth of the way toward the camera: the base
 				is drawn of compressed vertices by the model shader, the layer of
 				these by another, and the depth they come to differs by more than
@@ -9538,9 +10125,90 @@ static void saber_level_layers_render(
 		fogged, but its layers cover it whole and are not. The ground stood
 		dark and clear in the distance among the map's trees and rocks, pale
 		in the fog) */
-		if (part->layer_cover != NONE)
+		if (covered)
+		{
+			if (depth_written)
+			{
+				depth_written = FALSE;
+				IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, FALSE);
+			}
 			saber_level_layers_fog(part, &shader);
-		multiplying = NONE;
+			multiplying = NONE;
+		}
+	}
+	/* (the batches: each place's layers, the first's writing the depth, then
+	their fog) */
+	if (batched)
+	{
+		unsigned long const used = FLAG(0) | FLAG(4) | FLAG(9);
+		long slot;
+		long batch_index;
+
+		for (slot = 0; slot < SABER_MAXIMUM_LAYERS; slot++)
+		{
+			for (batch_index = 0; batch_index < saber_level_batches.batch_count; batch_index++)
+			{
+				struct saber_level_batch *batch = &saber_level_batches.batches[batch_index];
+				long range;
+
+				if (batch->slot != slot || !batch->range_count)
+					continue;
+				if (multiplying != (long)batch->multiply)
+				{
+					multiplying = (long)batch->multiply;
+					saber_level_layer_shader_set(&shader, batch->multiply);
+				}
+				if (!rasterizer_set_texture_bitmap_data(0, &saber_level.bitmaps[batch->texture]))
+				{
+					layers_untextured += batch->range_count;
+					batch->range_count = 0;
+					continue;
+				}
+				IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+				IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+				IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+				IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+				IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+				if ((slot == 0) != depth_written)
+				{
+					depth_written = slot == 0;
+					IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, depth_written);
+				}
+				d3d8_gl_static_vertices_draw_ranges(batch->vertices, used, batch->firsts, batch->counts,
+					(unsigned long)batch->range_count);
+				layers_drawn += batch->range_count;
+				for (range = 0; range < batch->range_count; range++)
+					triangles_drawn += (long)(batch->counts[range] / 3);
+				batch->range_count = 0;
+			}
+		}
+		if (depth_written)
+		{
+			depth_written = FALSE;
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_ZWRITEENABLE, FALSE);
+		}
+		if (saber_level_batches.fog.range_count)
+		{
+			csmemset(&shader, 0, sizeof(shader));
+			shader.texture_modes = 0;
+			shader.combiner_count = 1;
+			/* (the vertex's colour, the fog's, and its alpha, the fog's density) */
+			shader.rgb_inputs[0] = 0x04200000;
+			shader.alpha_inputs[0] = 0x14200000;
+			shader.rgb_outputs[0] = 0xc00;
+			shader.alpha_outputs[0] = 0xc00;
+			shader.final_combiner_inputs_abcd = 0xc;
+			shader.final_combiner_inputs_efg = 0x1c00;
+			IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_COLORWRITEENABLE,
+				D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+			rasterizer_set_framebuffer_blend_function(0);
+			rasterizer_set_pixel_shader(&shader);
+			d3d8_gl_static_vertices_draw_ranges(saber_level_batches.fog.vertices, FLAG(0) | FLAG(9),
+				saber_level_batches.fog.firsts, saber_level_batches.fog.counts,
+				(unsigned long)saber_level_batches.fog.range_count);
+			saber_level_batches.fog.range_count = 0;
+			multiplying = NONE;
+		}
 	}
 	if (!logged && parts_layered)
 	{
@@ -9629,6 +10297,11 @@ void saber_models_level_render(
 			part->lighting.point_light_count = 0;
 			part->lit_bsp = bsp_index;
 		}
+		/* (not a base its own material laid whole over it covers: never seen,
+		that layer drawn in its place, and the depth its layers are drawn
+		against: saber_level_layers_render) */
+		if (part->layer_count && part->layer_cover == 0)
+			continue;
 		parameters.lighting = part->lighting;
 		/* (and the frame's point lights that reach it, the flashlight's) */
 		saber_level_point_lights(part, &parameters.lighting);
