@@ -468,6 +468,7 @@ pointers, sees the declarations without these aliases */
 #define glBindBufferBase halo_glBindBufferBase
 #define glGenVertexArrays halo_glGenVertexArrays
 #define glBindVertexArray halo_glBindVertexArray
+#define glMultiDrawElements halo_glMultiDrawElements
 #define glEnableVertexAttribArray halo_glEnableVertexAttribArray
 #define glDisableVertexAttribArray halo_glDisableVertexAttribArray
 #define glVertexAttribPointer halo_glVertexAttribPointer
