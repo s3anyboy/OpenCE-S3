@@ -9596,11 +9596,13 @@ static boolean saber_level_batches_make(
 	the camera moves) */
 	if (fog_vertices > 0)
 	{
-		float *packed = calloc((size_t)fog_vertices * 8, sizeof(*packed));
+		/* (malloc, not calloc: free is the engine's, which knows only its own) */
+		float *packed = malloc(sizeof(*packed) * 8 * (size_t)fog_vertices);
 		unsigned long *indices = malloc(sizeof(*indices) * (size_t)fog_indices);
 
 		if (packed && indices)
 		{
+			csmemset(packed, 0, sizeof(*packed) * 8 * (size_t)fog_vertices);
 			for (index = 0; index < saber_level.part_count; index++)
 			{
 				struct saber_level_part *part = &saber_level.parts[index];
