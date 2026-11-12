@@ -104,6 +104,8 @@ static void saber_level_batches_free(void);
 #include "objects/object_lights_rendering.h"
 #include "scenario/scenario.h"
 #include "structures/structure_bsp_definitions.h"
+#include "structures/structures.h"
+#include "structures/structure_visibility.h"
 #include "shaders/shader_definitions.h"
 #include "shaders/shader_texture_animation.h"
 #include "tag_files/tag_groups.h"
@@ -6777,6 +6779,11 @@ typedef char verify_saber_tag_instance_size[sizeof(struct saber_tag_instance) ==
 /* a part of the level's geometry: its buffers, the texture (of the level's
 bitmap) it is drawn with, whether that is cut out, its bounds and the
 light it is drawn in (sampled of the structure, as an object's) */
+/* the points of a part it is placed in the structure by */
+#define SABER_LEVEL_CLUSTER_SAMPLES 24
+/* how far off its surface they are, in world units (about 15 cm) */
+#define SABER_LEVEL_CLUSTER_SAMPLE_STEP 0.05f
+
 struct saber_level_part
 {
 	struct vertex_buffer vertex_buffer;
@@ -6822,6 +6829,19 @@ struct saber_level_part
 	real_rectangle3d bounds;
 	real_point3d centroid;
 	real radius;
+	/* where it is in the structure, so that what of it the structure's
+	walls hide is not drawn: points of it, its vertices a step off along
+	their normals into the open in front of them; and the structure's
+	clusters it is in, of clusters_bsp's (NONE, not yet found), the ones
+	they are in and those beside them it reaches. Drawn only while the
+	camera sees one of them (render.visible_cluster_flags, through the
+	portals). Everywhere: none of its points in the structure (beyond it,
+	or the structure is another's), drawn wherever it is in view */
+	real cluster_samples[SABER_LEVEL_CLUSTER_SAMPLES][3];
+	short cluster_sample_count;
+	short clusters_bsp;
+	boolean clusters_everywhere;
+	unsigned long cluster_flags[MAXIMUM_CLUSTERS_PER_STRUCTURE / LONG_BITS];
 	short lit_bsp;
 	/* ground, a terrain's: lit as the ground is (saber_level_ground_light) */
 	boolean terrain;
@@ -6875,6 +6895,8 @@ struct saber_level_part
 	real_point3d fog_camera;
 	long layer_lit_version;
 	short layer_lit_bsp;
+	/* (whether it can be seen this frame: saber_level_part_seen) */
+	boolean seen;
 	short layer_textures[SABER_MAXIMUM_LAYERS];
 	boolean layer_multiply[SABER_MAXIMUM_LAYERS];
 	unsigned char *layer_weights[SABER_MAXIMUM_LAYERS];
@@ -7772,6 +7794,22 @@ static boolean saber_level_play(
 			part->vertex_count = 0;
 			continue;
 		}
+		/* (where it is: its vertices, evenly, each a step off its face) */
+		made->cluster_sample_count = 0;
+		for (vertex = 0; !sky && vertex < part->vertex_count &&
+			made->cluster_sample_count < SABER_LEVEL_CLUSTER_SAMPLES;)
+		{
+			struct model_vertex_uncompressed const *point = &part->vertices[vertex];
+			real length = magnitude3d(&point->normal);
+			real step = length > 0.0001f ? SABER_LEVEL_CLUSTER_SAMPLE_STEP / length : 0.f;
+			real *sample = made->cluster_samples[made->cluster_sample_count++];
+
+			sample[0] = point->position.x + point->normal.i * step;
+			sample[1] = point->position.y + point->normal.j * step;
+			sample[2] = point->position.z + point->normal.k * step;
+			vertex += MAX(1, part->vertex_count / SABER_LEVEL_CLUSTER_SAMPLES);
+		}
+		made->clusters_bsp = NONE;
 		/* (the daytime sky's texture: made, not read) */
 		if (made->gradient)
 		{
@@ -9982,6 +10020,145 @@ static void saber_level_layer_shader_set(
 cliff), each texture lit as the vertex is and blended by the vertex's
 weight, as Halo draws a decal: its vertex shader of decals, alpha
 blended, the depth tested and not written. */
+/* each of the structure's clusters' place among the frame's rendered ones
+(render.rendered_clusters), NONE, not among them */
+static short saber_level_rendered_of_cluster[MAXIMUM_CLUSTERS_PER_STRUCTURE];
+/* (counted the first frame, and logged: the parts in view, and of them
+those the structure hides) */
+static long saber_level_parts_in_view;
+static long saber_level_parts_hidden;
+
+/* the clusters a part is in, in the structure that is loaded */
+static void saber_level_part_place(
+	struct saber_level_part *part,
+	short bsp_index)
+{
+	struct structure_bsp *structure = global_structure_bsp_get();
+	short found[MAXIMUM_CLUSTERS_PER_STRUCTURE];
+	short starts[SABER_LEVEL_CLUSTER_SAMPLES + 1];
+	long start_count = 0;
+	long sample;
+	long start;
+
+	part->clusters_bsp = bsp_index;
+	part->clusters_everywhere = TRUE;
+	csmemset(part->cluster_flags, 0, sizeof(part->cluster_flags));
+	if (!structure || structure->clusters.count <= 0 ||
+		structure->clusters.count > MAXIMUM_CLUSTERS_PER_STRUCTURE)
+	{
+		return;
+	}
+	for (sample = 0; sample <= part->cluster_sample_count; sample++)
+	{
+		struct location location;
+		real_point3d point;
+
+		/* (and its middle) */
+		if (sample == part->cluster_sample_count)
+		{
+			point = part->centroid;
+		}
+		else
+		{
+			point.x = part->cluster_samples[sample][0];
+			point.y = part->cluster_samples[sample][1];
+			point.z = part->cluster_samples[sample][2];
+		}
+		scenario_location_from_point(&location, &point);
+		if (location.cluster_index == NONE ||
+			BIT_VECTOR_TEST_FLAG(part->cluster_flags, location.cluster_index))
+		{
+			continue;
+		}
+		BIT_VECTOR_SET_FLAG(part->cluster_flags, location.cluster_index, TRUE);
+		starts[start_count++] = location.cluster_index;
+	}
+	if (!start_count)
+		return;
+	part->clusters_everywhere = FALSE;
+	/* (and the clusters about them it reaches: a part stands across a
+	cluster's portal, and a wall's far end is in the next room. Those its
+	sphere meets, through the portals in it) */
+	for (start = 0; start < start_count; start++)
+	{
+		short count = structure_clusters_in_sphere(starts[start], &part->centroid, part->radius,
+			NUMBEROF(found), found);
+		short index;
+
+		for (index = 0; index < count; index++)
+		{
+			if (VALID_INDEX(found[index], structure->clusters.count))
+				BIT_VECTOR_SET_FLAG(part->cluster_flags, found[index], TRUE);
+		}
+	}
+}
+
+/* each frame, before the parts are drawn: where each rendered cluster is */
+static void saber_level_clusters_frame(
+	void)
+{
+	short index;
+
+	for (index = 0; index < MAXIMUM_CLUSTERS_PER_STRUCTURE; index++)
+		saber_level_rendered_of_cluster[index] = NONE;
+	for (index = 0; index < render.rendered_cluster_count; index++)
+	{
+		short cluster_index = render.rendered_clusters[index].cluster_index;
+
+		if (VALID_INDEX(cluster_index, MAXIMUM_CLUSTERS_PER_STRUCTURE))
+			saber_level_rendered_of_cluster[cluster_index] = index;
+	}
+}
+
+/* whether any of a part can be seen: in view, and in a cluster the camera
+sees, through the portals the structure's walls leave, in the part of the
+view that cluster is seen in (as the engine draws an object) */
+static boolean saber_level_part_seen(
+	struct saber_level_part *part)
+{
+	struct structure_bsp *structure;
+	short bsp_index;
+	long word_count;
+	long word;
+
+	if (!render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
+		return FALSE;
+	bsp_index = global_structure_bsp_index_get();
+	if (part->clusters_bsp != bsp_index)
+		saber_level_part_place(part, bsp_index);
+	/* (beyond the structure, or the camera is: outside it, every cluster
+	is seen) */
+	if (part->clusters_everywhere || render.cluster_index == NONE)
+		return TRUE;
+	structure = global_structure_bsp_get();
+	word_count = BIT_VECTOR_SIZE_IN_LONGS(structure->clusters.count);
+	for (word = 0; word < word_count; word++)
+	{
+		unsigned long seen = part->cluster_flags[word] & render.visible_cluster_flags[word];
+
+		while (seen)
+		{
+			long bit = 0;
+			short cluster_index;
+			short rendered_index;
+
+			while (!(seen & (1UL << bit)))
+				bit++;
+			seen &= ~(1UL << bit);
+			cluster_index = (short)(word * LONG_BITS + bit);
+			rendered_index = saber_level_rendered_of_cluster[cluster_index];
+			/* (seen by the pvs, or more clusters than are rendered: in view) */
+			if (structures_use_pvs_for_vs || rendered_index == NONE ||
+				render_frustum_cube_visible(&render.rendered_clusters[rendered_index].frustum, &part->bounds, FALSE))
+			{
+				return TRUE;
+			}
+		}
+	}
+
+	return FALSE;
+}
+
 static void saber_level_layers_render(
 	void)
 {
@@ -10015,11 +10192,10 @@ static void saber_level_layers_render(
 			if (part->lit_bsp == NONE)
 				parts_unlit++;
 		}
-		if (!part->layer_count || part->sky || part->lit_bsp == NONE ||
-			!render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
-		{
+		/* (seen, of the parts that are: saber_models_level_render, which
+		drew their bases, saw which) */
+		if (!part->layer_count || part->sky || part->lit_bsp == NONE || !part->seen)
 			continue;
-		}
 		if (!begun)
 		{
 			begun = TRUE;
@@ -10238,6 +10414,7 @@ void saber_models_level_render(
 	real_matrix4x3 node;
 	short bsp_index = global_structure_bsp_index_get();
 	long index;
+	static boolean logged_hidden = FALSE;
 
 	if (!saber_level.drawn || saber_toggle_classic_level())
 		return;
@@ -10256,14 +10433,28 @@ void saber_models_level_render(
 	parameters.base_map_scale.j = 1.f;
 	if (saber_level.ground_lit_bsp != bsp_index)
 		saber_level_ground_light(bsp_index);
+	saber_level_clusters_frame();
 	for (index = 0; index < saber_level.part_count; index++)
 	{
 		struct saber_level_part *part = &saber_level.parts[index];
 		struct shader_model_definition *shader = &part->shader;
 
-		/* (the sky is drawn in the map sky's place) */
-		if (part->sky || !render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
+		/* (the sky is drawn in the map sky's place; and nothing the camera
+		cannot see, out of view or behind the structure's walls) */
+		part->seen = FALSE;
+		if (part->sky)
 			continue;
+		if (!render_frustum_cube_visible(&render.frustum, &part->bounds, FALSE))
+			continue;
+		if (!logged_hidden)
+			saber_level_parts_in_view++;
+		if (!saber_level_part_seen(part))
+		{
+			if (!logged_hidden)
+				saber_level_parts_hidden++;
+			continue;
+		}
+		part->seen = TRUE;
 		/* (its light, of the structure about its middle, sampled as it is first
 		drawn in a structure) */
 		if (part->lit_bsp != bsp_index)
@@ -10318,6 +10509,12 @@ void saber_models_level_render(
 		rasterizer_model_end();
 	}
 	saber_level_layers_render();
+	if (!logged_hidden && saber_level_parts_in_view)
+	{
+		logged_hidden = TRUE;
+		platform_log("anniversary: of the structure's %ld parts in view, %ld are behind its walls, not drawn",
+			saber_level_parts_in_view, saber_level_parts_hidden);
+	}
 }
 
 int saber_bitmaps_contain(
