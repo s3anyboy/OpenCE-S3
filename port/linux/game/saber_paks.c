@@ -1373,6 +1373,30 @@ static boolean node_damaged(
 	return FALSE;
 }
 
+/* whether a node's name, or a name of a node it is under, has `word` in
+it (an Elite zealot's "commander_holo" and its levels of detail) */
+static boolean node_under(
+	struct template_walk const *walk,
+	struct template_node const *node,
+	char const *word)
+{
+	long depth;
+
+	for (depth = 0; node && depth < MAXIMUM_NODE_DEPTH; depth++)
+	{
+		char name[64];
+		unsigned long length = MIN(node->name_length, sizeof(name) - 1);
+
+		memcpy(name, walk->bytes + node->name_start, length);
+		name[length] = 0;
+		if (strstr(name, word))
+			return TRUE;
+		node = node->parent_id == NONE ? NULL : node_of_id(walk, node->parent_id);
+	}
+
+	return FALSE;
+}
+
 /* the rank a node, or the nearest node it is under that is of one, is
 drawn for (an Elite's "metal_major", a Grunt's "back_minor": Saber3D draws
 each rank as meshes of its own), or _saber_rank_all */
@@ -2427,6 +2451,8 @@ static boolean mesh_read(
 	if (uv_offset >= 0 && !node->has_uv_decompress && !walk->level && vertex_count > 0)
 	{
 		long inside = 0;
+		long inside_across = 0;
+		boolean strip;
 		real max_u = -1.f;
 		real max_v = -1.f;
 		real inside_u = -1.f;
@@ -2441,6 +2467,8 @@ static boolean mesh_read(
 				max_u = u;
 			if (v > max_v)
 				max_v = v;
+			if (u >= -0.02f && u <= 0.51f)
+				inside_across++;
 			if (u >= -0.02f && u <= 0.51f && v >= -0.02f && v <= 0.51f)
 			{
 				inside++;
@@ -2450,7 +2478,24 @@ static boolean mesh_read(
 		}
 		/* (or all but a stray triangle or two in the half: a Ghost's, a
 		Banshee's, a few points past it) */
-		if ((inside * 10 >= vertex_count * 9 && max_u > 0.35f && max_v > 0.35f &&
+		/* (or a holo's strip: an Elite zealot's commander_holo, across from
+		0.47 to 0.5, at half the last sixteenth of the texture, its column of
+		blue lines. Left across the middle of the texture, the accents were
+		the gold of the armour under them. Down, it runs from -0.22 to 0.74
+		and the column repeats: twice that is more than a compressed vertex
+		holds, so it stays, its lines drawn twice as long) */
+		strip = inside_across == vertex_count && max_u > 0.35f && node_under(walk, node, "commander_holo");
+		if (strip)
+		{
+			uv_rewritten = TRUE;
+			for (index = 0; index < vertex_count; index++)
+			{
+				vertices[index].texcoord.x *= 2.f;
+				if (vertices[index].texcoord.x > 1.02f)
+					vertices[index].texcoord.x -= 1.f;
+			}
+		}
+		else if ((inside * 10 >= vertex_count * 9 && max_u > 0.35f && max_v > 0.35f &&
 				max_u <= 0.56f && max_v <= 0.56f) ||
 			(inside * 1000 >= vertex_count * 995 && inside_u > 0.35f && inside_v > 0.35f))
 		{
