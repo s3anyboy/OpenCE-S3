@@ -11,7 +11,9 @@ do, each at its own base (FORCE TEAM SPAWNS). A team scores:
   5, a jackal 10, a Flood combat form 10, an elite 15, a hunter 25, an elite
   commander 100, any other 5; and more for a vehicle's driver killed at its
   controls, who is worth his own as well: 25 a Ghost's or a Banshee's, 50 a
-  Wraith's.
+  Wraith's. A vehicle destroyed scores its enemy riders, who die with it
+  (as acts of god, which no kill reports), each their own, its driver the
+  vehicle's as well.
 
 The first team to the points to win (a hundred for each of the gametype's
 score to win, which King counts in minutes: 10, 1000 points) wins, as does
@@ -150,7 +152,7 @@ long warzone_unit_points(
 
 	if (!unit)
 		return 0;
-	/* (a vehicle's own death is not scored: its driver's is) */
+	/* (a vehicle's own death is scored as its riders': warzone_unit_killed) */
 	if (unit->object.type != _object_type_biped)
 		return 0;
 	if (player_index_from_unit_index(unit_index) != NONE)
@@ -193,6 +195,52 @@ static void warzone_score(
 		game_engine_end_game();
 }
 
+/* whether a unit killed was the killer's enemy: a player of the other
+team, or the AI against the killer's */
+static boolean warzone_unit_is_enemy(
+	long unit_index,
+	struct unit_datum const *unit,
+	struct player_datum const *killer,
+	long killing_player_index,
+	short killing_team_index)
+{
+	long dead_player_index = player_index_from_unit_index(unit_index);
+
+	if (dead_player_index != NONE)
+	{
+		struct player_datum *dead = player_try_and_get(dead_player_index);
+
+		return dead && dead_player_index != killing_player_index && dead->team_index != killer->team_index;
+	}
+	return game_team_is_enemy(killing_team_index, unit->object.owner_team_index);
+}
+
+/* the riders a vehicle's death scored (who die with it after, as acts of
+god: damage.c's unit_kill), so that a death of their own then is not
+scored again */
+static struct
+{
+	long unit_index;
+	long time;
+} warzone_scored_riders[16];
+static long warzone_scored_rider_next;
+
+static boolean warzone_rider_scored(
+	long unit_index)
+{
+	long index;
+
+	for (index = 0; index < NUMBEROF(warzone_scored_riders); index++)
+	{
+		if (warzone_scored_riders[index].unit_index == unit_index &&
+			game_time_get() - warzone_scored_riders[index].time <= 2 * TICKS_PER_SECOND)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 void warzone_unit_killed(
 	long unit_index,
 	long killing_player_index,
@@ -200,8 +248,7 @@ void warzone_unit_killed(
 {
 	struct player_datum *killer;
 	struct unit_datum *unit;
-	long dead_player_index;
-	long points;
+	long points = 0;
 
 	if (game_modes_mode() != _game_mode_warzone || network_game_distributed_client() || !game_engine_can_score())
 		return;
@@ -209,21 +256,39 @@ void warzone_unit_killed(
 	unit = (struct unit_datum *)object_try_and_get_and_verify_type(unit_index, _object_mask_unit);
 	if (!killer || !unit)
 		return;
-	dead_player_index = player_index_from_unit_index(unit_index);
-	/* (an enemy's: a player of the other team, or the AI against the
-	killer's) */
-	if (dead_player_index != NONE)
+	if (unit->object.type == _object_type_vehicle)
 	{
-		struct player_datum *dead = player_try_and_get(dead_player_index);
+		/* (a vehicle destroyed: its riders die with it, as acts of god
+		with no killer, so its killer scores them now, each its own and
+		its driver the vehicle's as well: warzone_unit_points) */
+		long rider_index = unit->object.first_child_object_index;
 
-		if (!dead || dead_player_index == killing_player_index || dead->team_index == killer->team_index)
-			return;
+		while (rider_index != NONE)
+		{
+			struct unit_datum *rider = (struct unit_datum *)object_get(rider_index);
+
+			if (rider->object.type == _object_type_biped && rider->unit.parent_seat_index != NONE &&
+				!TEST_FLAG(rider->object.damage_flags, _object_dead_bit) &&
+				warzone_unit_is_enemy(rider_index, rider, killer, killing_player_index, killing_team_index))
+			{
+				long rider_points = warzone_unit_points(rider_index);
+
+				if (rider_points)
+				{
+					points += rider_points;
+					warzone_scored_riders[warzone_scored_rider_next].unit_index = rider_index;
+					warzone_scored_riders[warzone_scored_rider_next].time = game_time_get();
+					warzone_scored_rider_next = (warzone_scored_rider_next + 1) % NUMBEROF(warzone_scored_riders);
+				}
+			}
+			rider_index = rider->object.next_object_index;
+		}
 	}
-	else if (!game_team_is_enemy(killing_team_index, unit->object.owner_team_index))
+	else if (!warzone_rider_scored(unit_index) &&
+		warzone_unit_is_enemy(unit_index, unit, killer, killing_player_index, killing_team_index))
 	{
-		return;
+		points = warzone_unit_points(unit_index);
 	}
-	points = warzone_unit_points(unit_index);
 	if (points)
 		warzone_score(killer->team_index, killing_player_index, points);
 }
