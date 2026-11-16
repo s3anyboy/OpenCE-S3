@@ -8,9 +8,10 @@ do, each at its own base (FORCE TEAM SPAWNS). A team scores:
 - a point a second for each hill its players alone are on (one both teams
   are on is contested, and scores for nobody);
 - for a kill of an enemy: 25 for a player; for the AI by its kind, a grunt
-  5, a jackal 10, an elite 15, a hunter 25, an elite commander 50, any other
-  5; and 25 more for a Ghost's or a Banshee's driver killed at its controls,
-  who is worth his own as well.
+  5, a jackal 10, a Flood combat form 10, an elite 15, a hunter 25, an elite
+  commander 100, any other 5; and more for a vehicle's driver killed at its
+  controls, who is worth his own as well: 25 a Ghost's or a Banshee's, 50 a
+  Wraith's.
 
 The first team to the points to win (a hundred for each of the gametype's
 score to win, which King counts in minutes: 10, 1000 points) wins, as does
@@ -23,8 +24,10 @@ their time on the hills and their kills', are their King statistics' time
 on the hill, which the host sends with their other statistics.
 
 Kinds are told by the tags' types, never by their names: the AI's by its
-actor's type, a vehicle's by its own (a Ghost is the alien scout, a Banshee
-the alien fighter). An elite commander is an Elite whose actor variant
+actor's type, a vehicle's by its own (a Banshee is the alien fighter; the
+Ghost and the Wraith are both alien scouts, the Ghost's guns fixed forward,
+its AI weapon cannot rotate, and the Wraith's mortar turning). An elite
+commander is an Elite whose actor variant
 cannot use ranged weapons (a sword's), or whose shields are the strongest of
 the map's Elite variants and at least twice the weakest's (b30's: the
 commander's 300, the major's 150 and the minor's 100).
@@ -51,22 +54,27 @@ Only the host scores; its clients show what it sends.
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
 
-/* the vehicle tag's type, as vehicles.c reads it (its layout is not the
-public header's) */
+/* the vehicle tag's flags and type, as vehicles.c and actor_combat.c read
+them (its layout is not the public header's) */
 struct warzone_vehicle_definition
 {
-	byte __unknown0[0x2F4];
+	byte __unknown0[0x2F0];
+	unsigned long flags;
 	short vehicle_type;
 };
 
 typedef char warzone_vehicle_type_offset_assert[
 	offsetof(struct warzone_vehicle_definition, vehicle_type) == 0x2F4 ? 1 : -1];
+typedef char warzone_vehicle_flags_offset_assert[
+	offsetof(struct warzone_vehicle_definition, flags) == 0x2F0 ? 1 : -1];
 
-/* (vehicles.c's vehicle types: a Ghost's and a Banshee's) */
+/* (vehicles.c's vehicle types: a Ghost's and a Wraith's, a Banshee's; and
+actor_combat.c's flag of the Ghost's fixed guns) */
 enum
 {
 	_vehicle_type_alien_scout = 4,
-	_vehicle_type_alien_fighter = 5
+	_vehicle_type_alien_fighter = 5,
+	_vehicle_ai_weapon_cannot_rotate_bit = 8
 };
 
 /* King's messages (game_engine_king.h's king_message) */
@@ -120,6 +128,8 @@ static long warzone_actor_points(
 		return WARZONE_POINTS_JACKAL;
 	case _actor_hunter:
 		return WARZONE_POINTS_HUNTER;
+	case _actor_combat_form:
+		return WARZONE_POINTS_FLOOD_COMBAT_FORM;
 	case _actor_elite:
 		if (actor->meta.variant_definition_index != NONE &&
 			warzone_variant_is_commander(actor_variant_definition_get(actor->meta.variant_definition_index)))
@@ -149,16 +159,21 @@ long warzone_unit_points(
 		points = warzone_actor_points(unit->unit.actor_index);
 	if (!points)
 		return 0;
-	/* (at a Ghost's or a Banshee's controls) */
+	/* (at a Ghost's, a Banshee's or a Wraith's controls) */
 	vehicle = unit->object.parent_object_index == NONE ? NULL :
 		(struct unit_datum *)object_try_and_get_and_verify_type(unit->object.parent_object_index, _object_mask_vehicle);
 	if (vehicle && vehicle->unit.driver_object_index == unit_index)
 	{
-		short type = ((struct warzone_vehicle_definition *)tag_get('vehi',
-			vehicle->definition_index))->vehicle_type;
+		struct warzone_vehicle_definition const *definition =
+			(struct warzone_vehicle_definition *)tag_get('vehi', vehicle->definition_index);
 
-		if (type == _vehicle_type_alien_scout || type == _vehicle_type_alien_fighter)
+		if (definition->vehicle_type == _vehicle_type_alien_fighter)
 			points += WARZONE_POINTS_VEHICLE;
+		else if (definition->vehicle_type == _vehicle_type_alien_scout)
+		{
+			points += TEST_FLAG(definition->flags, _vehicle_ai_weapon_cannot_rotate_bit) ?
+				WARZONE_POINTS_VEHICLE : WARZONE_POINTS_WRAITH;
+		}
 	}
 	return points;
 }

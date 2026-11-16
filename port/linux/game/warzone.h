@@ -12,11 +12,15 @@ enum
 	WARZONE_POINTS_JACKAL = 10,
 	WARZONE_POINTS_ELITE = 15,
 	WARZONE_POINTS_HUNTER = 25,
-	WARZONE_POINTS_ELITE_COMMANDER = 50,
-	/* the AI of any other kind (a marine, the Flood, a sentinel) */
+	WARZONE_POINTS_ELITE_COMMANDER = 100,
+	WARZONE_POINTS_FLOOD_COMBAT_FORM = 10,
+	/* the AI of any other kind (a marine, the Flood's other forms, a
+	sentinel) */
 	WARZONE_POINTS_OTHER_AI = 5,
 	/* a Ghost's or a Banshee's driver killed at its controls: more */
 	WARZONE_POINTS_VEHICLE = 25,
+	/* and a Wraith's */
+	WARZONE_POINTS_WRAITH = 50,
 	/* a hill a team alone is on: a second's */
 	WARZONE_POINTS_HILL = 1,
 	/* the points to win, a hundred for each of the gametype's score to win
