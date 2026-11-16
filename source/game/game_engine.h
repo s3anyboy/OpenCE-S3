@@ -224,13 +224,14 @@ enum
 };
 
 /* port: OpenCE's gametypes (port/linux/game/game_modes.c): a mode's rules
-over its game engine's (Slayer's), and Hardcore's over any */
+over its game engine's (Slayer's; Warzone's King's), and Hardcore's over any */
 enum
 {
 	_game_mode_none = 0,
 	_game_mode_swat,
 	_game_mode_infection,
 	_game_mode_gun_game,
+	_game_mode_warzone,
 	NUMBER_OF_GAME_MODES
 };
 

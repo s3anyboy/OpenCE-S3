@@ -1,5 +1,6 @@
 """OpenCE's gametypes: options' defaults and range, Hardcore's restore of a killer, the modes a gametype allows,
-Infection's round and state, Gun Game's weapons (port/linux/game/game_modes.c, infection.c, gun_game.c)."""
+Infection's round and state, Gun Game's weapons, Warzone's mode of King (port/linux/game/game_modes.c, infection.c,
+gun_game.c)."""
 import re
 import sys
 from pathlib import Path
@@ -68,6 +69,9 @@ def test_case(case):
     (('game_engine_index == game_engine_slayer && mode > _game_mode_none', 'mode > _game_mode_none'),
      'kind_untrusted'),
     (('if (!hardcore || game_engine_index', 'if (game_engine_index'), 'kind_untrusted'),
+    (('&&\n\t\tmode != _game_mode_warzone)', ')'), 'kind_untrusted'),
+    (('return options->mode == _game_mode_warzone && variant->universal_variant.teams ?',
+      'return options->mode == _game_mode_warzone ?'), 'variant_mode'),
 ])
 def test_negative_control(fault, case):
     status, output = run(build('game_modes', generated(fault)), case)

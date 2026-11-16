@@ -70,6 +70,22 @@ void render_dynamic_quad(
 	real u_scale,
 	real v_scale);
 
+/* port: Warzone (port/linux/game/warzone.c), whose points are the team
+scores: King leaves them to it, and its clients make no sound of them */
+void game_engine_king_set_warzone(
+	boolean warzone);
+/* the hills in play, and the team whose players alone are on one (NONE) */
+short game_engine_king_hill_count(
+	void);
+long game_engine_king_hill_holder(
+	short hill_index);
+/* a team's score (the host's, which it sends its clients), in ticks */
+long game_engine_king_team_score(
+	long team_index);
+void game_engine_king_add_score(
+	long team_index,
+	long score);
+
 /* ---------- globals */
 
 extern struct game_engine king_engine;

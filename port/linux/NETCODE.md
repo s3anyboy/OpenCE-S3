@@ -473,6 +473,12 @@ Version 44 unifies MCC offers under Map Sharing and lets a receiver satisfy
 omitted base resources with its own validated local files. Message layouts
 are unchanged; the changed sharing agreement requires matching peers.
 
+Version 44 also carries Warzone (`port/linux/game/warzone.c`), a mode of
+team King: a gametype's options carry its mode (4), and King's team scores,
+which the host sends as before, are its points (a tick a point's second).
+Only the host scores them, for the hills and for each kill of an enemy, a
+player's or the AI's.
+
 `port/linux/network_format.txt` records the wire format of the current
 version (`tools/network_format.py`): `test_linux_port.py` fails when the
 sources' messages, kinds, bits, structs sent whole or the sizes of their

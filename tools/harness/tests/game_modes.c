@@ -150,6 +150,14 @@ int main(int argc,char **argv)
   CHECK(game_modes_variant_mode(&variant,&options)==_game_mode_none,"Slayer's modes only");
   CHECK(game_modes_variant_mode(NULL,&options)==_game_mode_none&&game_modes_variant_mode(&variant,NULL)==_game_mode_none,
    "none without a gametype");
+  options.mode=_game_mode_warzone;variant.game_engine_index=game_engine_king;variant.universal_variant.teams=TRUE;
+  CHECK(game_modes_variant_mode(&variant,&options)==_game_mode_warzone,"Warzone on team King");
+  variant.universal_variant.teams=FALSE;
+  CHECK(game_modes_variant_mode(&variant,&options)==_game_mode_none,"no Warzone free for all");
+  variant.universal_variant.teams=TRUE;variant.game_engine_index=game_engine_slayer;
+  CHECK(game_modes_variant_mode(&variant,&options)==_game_mode_none,"no Warzone of Slayer");
+  options.mode=_game_mode_swat;variant.game_engine_index=game_engine_king;
+  CHECK(game_modes_variant_mode(&variant,&options)==_game_mode_none,"no Slayer mode of King");
  } else CASE("round_result") {
   long limit=300*30;
   CHECK(infection_round_result(3,1,0,limit)==NONE,"humans and zombies left");
@@ -234,6 +242,12 @@ int main(int argc,char **argv)
   CHECK(game_modes_kind_name(game_engine_slayer,0x7F,TRUE)==NULL,"a mode this build does not know");
   CHECK(game_modes_kind_name(game_engine_none,0x80,TRUE)==NULL,"no engine (co-op)");
   CHECK(game_modes_kind_name(99,0x80,TRUE)==NULL,"an engine this build does not know");
+  CHECK(!wcscmp(game_modes_kind_name(game_engine_king,_game_mode_warzone,TRUE),L"WARZONE"),"Warzone of King");
+  CHECK(!wcscmp(game_modes_kind_name(game_engine_king,_game_mode_warzone|0x80,FALSE),L"HARDCORE WARZONE"),
+   "Hardcore Warzone");
+  CHECK(game_modes_kind_name(game_engine_slayer,_game_mode_warzone,TRUE)==NULL,"Warzone of Slayer is none");
+  CHECK(!wcscmp(game_modes_kind_name(game_engine_king,_game_mode_swat|0x80,TRUE),L"HC KING"),
+   "a Slayer mode of King is none");
  } else return 2;
  return 0;
 }

@@ -98,6 +98,7 @@ their handlers open opens.
 #include "mcc_share_menu.h"
 #include "mcc_cache.h"
 #include "game_modes.h"
+#include "warzone.h"
 #include "network_voice.h"
 #include "network_map_vote.h"
 #include "text/draw_string.h"
@@ -3938,6 +3939,10 @@ static void gametype_rules_text(long profile_index, wchar_t *text, short size)
 		break;
 	case _game_mode_gun_game:
 		usnprintf(text, size - 1, L"%s\r\nFree for all\r\nA kill with each weapon", kind);
+		break;
+	case _game_mode_warzone:
+		usnprintf(text, size - 1, L"%s\r\nTeams\r\nScore to win: %ld points", kind,
+			variant.universal_variant.score_to_win * WARZONE_POINTS_PER_SCORE_TO_WIN);
 		break;
 	default:
 		usnprintf(text, size - 1, L"%s\r\n%s\r\nScore to win: %ld", kind ? kind : engine_names[engine],
@@ -7806,8 +7811,8 @@ struct gametype_option
 static struct gametype_option const gametype_options[] =
 {
 	/* OPENCE OPTIONS (OpenCE's gametypes: game_modes.c) */
-	{ "oce_mode_spinner", _option_option_byte, OPTIONS_FIELD(mode), 0, 4,
-		{ _game_mode_none, _game_mode_swat, _game_mode_infection, _game_mode_gun_game } },
+	{ "oce_mode_spinner", _option_option_byte, OPTIONS_FIELD(mode), 0, 5,
+		{ _game_mode_none, _game_mode_swat, _game_mode_infection, _game_mode_gun_game, _game_mode_warzone } },
 	{ "oce_hardcore_spinner", _option_option_byte, OPTIONS_FIELD(hardcore), 0, 2, { FALSE, TRUE } },
 	{ "inf_zombies_spinner", _option_option_byte, OPTIONS_FIELD(infection_initial_zombies), 0, 6, { 1, 2, 3, 4, 8, 16 } },
 	{ "inf_speed_spinner", _option_option_byte, OPTIONS_FIELD(infection_zombie_speed), 0, 6,
@@ -8317,6 +8322,16 @@ static boolean gametype_options_save(struct widget_instance *widget)
 			edit_variant()->universal_variant.teams = TRUE;
 		else if (edit_options()->mode == _game_mode_gun_game)
 			edit_variant()->universal_variant.teams = FALSE;
+	}
+	/* (and Warzone on teams, at three hills that stay, the teams spawning at
+	their bases: warzone.c) */
+	if (named(list, "oce_mode_spinner", 0) && edit_variant()->game_engine_index == game_engine_king &&
+		edit_options()->mode == _game_mode_warzone)
+	{
+		edit_variant()->universal_variant.teams = TRUE;
+		edit_variant()->game_engine_variant.king.moving_hill = FALSE;
+		edit_variant()->game_engine_variant.king.multi_hill = WARZONE_HILLS;
+		edit_options()->force_team_spawns = TRUE;
 	}
 	return TRUE;
 }

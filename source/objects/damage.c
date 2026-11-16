@@ -1138,6 +1138,11 @@ static void object_damage_aftermath(
 				damage->owner_object_index,
 				damage->owner_team_index);
 			game_modes_kill_by_melee(FALSE);
+			/* port: Warzone's points for a kill, a player's or the AI's */
+			game_modes_unit_killed(
+				object_index,
+				damage->owner_player_index,
+				damage->owner_team_index);
 		}
 	}
 	else if (game_engine_can_score())

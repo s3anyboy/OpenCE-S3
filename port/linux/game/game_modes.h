@@ -1,6 +1,7 @@
 /* game_modes.h: OpenCE's gametypes (port/linux/game/game_modes.c)
 
-SWAT, Infection and Gun Game are modes of Slayer, and Hardcore is a set of
+SWAT, Infection and Gun Game are modes of Slayer, Warzone a mode of team
+King of the Hill, and Hardcore is a set of
 rules over any game engine's: a gametype's PC options (game_engine.h's struct
 game_variant_options, from mode on) say which, so a saved gametype, the
 network game and the game all carry them. The built-in ones are written with
@@ -39,7 +40,7 @@ mode's own set to their defaults where none were given */
 void game_modes_options_sanitize(struct game_variant_options *options);
 /* the mode a gametype plays: its options' if its game engine and teams
 allow it (SWAT and Infection on teams, Gun Game free for all, all of them
-Slayer), else none */
+Slayer; Warzone team King), else none */
 short game_modes_variant_mode(struct game_variant const *variant, struct game_variant_options const *options);
 /* the name the menus show for its kind of game ("INFECTION", "HARDCORE
 CTF"), NULL for a game engine's own ("SLAYER") */
@@ -70,6 +71,9 @@ Slayer's with their own rules; SWAT's variant has no shields
 struct game_engine *game_modes_engine(struct game_engine *engine);
 /* a player's spawn, after its starting equipment (game_engine_postspawn_player_update) */
 void game_modes_postspawn(long player_index);
+/* a unit killed, a player or the AI (damage.c, after
+game_statistics_record_kill): Warzone's points for it */
+void game_modes_unit_killed(long unit_index, long killing_player_index, short killing_team_index);
 /* a player killed (game_engine_player_killed, after the game engine's):
 Hardcore's restore of the killer */
 void game_modes_player_killed(long killing_player_index, long dead_player_index, boolean friendly_fire);

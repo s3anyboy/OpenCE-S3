@@ -230,6 +230,9 @@ static short king_engine_hills[MAXIMUM_HILLS] = { 0 };
 /* port: the hills in play (the first king_globals' own), and how many */
 static struct king_hill king_hills[MAXIMUM_HILLS_AT_ONCE] = { 0 };
 static short king_hill_count = 0;
+/* port: a Warzone game's (port/linux/game/warzone.c): the team scores are
+its points, which it gives, not the hills' seconds */
+static boolean king_warzone = FALSE;
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -532,7 +535,8 @@ static void king_engine_player_update(
 			hill as it sees them) */
 			if (!network_game_distributed_client())
 				player->statistics.multiplayer_statistics.king_statistics.time_on_hill++;
-			if (!network_game_distributed_client() &&
+			/* port: (Warzone's points are its own: game_engine_king_add_score) */
+			if (!king_warzone && !network_game_distributed_client() &&
 				king_globals.score_tick[player->team_index] < game_time_get())
 			{
 				long score_to_win;
@@ -1375,7 +1379,8 @@ static void king_client_score_sounds(
 {
 	long score_to_win = game_engine_get_variant()->universal_variant.score_to_win*TICKS_PER_MINUTE;
 
-	if (score <= previous_score || previous_score < 0)
+	/* port: (Warzone's score is points, not a time left to call out) */
+	if (king_warzone || score <= previous_score || previous_score < 0)
 		return;
 	if (previous_score < score_to_win - HILL_30_SECOND_WARNING &&
 		score >= score_to_win - HILL_30_SECOND_WARNING)
@@ -1475,4 +1480,54 @@ boolean game_engine_king_read_network_state(
 	if (hills_moved && !first)
 		game_engine_play_multiplayer_sound(_multiplayer_sound_hill_move);
 	return TRUE;
+}
+
+/* port: Warzone (port/linux/game/warzone.c) */
+
+void game_engine_king_set_warzone(
+	boolean warzone)
+{
+	king_warzone = warzone;
+
+	return;
+}
+
+short game_engine_king_hill_count(
+	void)
+{
+	return king_hill_count;
+}
+
+/* the team whose players alone are on the hill (king_calculate_hill_state's
+state, as each machine finds it), NONE: nobody, or both teams */
+long game_engine_king_hill_holder(
+	short hill_index)
+{
+	if (!VALID_INDEX(hill_index, king_hill_count) || king_hills[hill_index].hill_point_count <= 0)
+		return NONE;
+	switch (king_hills[hill_index].hill_state)
+	{
+	case king_hill_controlled_red:
+		return 0;
+	case king_hill_controlled_blue:
+		return 1;
+	}
+
+	return NONE;
+}
+
+long game_engine_king_team_score(
+	long team_index)
+{
+	return VALID_INDEX(team_index, MAXIMUM_KING_SCORE_SLOTS) ? king_globals.score[team_index] : 0;
+}
+
+void game_engine_king_add_score(
+	long team_index,
+	long score)
+{
+	if (VALID_INDEX(team_index, MAXIMUM_KING_SCORE_SLOTS))
+		king_globals.score[team_index] += score;
+
+	return;
 }

@@ -1,8 +1,8 @@
 /*
 GAME_MODES.C
 
-OpenCE's gametypes: SWAT, Infection and Gun Game, modes of Slayer, and
-Hardcore, rules over any game engine's. Which a gametype plays is in its PC
+OpenCE's gametypes: SWAT, Infection and Gun Game, modes of Slayer, Warzone,
+a mode of team King of the Hill, and Hardcore, rules over any game engine's. Which a gametype plays is in its PC
 options (game_engine.h's struct game_variant_options, from mode on), which a
 saved gametype keeps (playlist_profile.c), the network game carries to every
 machine (network_game_manager.h) and the game plays by
@@ -16,6 +16,10 @@ machine (network_game_manager.h) and the game plays by
   the zombies win when no human is left, the humans when the time runs out.
 - Gun Game (gun_game.c): free for all. Each kill gives the killer the next
   weapon of a list; a kill with the last wins.
+- Warzone (warzone.c): on teams. Three hills at once, the teams spawning
+  at their own bases as CTF's do; a team scores a point a second for each
+  hill it alone holds, and points for each kill of an enemy, a player's or
+  the AI's.
 - Hardcore: no motion sensor, no aim assist, and a kill restores the
   killer's health and shields.
 
@@ -32,9 +36,11 @@ of their own (menu_functions.c's OPENCE).
 #include "networking/network_game_globals.h"
 #include "objects/objects.h"
 #include "units/units.h"
+#include "game/game_engine_king.h"
 #include "game_modes.h"
 #include "gun_game.h"
 #include "infection.h"
+#include "warzone.h"
 
 #include <string.h>
 
@@ -66,6 +72,7 @@ enum
 	_gametype_hardcore_ctf,
 	_gametype_hardcore_oddball,
 	_gametype_hardcore_king,
+	_gametype_warzone,
 	NUMBER_OF_GAMETYPES
 };
 
@@ -87,6 +94,7 @@ static struct
 	{ "hardcore_ctf", L"Hardcore CTF", L"HC CTF" },
 	{ "hardcore_oddball", L"Hardcore Oddball", L"HC Oddball" },
 	{ "hardcore_king", L"Hardcore King", L"HC King" },
+	{ "warzone", L"Warzone", L"Warzone" },
 };
 
 /* the kill being recorded is a melee's (game_modes_kill_by_melee) */
@@ -133,6 +141,7 @@ void game_modes_gametype(
 		*variant = *build_game_variant_team_oddball(&temporary);
 		break;
 	case _gametype_hardcore_king:
+	case _gametype_warzone:
 		*variant = *build_game_variant_team_king(&temporary);
 		break;
 	case _gametype_gun_game:
@@ -173,6 +182,17 @@ void game_modes_gametype(
 		variant->universal_variant.respawn_time = 90;
 		variant->universal_variant.suicide_penalty = 0;
 		options->no_map_weapons = TRUE;
+		break;
+	case _gametype_warzone:
+		/* (three hills that stay, the teams at their bases, 1000 points or
+		15 minutes) */
+		options->mode = _game_mode_warzone;
+		variant->game_engine_variant.king.moving_hill = FALSE;
+		variant->game_engine_variant.king.multi_hill = WARZONE_HILLS;
+		variant->universal_variant.score_to_win = 10;
+		variant->universal_variant.suicide_penalty = 0;
+		options->time_limit = 15;
+		options->force_team_spawns = TRUE;
 		break;
 	default:
 		options->hardcore = TRUE;
@@ -266,7 +286,15 @@ short game_modes_variant_mode(
 	struct game_variant const *variant,
 	struct game_variant_options const *options)
 {
-	if (!variant || !options || variant->game_engine_index != game_engine_slayer)
+	if (!variant || !options)
+		return _game_mode_none;
+	/* (Warzone is team King's) */
+	if (variant->game_engine_index == game_engine_king)
+	{
+		return options->mode == _game_mode_warzone && variant->universal_variant.teams ?
+			_game_mode_warzone : _game_mode_none;
+	}
+	if (variant->game_engine_index != game_engine_slayer)
 		return _game_mode_none;
 	switch (options->mode)
 	{
@@ -300,6 +328,7 @@ wchar_t const *game_modes_kind_name(
 		{ { L"SWAT", L"SWAT" }, { L"HARDCORE SWAT", L"HC SWAT" } },
 		{ { L"INFECTION", L"INFECTION" }, { L"HARDCORE INFECTION", L"HC INFECTION" } },
 		{ { L"GUN GAME", L"GUN GAME" }, { L"HARDCORE GUN GAME", L"HC GUN GAME" } },
+		{ { L"WARZONE", L"WARZONE" }, { L"HARDCORE WARZONE", L"HC WARZONE" } },
 	};
 	static wchar_t const *const hardcore_names[][2] =
 	{
@@ -313,9 +342,15 @@ wchar_t const *game_modes_kind_name(
 	boolean hardcore = (kind & GAME_MODES_KIND_HARDCORE) != 0;
 	short mode = (short)(kind & ~GAME_MODES_KIND_HARDCORE);
 
-	/* (another machine's: a mode of Slayer only, and one this build knows) */
-	if (game_engine_index == game_engine_slayer && mode > _game_mode_none && mode < NUMBER_OF_GAME_MODES)
+	/* (another machine's: a mode of Slayer, or Warzone of King, and one this
+	build knows) */
+	if (game_engine_index == game_engine_king && mode == _game_mode_warzone)
 		return mode_names[mode][hardcore][abbreviated != FALSE];
+	if (game_engine_index == game_engine_slayer && mode > _game_mode_none && mode < NUMBER_OF_GAME_MODES &&
+		mode != _game_mode_warzone)
+	{
+		return mode_names[mode][hardcore][abbreviated != FALSE];
+	}
 	if (!hardcore || game_engine_index <= game_engine_none || game_engine_index >= (long)NUMBEROF(hardcore_names))
 		return NULL;
 	return hardcore_names[game_engine_index][abbreviated != FALSE];
@@ -355,6 +390,8 @@ boolean game_modes_hardcore(
 struct game_engine *game_modes_engine(
 	struct game_engine *engine)
 {
+	/* (King's team scores are Warzone's points in its games alone) */
+	game_engine_king_set_warzone(game_modes_mode() == _game_mode_warzone);
 	switch (game_modes_mode())
 	{
 	case _game_mode_swat:
@@ -365,6 +402,8 @@ struct game_engine *game_modes_engine(
 		return infection_engine_get(engine);
 	case _game_mode_gun_game:
 		return gun_game_engine_get(engine);
+	case _game_mode_warzone:
+		return warzone_engine_get(engine);
 	}
 	return engine;
 }
@@ -381,6 +420,15 @@ void game_modes_postspawn(
 		gun_game_postspawn(player_index);
 		break;
 	}
+}
+
+void game_modes_unit_killed(
+	long unit_index,
+	long killing_player_index,
+	short killing_team_index)
+{
+	if (game_modes_mode() == _game_mode_warzone)
+		warzone_unit_killed(unit_index, killing_player_index, killing_team_index);
 }
 
 void game_modes_player_killed(
